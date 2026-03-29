@@ -1,0 +1,1281 @@
+--[[
+╔═══════════════════════════════════════════════════════════╗
+║   RIVALS TOOL — Orbit & Voidspam  (MOBILE + PC)         ║
+║                                                           ║
+║   [P1] YOU ──► Build the core script                     ║
+║   [P2] ──────► Test, tweak values, fix bugs              ║
+║   [P3] ──────► Final polish, anti-detect, deploy         ║
+║                                                           ║
+║   PC Toggle:    RightControl                              ║
+║   Mobile Toggle: Floating button (top-left)               ║
+╚═══════════════════════════════════════════════════════════╝
+]]
+
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- SERVICES & CONFIG
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+local Players       = game:GetService("Players")
+local RunService    = game:GetService("RunService")
+local UIS           = game:GetService("UserInputService")
+local TweenService  = game:GetService("TweenService")
+local GuiService    = game:GetService("GuiService")
+
+local LP    = Players.LocalPlayer
+local Mouse = LP:GetMouse()
+
+local IsMobile = UIS.TouchEnabled and not UIS.KeyboardEnabled
+
+local CFG = {
+    Target = nil,
+    Orbit = {
+        On     = false,
+        Radius = 12,
+        Speed  = 2,
+        Height = 0,
+    },
+    Void = {
+        On    = false,
+        Rate  = 0.06,
+        Depth = -350,
+    },
+    UIKey = Enum.KeyCode.RightControl,
+}
+
+local ActiveConnections = {}
+
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- SCREEN DETECTION & SCALING
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+local camera  = workspace.CurrentCamera
+local screenW = camera.ViewportSize.X
+local screenH = camera.ViewportSize.Y
+
+-- Scale factor for mobile
+local SF = 1
+if IsMobile then
+    if screenW < 500 then
+        SF = 0.62
+    elseif screenW < 800 then
+        SF = 0.75
+    else
+        SF = 0.85
+    end
+end
+
+local function s(n) return math.floor(n * SF) end
+
+-- Window size
+local WIN_W = s(540)
+local WIN_H = s(400)
+local SIDE_W = s(120)
+local TOP_H = s(40)
+local STATUS_H = s(28)
+local BTN_H = s(38)
+local TOGGLE_H = s(40)
+local SLIDER_H = s(56)
+local FONT_MAIN = s(13)
+local FONT_SMALL = s(11)
+local FONT_TINY = s(10)
+
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- COLOR PALETTE
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+local C = {
+    bg       = Color3.fromRGB(10, 10, 14),
+    side     = Color3.fromRGB(15, 15, 20),
+    panel    = Color3.fromRGB(20, 20, 26),
+    elem     = Color3.fromRGB(28, 28, 35),
+    border   = Color3.fromRGB(42, 42, 52),
+    hover    = Color3.fromRGB(36, 36, 45),
+    accent   = Color3.fromRGB(185, 28, 38),
+    accentL  = Color3.fromRGB(220, 45, 55),
+    text     = Color3.fromRGB(215, 215, 220),
+    dim      = Color3.fromRGB(105, 105, 118),
+    green    = Color3.fromRGB(40, 180, 70),
+    off      = Color3.fromRGB(52, 52, 62),
+    red      = Color3.fromRGB(200, 40, 40),
+}
+
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- HELPERS
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+local function make(class, props)
+    local obj = Instance.new(class)
+    for k, v in pairs(props) do
+        if k ~= "Parent" then
+            obj[k] = v
+        end
+    end
+    if props.Parent then obj.Parent = props.Parent end
+    return obj
+end
+
+local function tw(obj, dur, goals)
+    TweenService:Create(obj, TweenInfo.new(dur, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), goals):Play()
+end
+
+local function fmtN(val, inc)
+    if inc >= 1 then return tostring(math.floor(val)) end
+    if inc >= 0.1 then return string.format("%.1f", val) end
+    return string.format("%.2f", val)
+end
+
+local function isTouchOrMouse(input)
+    return input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch
+end
+
+local function isTouchOrMouseMove(input)
+    return input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch
+end
+
+local function getInputPos(input)
+    return Vector2.new(input.Position.X, input.Position.Y)
+end
+
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- SCREENGUI
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+if game:GetService("CoreGui"):FindFirstChild("RivalsTool") then
+    game:GetService("CoreGui"):FindFirstChild("RivalsTool"):Destroy()
+end
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "RivalsTool"
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.ResetOnSpawn = false
+
+pcall(function() gui.Parent = game:GetService("CoreGui") end)
+if not gui.Parent then gui.Parent = LP:WaitForChild("PlayerGui") end
+
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- FLOATING MOBILE TOGGLE BUTTON (draggable)
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+local floatBtn = make("TextButton", {
+    Name = "FloatToggle",
+    Size = UDim2.new(0, s(50), 0, s(50)),
+    Position = UDim2.new(0, 8, 0, screenH * 0.3),
+    BackgroundColor3 = C.accent,
+    BorderSizePixel = 0,
+    Text = "R",
+    TextColor3 = C.text,
+    Font = Enum.Font.GothamBold,
+    TextSize = s(20),
+    ZIndex = 100,
+    Parent = gui,
+})
+make("UICorner", { CornerRadius = UDim.new(0, s(12)), Parent = floatBtn })
+make("UIStroke", { Color = C.border, Thickness = 1, Parent = floatBtn })
+
+-- Make float button draggable on mobile
+do
+    local fbDragging = false
+    local fbDragStart, fbStartPos
+
+    floatBtn.InputBegan:Connect(function(input)
+        if isTouchOrMouse(input) then
+            fbDragging = true
+            fbDragStart = getInputPos(input)
+            fbStartPos = floatBtn.Position
+        end
+    end)
+
+    floatBtn.InputEnded:Connect(function(input)
+        if isTouchOrMouse(input) then
+            fbDragging = false
+        end
+    end)
+
+    table.insert(ActiveConnections, UIS.InputChanged:Connect(function(input)
+        if fbDragging and isTouchOrMouseMove(input) then
+            local delta = getInputPos(input) - fbDragStart
+            local moved = delta.Magnitude > 8
+            if moved then
+                floatBtn.Position = UDim2.new(
+                    fbStartPos.X.Scale, fbStartPos.X.Offset + delta.X,
+                    fbStartPos.Y.Scale, fbStartPos.Y.Offset + delta.Y
+                )
+            end
+        end
+    end))
+end
+
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- MAIN WINDOW
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+local mainFrame = make("Frame", {
+    Name = "Main",
+    Size = UDim2.new(0, WIN_W, 0, WIN_H),
+    Position = UDim2.new(0.5, -WIN_W/2, 0.5, -WIN_H/2),
+    BackgroundColor3 = C.bg,
+    BorderSizePixel = 0,
+    Parent = gui,
+})
+make("UICorner", { CornerRadius = UDim.new(0, s(4)), Parent = mainFrame })
+make("UIStroke", { Color = C.border, Thickness = 1, Parent = mainFrame })
+
+-- Shadow
+make("ImageLabel", {
+    Name = "Shadow",
+    Size = UDim2.new(1, 30, 1, 30),
+    Position = UDim2.new(0, -15, 0, -15),
+    BackgroundTransparency = 1,
+    Image = "rbxassetid://6015897843",
+    ImageColor3 = Color3.new(0, 0, 0),
+    ImageTransparency = 0.5,
+    ScaleType = Enum.ScaleType.Slice,
+    SliceCenter = Rect.new(49, 49, 450, 450),
+    ZIndex = 0,
+    Parent = mainFrame,
+})
+
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- TOP BAR (draggable on both mobile + pc)
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+local topBar = make("Frame", {
+    Name = "TopBar",
+    Size = UDim2.new(1, 0, 0, TOP_H),
+    BackgroundColor3 = C.side,
+    BorderSizePixel = 0,
+    Parent = mainFrame,
+})
+make("UICorner", { CornerRadius = UDim.new(0, s(4)), Parent = topBar })
+make("Frame", {
+    Size = UDim2.new(1, 0, 0, 8),
+    Position = UDim2.new(0, 0, 1, -8),
+    BackgroundColor3 = C.side,
+    BorderSizePixel = 0,
+    ZIndex = 2,
+    Parent = topBar,
+})
+
+make("TextLabel", {
+    Size = UDim2.new(0.5, 0, 1, 0),
+    Position = UDim2.new(0, s(14), 0, 0),
+    BackgroundTransparency = 1,
+    Text = "RIVALS TOOL",
+    TextColor3 = C.accent,
+    Font = Enum.Font.GothamBold,
+    TextSize = s(14),
+    TextXAlignment = Enum.TextXAlignment.Left,
+    Parent = topBar,
+})
+
+make("TextLabel", {
+    Size = UDim2.new(0, s(40), 1, 0),
+    Position = UDim2.new(0, s(120), 0, 0),
+    BackgroundTransparency = 1,
+    Text = "v1.1",
+    TextColor3 = C.dim,
+    Font = Enum.Font.Gotham,
+    TextSize = FONT_SMALL,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    Parent = topBar,
+})
+
+-- Close
+local closeBtn = make("TextButton", {
+    Size = UDim2.new(0, TOP_H, 0, TOP_H),
+    Position = UDim2.new(1, -TOP_H, 0, 0),
+    BackgroundTransparency = 1,
+    Text = "X",
+    TextColor3 = C.dim,
+    Font = Enum.Font.GothamBold,
+    TextSize = s(14),
+    Parent = topBar,
+})
+
+-- Minimize
+local minBtn = make("TextButton", {
+    Size = UDim2.new(0, TOP_H, 0, TOP_H),
+    Position = UDim2.new(1, -TOP_H * 2, 0, 0),
+    BackgroundTransparency = 1,
+    Text = "—",
+    TextColor3 = C.dim,
+    Font = Enum.Font.GothamBold,
+    TextSize = s(14),
+    Parent = topBar,
+})
+
+closeBtn.MouseEnter:Connect(function() closeBtn.TextColor3 = C.red end)
+closeBtn.MouseLeave:Connect(function() closeBtn.TextColor3 = C.dim end)
+minBtn.MouseEnter:Connect(function() minBtn.TextColor3 = C.text end)
+minBtn.MouseLeave:Connect(function() minBtn.TextColor3 = C.dim end)
+
+-- DRAG (works on mobile + pc)
+do
+    local dragging = false
+    local dragStart, startPos
+
+    local dragInput = make("TextButton", {
+        Name = "DragZone",
+        Size = UDim2.new(1, -TOP_H*2, 1, 0),
+        Position = UDim2.new(0, 0, 0, 0),
+        BackgroundTransparency = 1,
+        Text = "",
+        ZIndex = 5,
+        Parent = topBar,
+    })
+
+    dragInput.InputBegan:Connect(function(input)
+        if isTouchOrMouse(input) then
+            dragging = true
+            dragStart = getInputPos(input)
+            startPos = mainFrame.Position
+        end
+    end)
+
+    dragInput.InputEnded:Connect(function(input)
+        if isTouchOrMouse(input) then
+            dragging = false
+        end
+    end)
+
+    table.insert(ActiveConnections, UIS.InputChanged:Connect(function(input)
+        if dragging and isTouchOrMouseMove(input) then
+            local delta = getInputPos(input) - dragStart
+            mainFrame.Position = UDim2.new(
+                startPos.X.Scale, startPos.X.Offset + delta.X,
+                startPos.Y.Scale, startPos.Y.Offset + delta.Y
+            )
+        end
+    end))
+end
+
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- SIDEBAR
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+local sidebar = make("Frame", {
+    Name = "Sidebar",
+    Size = UDim2.new(0, SIDE_W, 1, -TOP_H),
+    Position = UDim2.new(0, 0, 0, TOP_H),
+    BackgroundColor3 = C.side,
+    BorderSizePixel = 0,
+    Parent = mainFrame,
+})
+
+make("UIListLayout", {
+    SortOrder = Enum.SortOrder.LayoutOrder,
+    Padding = UDim.new(0, s(2)),
+    Parent = sidebar,
+})
+make("UIPadding", {
+    PaddingTop = UDim.new(0, s(8)),
+    PaddingLeft = UDim.new(0, s(5)),
+    PaddingRight = UDim.new(0, s(5)),
+    Parent = sidebar,
+})
+
+-- Divider
+make("Frame", {
+    Size = UDim2.new(0, 1, 1, -TOP_H),
+    Position = UDim2.new(0, SIDE_W, 0, TOP_H),
+    BackgroundColor3 = C.border,
+    BorderSizePixel = 0,
+    ZIndex = 5,
+    Parent = mainFrame,
+})
+
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- CONTENT AREA
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+local contentArea = make("Frame", {
+    Name = "Content",
+    Size = UDim2.new(1, -(SIDE_W + 1), 1, -(TOP_H + STATUS_H)),
+    Position = UDim2.new(0, SIDE_W + 1, 0, TOP_H),
+    BackgroundColor3 = C.panel,
+    BorderSizePixel = 0,
+    ClipsDescendants = true,
+    Parent = mainFrame,
+})
+
+-- Status Bar
+local statusBar = make("Frame", {
+    Name = "StatusBar",
+    Size = UDim2.new(1, 0, 0, STATUS_H),
+    Position = UDim2.new(0, 0, 1, -STATUS_H),
+    BackgroundColor3 = C.side,
+    BorderSizePixel = 0,
+    Parent = mainFrame,
+})
+make("UICorner", { CornerRadius = UDim.new(0, s(4)), Parent = statusBar })
+make("Frame", {
+    Size = UDim2.new(1, 0, 0, 8),
+    Position = UDim2.new(0, 0, 0, 0),
+    BackgroundColor3 = C.side,
+    BorderSizePixel = 0,
+    ZIndex = 2,
+    Parent = statusBar,
+})
+
+local statusDot = make("Frame", {
+    Size = UDim2.new(0, s(6), 0, s(6)),
+    Position = UDim2.new(0, s(10), 0.5, -s(3)),
+    BackgroundColor3 = C.dim,
+    BorderSizePixel = 0,
+    Parent = statusBar,
+})
+make("UICorner", { CornerRadius = UDim.new(1, 0), Parent = statusDot })
+
+local statusLabel = make("TextLabel", {
+    Size = UDim2.new(1, -s(80), 1, 0),
+    Position = UDim2.new(0, s(22), 0, 0),
+    BackgroundTransparency = 1,
+    Text = "Idle — No target",
+    TextColor3 = C.dim,
+    Font = Enum.Font.Gotham,
+    TextSize = FONT_TINY,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    TextTruncate = Enum.TextTruncate.AtEnd,
+    Parent = statusBar,
+})
+
+local targetLabel = make("TextLabel", {
+    Size = UDim2.new(0, s(70), 1, 0),
+    Position = UDim2.new(1, -s(75), 0, 0),
+    BackgroundTransparency = 1,
+    Text = "",
+    TextColor3 = C.accent,
+    Font = Enum.Font.GothamSemibold,
+    TextSize = FONT_TINY,
+    TextXAlignment = Enum.TextXAlignment.Right,
+    TextTruncate = Enum.TextTruncate.AtEnd,
+    Parent = statusBar,
+})
+
+local function updateStatus(msg, color)
+    statusLabel.Text = msg
+    statusDot.BackgroundColor3 = color or C.dim
+end
+
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- UI COMPONENT BUILDERS (mobile-friendly sizes)
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+local function makeSection(parent, text, order)
+    return make("TextLabel", {
+        Size = UDim2.new(1, 0, 0, s(22)),
+        BackgroundTransparency = 1,
+        Text = string.upper(text),
+        TextColor3 = C.dim,
+        Font = Enum.Font.GothamBold,
+        TextSize = FONT_TINY,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        LayoutOrder = order or 0,
+        Parent = parent,
+    })
+end
+
+-- TOGGLE (big touch targets)
+local function makeToggle(parent, label, default, order, callback)
+    local state = default or false
+
+    local frame = make("Frame", {
+        Size = UDim2.new(1, 0, 0, TOGGLE_H),
+        BackgroundColor3 = C.elem,
+        BorderSizePixel = 0,
+        LayoutOrder = order or 0,
+        Parent = parent,
+    })
+    make("UICorner", { CornerRadius = UDim.new(0, s(3)), Parent = frame })
+
+    make("TextLabel", {
+        Size = UDim2.new(1, -s(60), 1, 0),
+        Position = UDim2.new(0, s(12), 0, 0),
+        BackgroundTransparency = 1,
+        Text = label,
+        TextColor3 = C.text,
+        Font = Enum.Font.Gotham,
+        TextSize = FONT_MAIN,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+        Parent = frame,
+    })
+
+    local trackW = s(40)
+    local trackH = s(20)
+    local knobS  = s(16)
+
+    local track = make("Frame", {
+        Size = UDim2.new(0, trackW, 0, trackH),
+        Position = UDim2.new(1, -trackW - s(10), 0.5, -trackH/2),
+        BackgroundColor3 = state and C.accent or C.off,
+        BorderSizePixel = 0,
+        Parent = frame,
+    })
+    make("UICorner", { CornerRadius = UDim.new(0, trackH/2), Parent = track })
+
+    local knob = make("Frame", {
+        Size = UDim2.new(0, knobS, 0, knobS),
+        Position = state
+            and UDim2.new(1, -knobS - s(2), 0.5, -knobS/2)
+            or  UDim2.new(0, s(2), 0.5, -knobS/2),
+        BackgroundColor3 = C.text,
+        BorderSizePixel = 0,
+        Parent = track,
+    })
+    make("UICorner", { CornerRadius = UDim.new(1, 0), Parent = knob })
+
+    local btn = make("TextButton", {
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundTransparency = 1,
+        Text = "",
+        Parent = frame,
+    })
+
+    local function toggle()
+        state = not state
+        tw(track, 0.18, { BackgroundColor3 = state and C.accent or C.off })
+        tw(knob, 0.18, {
+            Position = state
+                and UDim2.new(1, -knobS - s(2), 0.5, -knobS/2)
+                or  UDim2.new(0, s(2), 0.5, -knobS/2)
+        })
+        if callback then callback(state) end
+    end
+
+    btn.MouseButton1Click:Connect(toggle)
+    btn.TouchTap:Connect(function() -- extra mobile safety
+    end)
+
+    return {
+        getState = function() return state end,
+        setState = function(v)
+            state = v
+            track.BackgroundColor3 = v and C.accent or C.off
+            knob.Position = v
+                and UDim2.new(1, -knobS - s(2), 0.5, -knobS/2)
+                or  UDim2.new(0, s(2), 0.5, -knobS/2)
+        end,
+    }
+end
+
+-- SLIDER (touch + mouse)
+local function makeSlider(parent, label, min, max, default, increment, order, callback)
+    local value = default
+
+    local frame = make("Frame", {
+        Size = UDim2.new(1, 0, 0, SLIDER_H),
+        BackgroundColor3 = C.elem,
+        BorderSizePixel = 0,
+        LayoutOrder = order or 0,
+        Parent = parent,
+    })
+    make("UICorner", { CornerRadius = UDim.new(0, s(3)), Parent = frame })
+
+    make("TextLabel", {
+        Size = UDim2.new(0.6, 0, 0, s(22)),
+        Position = UDim2.new(0, s(12), 0, s(2)),
+        BackgroundTransparency = 1,
+        Text = label,
+        TextColor3 = C.text,
+        Font = Enum.Font.Gotham,
+        TextSize = s(12),
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+        Parent = frame,
+    })
+
+    local valLabel = make("TextLabel", {
+        Size = UDim2.new(0.35, 0, 0, s(22)),
+        Position = UDim2.new(0.62, 0, 0, s(2)),
+        BackgroundTransparency = 1,
+        Text = fmtN(value, increment),
+        TextColor3 = C.dim,
+        Font = Enum.Font.GothamSemibold,
+        TextSize = s(12),
+        TextXAlignment = Enum.TextXAlignment.Right,
+        Parent = frame,
+    })
+
+    local barH = s(8)
+    local trackBG = make("Frame", {
+        Size = UDim2.new(1, -s(24), 0, barH),
+        Position = UDim2.new(0, s(12), 0, SLIDER_H - barH - s(10)),
+        BackgroundColor3 = C.border,
+        BorderSizePixel = 0,
+        Parent = frame,
+    })
+    make("UICorner", { CornerRadius = UDim.new(0, s(3)), Parent = trackBG })
+
+    local pct = math.clamp((default - min) / (max - min), 0, 1)
+
+    local fill = make("Frame", {
+        Size = UDim2.new(pct, 0, 1, 0),
+        BackgroundColor3 = C.accent,
+        BorderSizePixel = 0,
+        Parent = trackBG,
+    })
+    make("UICorner", { CornerRadius = UDim.new(0, s(3)), Parent = fill })
+
+    local handleS = s(18)
+    local handle = make("Frame", {
+        Size = UDim2.new(0, handleS, 0, handleS),
+        Position = UDim2.new(pct, -handleS/2, 0.5, -handleS/2),
+        BackgroundColor3 = C.text,
+        BorderSizePixel = 0,
+        ZIndex = 3,
+        Parent = trackBG,
+    })
+    make("UICorner", { CornerRadius = UDim.new(1, 0), Parent = handle })
+
+    -- Invisible bigger touch area over the slider track
+    local touchZone = make("TextButton", {
+        Size = UDim2.new(1, s(20), 0, s(30)),
+        Position = UDim2.new(0, -s(10), 0.5, -s(15)),
+        BackgroundTransparency = 1,
+        Text = "",
+        ZIndex = 4,
+        Parent = trackBG,
+    })
+
+    local sliding = false
+
+    local function updateSlider(inputX)
+        local absX = trackBG.AbsolutePosition.X
+        local absW = trackBG.AbsoluteSize.X
+        local rel = math.clamp((inputX - absX) / absW, 0, 1)
+        local raw = min + (max - min) * rel
+        value = math.floor(raw / increment + 0.5) * increment
+        value = math.clamp(value, min, max)
+        local finalPct = (value - min) / (max - min)
+        fill.Size = UDim2.new(finalPct, 0, 1, 0)
+        handle.Position = UDim2.new(finalPct, -handleS/2, 0.5, -handleS/2)
+        valLabel.Text = fmtN(value, increment)
+        if callback then callback(value) end
+    end
+
+    touchZone.InputBegan:Connect(function(input)
+        if isTouchOrMouse(input) then
+            sliding = true
+            updateSlider(input.Position.X)
+        end
+    end)
+
+    handle.InputBegan:Connect(function(input)
+        if isTouchOrMouse(input) then
+            sliding = true
+        end
+    end)
+
+    table.insert(ActiveConnections, UIS.InputChanged:Connect(function(input)
+        if sliding and isTouchOrMouseMove(input) then
+            updateSlider(input.Position.X)
+        end
+    end))
+
+    table.insert(ActiveConnections, UIS.InputEnded:Connect(function(input)
+        if isTouchOrMouse(input) then
+            sliding = false
+        end
+    end))
+
+    return {
+        getValue = function() return value end,
+        setValue = function(v)
+            value = v
+            local p = (v - min) / (max - min)
+            fill.Size = UDim2.new(p, 0, 1, 0)
+            handle.Position = UDim2.new(p, -handleS/2, 0.5, -handleS/2)
+            valLabel.Text = fmtN(v, increment)
+        end,
+    }
+end
+
+-- BUTTON
+local function makeButton(parent, label, color, order, callback)
+    local btn = make("TextButton", {
+        Size = UDim2.new(1, 0, 0, BTN_H),
+        BackgroundColor3 = color or C.elem,
+        BorderSizePixel = 0,
+        Text = label,
+        TextColor3 = C.text,
+        Font = Enum.Font.GothamSemibold,
+        TextSize = FONT_MAIN,
+        LayoutOrder = order or 0,
+        Parent = parent,
+    })
+    make("UICorner", { CornerRadius = UDim.new(0, s(3)), Parent = btn })
+
+    btn.MouseButton1Click:Connect(function()
+        if callback then callback() end
+    end)
+
+    return btn
+end
+
+-- INFO LABEL
+local function makeInfo(parent, text, order)
+    return make("TextLabel", {
+        Size = UDim2.new(1, 0, 0, s(45)),
+        BackgroundTransparency = 1,
+        Text = text,
+        TextColor3 = C.dim,
+        Font = Enum.Font.Gotham,
+        TextSize = FONT_TINY,
+        TextWrapped = true,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Top,
+        LayoutOrder = order or 99,
+        Parent = parent,
+    })
+end
+
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- CONTENT PAGES
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+local function makeContentPage(name)
+    local page = make("ScrollingFrame", {
+        Name = name,
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ScrollBarThickness = s(3),
+        ScrollBarImageColor3 = C.border,
+        CanvasSize = UDim2.new(0, 0, 0, 0),
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        Visible = false,
+        ScrollingDirection = Enum.ScrollingDirection.Y,
+        Parent = contentArea,
+    })
+    make("UIListLayout", {
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0, s(5)),
+        Parent = page,
+    })
+    make("UIPadding", {
+        PaddingTop = UDim.new(0, s(10)),
+        PaddingBottom = UDim.new(0, s(15)),
+        PaddingLeft = UDim.new(0, s(10)),
+        PaddingRight = UDim.new(0, s(10)),
+        Parent = page,
+    })
+    return page
+end
+
+local pageTarget   = makeContentPage("Target")
+local pageOrbit    = makeContentPage("Orbit")
+local pageVoid     = makeContentPage("Voidspam")
+local pageSettings = makeContentPage("Settings")
+
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- TAB SWITCHING
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+local tabData = {}
+local activeTab = nil
+
+local function makeTabBtn(text, page, order, default)
+    local btn = make("TextButton", {
+        Size = UDim2.new(1, 0, 0, s(36)),
+        BackgroundColor3 = default and C.panel or Color3.new(0,0,0),
+        BackgroundTransparency = default and 0 or 1,
+        BorderSizePixel = 0,
+        Text = "",
+        LayoutOrder = order,
+        Parent = sidebar,
+    })
+    make("UICorner", { CornerRadius = UDim.new(0, s(3)), Parent = btn })
+
+    local indicator = make("Frame", {
+        Size = UDim2.new(0, s(3), 0.55, 0),
+        Position = UDim2.new(0, 0, 0.225, 0),
+        BackgroundColor3 = C.accent,
+        BorderSizePixel = 0,
+        Visible = default or false,
+        Parent = btn,
+    })
+    make("UICorner", { CornerRadius = UDim.new(0, 1), Parent = indicator })
+
+    local lbl = make("TextLabel", {
+        Size = UDim2.new(1, -s(16), 1, 0),
+        Position = UDim2.new(0, s(12), 0, 0),
+        BackgroundTransparency = 1,
+        Text = text,
+        TextColor3 = default and C.text or C.dim,
+        Font = Enum.Font.GothamSemibold,
+        TextSize = s(11),
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+        Parent = btn,
+    })
+
+    local tab = { btn = btn, indicator = indicator, lbl = lbl, page = page }
+    table.insert(tabData, tab)
+
+    btn.MouseButton1Click:Connect(function()
+        if activeTab then
+            activeTab.indicator.Visible = false
+            activeTab.lbl.TextColor3 = C.dim
+            activeTab.btn.BackgroundTransparency = 1
+            activeTab.page.Visible = false
+        end
+        activeTab = tab
+        tab.indicator.Visible = true
+        tab.lbl.TextColor3 = C.text
+        tw(tab.btn, 0.15, { BackgroundTransparency = 0 })
+        tab.btn.BackgroundColor3 = C.panel
+        tab.page.Visible = true
+    end)
+
+    if default then
+        activeTab = tab
+        page.Visible = true
+    end
+
+    return tab
+end
+
+makeTabBtn("TARGET",    pageTarget,   1, true)
+makeTabBtn("ORBIT",     pageOrbit,    2, false)
+makeTabBtn("VOIDSPAM",  pageVoid,     3, false)
+makeTabBtn("SETTINGS",  pageSettings, 4, false)
+
+--━━━━━━━���━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- TARGET TAB
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+makeSection(pageTarget, "Selected Target", 1)
+
+local selectedDisplay = make("Frame", {
+    Size = UDim2.new(1, 0, 0, s(38)),
+    BackgroundColor3 = C.elem,
+    BorderSizePixel = 0,
+    LayoutOrder = 2,
+    Parent = pageTarget,
+})
+make("UICorner", { CornerRadius = UDim.new(0, s(3)), Parent = selectedDisplay })
+
+local selectedText = make("TextLabel", {
+    Size = UDim2.new(1, -s(16), 1, 0),
+    Position = UDim2.new(0, s(10), 0, 0),
+    BackgroundTransparency = 1,
+    Text = "Target: None",
+    TextColor3 = C.dim,
+    Font = Enum.Font.GothamSemibold,
+    TextSize = FONT_MAIN,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    TextTruncate = Enum.TextTruncate.AtEnd,
+    Parent = selectedDisplay,
+})
+
+makeSection(pageTarget, "Player List", 3)
+
+local playerList = make("Frame", {
+    Name = "PlayerList",
+    Size = UDim2.new(1, 0, 0, 0),
+    BackgroundTransparency = 1,
+    AutomaticSize = Enum.AutomaticSize.Y,
+    LayoutOrder = 4,
+    Parent = pageTarget,
+})
+make("UIListLayout", {
+    SortOrder = Enum.SortOrder.Name,
+    Padding = UDim.new(0, s(3)),
+    Parent = playerList,
+})
+
+local function selectTarget(player)
+    CFG.Target = player
+    if player then
+        selectedText.Text = "Target: " .. player.Name
+        selectedText.TextColor3 = C.accentL
+        targetLabel.Text = player.Name
+        updateStatus("Target: " .. player.Name, C.accent)
+    else
+        selectedText.Text = "Target: None"
+        selectedText.TextColor3 = C.dim
+        targetLabel.Text = ""
+        updateStatus("Idle — No target", C.dim)
+    end
+end
+
+local function addPlayerEntry(player)
+    if player == LP then return end
+    if playerList:FindFirstChild("E_" .. player.Name) then return end
+
+    local entry = make("Frame", {
+        Name = "E_" .. player.Name,
+        Size = UDim2.new(1, 0, 0, s(36)),
+        BackgroundColor3 = C.elem,
+        BorderSizePixel = 0,
+        Parent = playerList,
+    })
+    make("UICorner", { CornerRadius = UDim.new(0, s(3)), Parent = entry })
+
+    make("TextLabel", {
+        Size = UDim2.new(1, -s(70), 1, 0),
+        Position = UDim2.new(0, s(10), 0, 0),
+        BackgroundTransparency = 1,
+        Text = player.DisplayName,
+        TextColor3 = C.text,
+        Font = Enum.Font.Gotham,
+        TextSize = s(12),
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+        Parent = entry,
+    })
+
+    local selBtn = make("TextButton", {
+        Size = UDim2.new(0, s(55), 0, s(26)),
+        Position = UDim2.new(1, -s(62), 0.5, -s(13)),
+        BackgroundColor3 = C.accent,
+        BorderSizePixel = 0,
+        Text = "SELECT",
+        TextColor3 = C.text,
+        Font = Enum.Font.GothamBold,
+        TextSize = FONT_TINY,
+        Parent = entry,
+    })
+    make("UICorner", { CornerRadius = UDim.new(0, s(2)), Parent = selBtn })
+
+    selBtn.MouseButton1Click:Connect(function()
+        selectTarget(player)
+    end)
+end
+
+local function removePlayerEntry(player)
+    local entry = playerList:FindFirstChild("E_" .. player.Name)
+    if entry then entry:Destroy() end
+    if CFG.Target == player then selectTarget(nil) end
+end
+
+local function refreshPlayerList()
+    for _, child in pairs(playerList:GetChildren()) do
+        if child:IsA("Frame") then child:Destroy() end
+    end
+    for _, plr in pairs(Players:GetPlayers()) do
+        addPlayerEntry(plr)
+    end
+end
+
+refreshPlayerList()
+Players.PlayerAdded:Connect(addPlayerEntry)
+Players.PlayerRemoving:Connect(removePlayerEntry)
+
+makeButton(pageTarget, "DESELECT TARGET", C.off, 5, function()
+    selectTarget(nil)
+end)
+makeButton(pageTarget, "REFRESH LIST", C.elem, 6, refreshPlayerList)
+
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- ORBIT TAB
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+makeSection(pageOrbit, "Orbit Controls", 1)
+
+local orbitToggle = makeToggle(pageOrbit, "Enable Orbit", false, 2, function(state)
+    CFG.Orbit.On = state
+    if state and not CFG.Target then
+        updateStatus("Orbit ON — no target!", C.red)
+    elseif state then
+        updateStatus("Orbiting " .. CFG.Target.Name, C.green)
+    else
+        updateStatus(CFG.Target and ("Target: " .. CFG.Target.Name) or "Idle", CFG.Target and C.accent or C.dim)
+    end
+end)
+
+makeSection(pageOrbit, "Parameters", 3)
+
+local radiusSlider = makeSlider(pageOrbit, "Radius", 3, 35, CFG.Orbit.Radius, 1, 4, function(v)
+    CFG.Orbit.Radius = v
+end)
+
+local speedSlider = makeSlider(pageOrbit, "Speed", 0.5, 10, CFG.Orbit.Speed, 0.5, 5, function(v)
+    CFG.Orbit.Speed = v
+end)
+
+local heightSlider = makeSlider(pageOrbit, "Height", -20, 20, CFG.Orbit.Height, 1, 6, function(v)
+    CFG.Orbit.Height = v
+end)
+
+makeInfo(pageOrbit, "[P2] Adjust radius + speed for Rivals. If orbit clips through walls, reduce radius.", 7)
+
+--━━━━━━━���━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- VOIDSPAM TAB
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+makeSection(pageVoid, "Voidspam Controls", 1)
+
+local voidToggle = makeToggle(pageVoid, "Enable Voidspam", false, 2, function(state)
+    CFG.Void.On = state
+    if state and not CFG.Target then
+        updateStatus("Void ON — no target!", C.red)
+    elseif state then
+        updateStatus("Voidspamming " .. CFG.Target.Name, C.red)
+    else
+        updateStatus(CFG.Target and ("Target: " .. CFG.Target.Name) or "Idle", CFG.Target and C.accent or C.dim)
+    end
+end)
+
+makeSection(pageVoid, "Parameters", 3)
+
+local rateSlider = makeSlider(pageVoid, "Rate (sec)", 0.01, 0.2, CFG.Void.Rate, 0.01, 4, function(v)
+    CFG.Void.Rate = v
+end)
+
+local depthSlider = makeSlider(pageVoid, "Depth", -600, -100, CFG.Void.Depth, 25, 5, function(v)
+    CFG.Void.Depth = v
+end)
+
+makeInfo(pageVoid, "[P2] If void doesn't kill, lower depth. If kicked, raise rate (slower).", 6)
+
+make("TextLabel", {
+    Size = UDim2.new(1, 0, 0, s(30)),
+    BackgroundColor3 = Color3.fromRGB(40, 15, 15),
+    BorderSizePixel = 0,
+    Text = "  !! USE AT YOUR OWN RISK !!",
+    TextColor3 = C.red,
+    Font = Enum.Font.GothamBold,
+    TextSize = FONT_TINY,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    LayoutOrder = 7,
+    Parent = pageVoid,
+})
+
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- SETTINGS TAB
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+makeSection(pageSettings, "General", 1)
+
+make("TextLabel", {
+    Size = UDim2.new(1, 0, 0, s(34)),
+    BackgroundColor3 = C.elem,
+    BorderSizePixel = 0,
+    Text = IsMobile
+        and "  Toggle: Floating [R] button"
+        or  "  Toggle: RightControl / [R] button",
+    TextColor3 = C.text,
+    Font = Enum.Font.Gotham,
+    TextSize = s(12),
+    TextXAlignment = Enum.TextXAlignment.Left,
+    LayoutOrder = 2,
+    Parent = pageSettings,
+})
+
+make("TextLabel", {
+    Size = UDim2.new(1, 0, 0, s(28)),
+    BackgroundColor3 = C.elem,
+    BorderSizePixel = 0,
+    Text = "  Device: " .. (IsMobile and "MOBILE" or "PC"),
+    TextColor3 = IsMobile and C.green or C.accent,
+    Font = Enum.Font.GothamSemibold,
+    TextSize = s(12),
+    TextXAlignment = Enum.TextXAlignment.Left,
+    LayoutOrder = 3,
+    Parent = pageSettings,
+})
+
+makeButton(pageSettings, "STOP ALL", C.red, 4, function()
+    CFG.Orbit.On = false
+    CFG.Void.On = false
+    orbitToggle.setState(false)
+    voidToggle.setState(false)
+    updateStatus("All stopped", C.dim)
+end)
+
+makeButton(pageSettings, "DESELECT TARGET", C.off, 5, function()
+    CFG.Orbit.On = false
+    CFG.Void.On = false
+    orbitToggle.setState(false)
+    voidToggle.setState(false)
+    selectTarget(nil)
+end)
+
+makeSection(pageSettings, "Script", 6)
+
+makeButton(pageSettings, "DESTROY SCRIPT", C.red, 7, function()
+    CFG.Orbit.On = false
+    CFG.Void.On = false
+    for _, conn in pairs(ActiveConnections) do
+        pcall(function() conn:Disconnect() end)
+    end
+    gui:Destroy()
+end)
+
+makeSection(pageSettings, "Team", 8)
+
+make("TextLabel", {
+    Size = UDim2.new(1, 0, 0, s(55)),
+    BackgroundColor3 = C.elem,
+    BorderSizePixel = 0,
+    Text = "  [P1] Builder\n  [P2] Tester & Tweaker\n  [P3] Polish & Deploy",
+    TextColor3 = C.dim,
+    Font = Enum.Font.Gotham,
+    TextSize = FONT_TINY,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    TextYAlignment = Enum.TextYAlignment.Top,
+    LayoutOrder = 9,
+    Parent = pageSettings,
+})
+
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- CORE: ORBIT LOGIC
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+local orbitAngle = 0
+
+table.insert(ActiveConnections, RunService.Heartbeat:Connect(function(dt)
+    if not CFG.Orbit.On then return end
+    if not CFG.Target then return end
+
+    local myChar = LP.Character
+    if not myChar then return end
+    local myRoot = myChar:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return end
+
+    local targetChar = CFG.Target.Character
+    if not targetChar then return end
+    local targetRoot = targetChar:FindFirstChild("HumanoidRootPart")
+    if not targetRoot then return end
+
+    local myHum = myChar:FindFirstChildOfClass("Humanoid")
+    if myHum and myHum.Health <= 0 then return end
+
+    orbitAngle = orbitAngle + (CFG.Orbit.Speed * dt)
+    if orbitAngle > math.pi * 2 then
+        orbitAngle = orbitAngle - math.pi * 2
+    end
+
+    local tPos = targetRoot.Position
+    local oPos = tPos + Vector3.new(
+        math.cos(orbitAngle) * CFG.Orbit.Radius,
+        CFG.Orbit.Height,
+        math.sin(orbitAngle) * CFG.Orbit.Radius
+    )
+
+    myRoot.CFrame = CFrame.new(oPos, tPos)
+end))
+
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- CORE: VOIDSPAM LOGIC
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+task.spawn(function()
+    local phase = false
+    while true do
+        if CFG.Void.On and CFG.Target then
+            local myChar     = LP.Character
+            local targetChar = CFG.Target.Character
+
+            if myChar and targetChar then
+                local myRoot     = myChar:FindFirstChild("HumanoidRootPart")
+                local targetRoot = targetChar:FindFirstChild("HumanoidRootPart")
+                local myHum      = myChar:FindFirstChildOfClass("Humanoid")
+
+                if myRoot and targetRoot and myHum and myHum.Health > 0 then
+                    phase = not phase
+                    if phase then
+                        myRoot.CFrame = targetRoot.CFrame + Vector3.new(0, CFG.Void.Depth, 0)
+                    else
+                        myRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 0, 1)
+                    end
+                end
+            end
+        end
+        task.wait(CFG.Void.On and CFG.Void.Rate or 0.5)
+    end
+end)
+
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- CLOSE / MINIMIZE / TOGGLE
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+closeBtn.MouseButton1Click:Connect(function()
+    CFG.Orbit.On = false
+    CFG.Void.On = false
+    for _, conn in pairs(ActiveConnections) do
+        pcall(function() conn:Disconnect() end)
+    end
+    gui:Destroy()
+end)
+
+local minimized = false
+minBtn.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    tw(mainFrame, 0.25, {
+        Size = minimized
+            and UDim2.new(0, WIN_W, 0, TOP_H)
+            or  UDim2.new(0, WIN_W, 0, WIN_H)
+    })
+    contentArea.Visible = not minimized
+    sidebar.Visible = not minimized
+    statusBar.Visible = not minimized
+end)
+
+-- Float button toggles UI visibility
+local floatDebounce = false
+floatBtn.MouseButton1Click:Connect(function()
+    if floatDebounce then return end
+    floatDebounce = true
+    mainFrame.Visible = not mainFrame.Visible
+    floatBtn.BackgroundColor3 = mainFrame.Visible and C.accent or C.off
+    task.wait(0.2)
+    floatDebounce = false
+end)
+
+-- PC keyboard toggle
+table.insert(ActiveConnections, UIS.InputBegan:Connect(function(input, gpe)
+    if gpe then return end
+    if input.KeyCode == CFG.UIKey then
+        mainFrame.Visible = not mainFrame.Visible
+        floatBtn.BackgroundColor3 = mainFrame.Visible and C.accent or C.off
+    end
+end))
+
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- OPEN ANIMATION
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+mainFrame.Size = UDim2.new(0, WIN_W, 0, 0)
+mainFrame.BackgroundTransparency = 1
+task.wait(0.15)
+tw(mainFrame, 0.3, {
+    Size = UDim2.new(0, WIN_W, 0, WIN_H),
+    BackgroundTransparency = 0,
+})
+
+print("[RIVALS TOOL] Loaded | " .. (IsMobile and "MOBILE MODE" or "PC MODE"))
+
+--[[
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ MOBILE SUPPORT CHECKLIST (for P2/P3):
+
+ ✅ Touch drag on window (top bar)
+ ✅ Touch drag on floating toggle button
+ ✅ Touch-friendly slider (bigger hit zone)
+ ✅ Touch-friendly toggle (bigger switch)
+ ✅ Touch-friendly buttons (taller)
+ ✅ Auto-detect mobile vs PC
+ ✅ UI scales down on small screens
+ ✅ Floating [R] button to show/hide UI
+ ✅ Scrollable content pages
+ ✅ Text truncation (no overflow)
+ ✅ No keyboard-only features required
+
+ NOTES FOR P2:
+ • Test on phone + tablet — adjust SF scale if needed
+ • Confirm sliders respond to finger drag smoothly
+ • Check if buttons are easy to tap (not too small)
+ • Verify player list scrolls on mobile
+
+ NOTES FOR P3:
+ • Add haptic feedback (if executor supports it)
+ • Consider landscape vs portrait auto-sizing
+ • Test on Fluxus Mobile / Arceus X / Delta
+ • Obfuscate before distributing
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+]]

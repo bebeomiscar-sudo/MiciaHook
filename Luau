@@ -1,13 +1,10 @@
 --[[
 ╔═══════════════════════════════════════════════════════════╗
-║   RIVALS TOOL v4.0 — ANTI-UE RAGEBOT VOIDSPAM           ║
-║   Mobile + PC | Beats Unnamed Enhancements Ragebot       ║
+║   RIVALS TOOL v5.0 — CLEAN VOIDSPAM + ORBIT             ║
+║   Mobile + PC | Random TP Desync                         ║
 ║                                                           ║
-║   COUNTERS:                                               ║
-║   • Hide/Attack timing (0.01s-1s)                        ║
-║   • Projectile Mimic                                      ║
-║   • Shoot Attention Range 1-2                             ║
-║   • Their own Voidspam                                    ║
+║   Voidspam: random direction + distance teleport loop    ║
+║   No keybinds — everything controlled from UI            ║
 ║                                                           ║
 ║   PC: RightControl  |  Mobile: Floating [R] button       ║
 ╚═══════════════════════════════════════════════════════════╝
@@ -39,52 +36,28 @@ local CFG = {
     },
     Void = {
         On           = false,
-        Method       = "2KTP",
-        Mode         = "Adaptive",
-        PulseRate    = 0.008,
-        TPDistance    = 2000,
-        YJitter      = 50,
-        XZJitter     = 15,
-        SpiralRad    = 8,
-        SpiralSpd    = 6,
-
-        -- ── ANTI-UE RAGEBOT ──
-        GhostStack       = true,
-        GhostCount       = 4,
-        HomeShuffle       = true,
-        HomeShuffleRange  = 3.5,
-        AntiProjectile    = true,
-        TimingDesync      = true,
-        SkipChance        = 35,
-        VelocitySpoof     = true,
-        DesyncIntensity   = 3,
-
-        -- ── COUNTER TUNING ──
-        AntiHideMin    = 0.006,
-        AntiAttackJit  = 5.0,
-        RangeEscape    = 25,
+        MinDistance   = 500,
+        MaxDistance   = 5000,
+        TeleportDelay = 0.1,
+        HeightBoost  = 100,
     },
     UIKey = Enum.KeyCode.RightControl,
 }
 
 local ActiveConnections = {}
 
-local VoidState = {
-    active       = false,
-    savedCFrame  = nil,
-    homeBase     = nil,
-    phase        = 0,
-    accumulator  = 0,
-    tpCount      = 0,
-    clock        = 0,
-    tpsTracker   = {},
-    ghostsThisFrame = 0,
-    lastVelocity = Vector3.zero,
-    spoofedVel   = Vector3.zero,
-    skippedFrames = 0,
-    homeShuffleAngle = 0,
-    cycleID      = 0,
-}
+-- Character references
+local character = LP.Character or LP.CharacterAdded:Wait()
+local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+
+-- Respawn handler
+LP.CharacterAdded:Connect(function(newCharacter)
+    character = newCharacter
+    humanoidRootPart = newCharacter:WaitForChild("HumanoidRootPart")
+end)
+
+-- Void state
+local voidLoop = nil
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- SCALING
@@ -100,7 +73,7 @@ end
 local function s(n) return math.floor(n * SF) end
 
 local WIN_W      = s(540)
-local WIN_H      = s(460)
+local WIN_H      = s(400)
 local SIDE_W     = s(120)
 local TOP_H      = s(40)
 local STATUS_H   = s(28)
@@ -131,86 +104,78 @@ local C = {
     red     = Color3.fromRGB(200,40,40),
     orange  = Color3.fromRGB(210,140,30),
     cyan    = Color3.fromRGB(40,180,200),
-    purple  = Color3.fromRGB(140,60,210),
-    yellow  = Color3.fromRGB(220,200,40),
 }
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- HELPERS
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-local function make(class,props)
-    local obj=Instance.new(class)
-    for k,v in pairs(props) do if k~="Parent" then obj[k]=v end end
-    if props.Parent then obj.Parent=props.Parent end
+local function make(class, props)
+    local obj = Instance.new(class)
+    for k, v in pairs(props) do if k ~= "Parent" then obj[k] = v end end
+    if props.Parent then obj.Parent = props.Parent end
     return obj
 end
 
-local function tw(obj,dur,goals)
-    TweenService:Create(obj,TweenInfo.new(dur,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),goals):Play()
+local function tw(obj, dur, goals)
+    TweenService:Create(obj, TweenInfo.new(dur, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), goals):Play()
 end
 
-local function fmtN(val,inc)
-    if inc>=1 then return tostring(math.floor(val)) end
-    if inc>=0.1 then return string.format("%.1f",val) end
-    return string.format("%.3f",val)
+local function fmtN(val, inc)
+    if inc >= 1 then return tostring(math.floor(val)) end
+    if inc >= 0.1 then return string.format("%.1f", val) end
+    return string.format("%.2f", val)
 end
 
 local function isTM(i)
-    return i.UserInputType==Enum.UserInputType.MouseButton1
-        or i.UserInputType==Enum.UserInputType.Touch
+    return i.UserInputType == Enum.UserInputType.MouseButton1
+        or i.UserInputType == Enum.UserInputType.Touch
 end
+
 local function isTMM(i)
-    return i.UserInputType==Enum.UserInputType.MouseMovement
-        or i.UserInputType==Enum.UserInputType.Touch
-end
-local function gIP(i) return Vector2.new(i.Position.X,i.Position.Y) end
-
-local RNG = Random.new(tick() * 1000 + math.random(1,99999))
-
-local function rng(min,max)
-    return RNG:NextNumber(min or 0, max or 1)
+    return i.UserInputType == Enum.UserInputType.MouseMovement
+        or i.UserInputType == Enum.UserInputType.Touch
 end
 
-local function rngInt(min,max)
-    return RNG:NextInteger(min,max)
-end
+local function gIP(i) return Vector2.new(i.Position.X, i.Position.Y) end
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- SCREENGUI
---━━━━━━━���━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 if game:GetService("CoreGui"):FindFirstChild("RivalsTool") then
     game:GetService("CoreGui"):FindFirstChild("RivalsTool"):Destroy()
 end
-local gui=Instance.new("ScreenGui")
-gui.Name="RivalsTool";gui.ZIndexBehavior=Enum.ZIndexBehavior.Sibling;gui.ResetOnSpawn=false
-pcall(function() gui.Parent=game:GetService("CoreGui") end)
-if not gui.Parent then gui.Parent=LP:WaitForChild("PlayerGui") end
+local gui = Instance.new("ScreenGui")
+gui.Name = "RivalsTool"
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.ResetOnSpawn = false
+pcall(function() gui.Parent = game:GetService("CoreGui") end)
+if not gui.Parent then gui.Parent = LP:WaitForChild("PlayerGui") end
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- FLOAT BUTTON
 --━━━━━━━���━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-local floatBtn=make("TextButton",{
-    Size=UDim2.new(0,s(50),0,s(50)),
-    Position=UDim2.new(0,8,0,camera.ViewportSize.Y*0.3),
-    BackgroundColor3=C.accent,BorderSizePixel=0,
-    Text="R",TextColor3=C.text,Font=Enum.Font.GothamBold,
-    TextSize=s(20),ZIndex=100,Parent=gui,
+local floatBtn = make("TextButton", {
+    Size = UDim2.new(0, s(50), 0, s(50)),
+    Position = UDim2.new(0, 8, 0, camera.ViewportSize.Y * 0.3),
+    BackgroundColor3 = C.accent, BorderSizePixel = 0,
+    Text = "R", TextColor3 = C.text, Font = Enum.Font.GothamBold,
+    TextSize = s(20), ZIndex = 100, Parent = gui,
 })
-make("UICorner",{CornerRadius=UDim.new(0,s(12)),Parent=floatBtn})
-make("UIStroke",{Color=C.border,Thickness=1,Parent=floatBtn})
+make("UICorner", { CornerRadius = UDim.new(0, s(12)), Parent = floatBtn })
+make("UIStroke", { Color = C.border, Thickness = 1, Parent = floatBtn })
 
 do
-    local d,ds,sp=false,nil,nil
-    floatBtn.InputBegan:Connect(function(i) if isTM(i) then d=true;ds=gIP(i);sp=floatBtn.Position end end)
-    floatBtn.InputEnded:Connect(function(i) if isTM(i) then d=false end end)
-    table.insert(ActiveConnections,UIS.InputChanged:Connect(function(i)
+    local d, ds, sp = false, nil, nil
+    floatBtn.InputBegan:Connect(function(i) if isTM(i) then d = true; ds = gIP(i); sp = floatBtn.Position end end)
+    floatBtn.InputEnded:Connect(function(i) if isTM(i) then d = false end end)
+    table.insert(ActiveConnections, UIS.InputChanged:Connect(function(i)
         if d and isTMM(i) then
-            local delta=gIP(i)-ds
-            if delta.Magnitude>8 then
-                floatBtn.Position=UDim2.new(sp.X.Scale,sp.X.Offset+delta.X,sp.Y.Scale,sp.Y.Offset+delta.Y)
+            local delta = gIP(i) - ds
+            if delta.Magnitude > 8 then
+                floatBtn.Position = UDim2.new(sp.X.Scale, sp.X.Offset + delta.X, sp.Y.Scale, sp.Y.Offset + delta.Y)
             end
         end
     end))
@@ -220,69 +185,71 @@ end
 -- MAIN WINDOW
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-local mainFrame=make("Frame",{
-    Name="Main",Size=UDim2.new(0,WIN_W,0,WIN_H),
-    Position=UDim2.new(0.5,-WIN_W/2,0.5,-WIN_H/2),
-    BackgroundColor3=C.bg,BorderSizePixel=0,Parent=gui,
+local mainFrame = make("Frame", {
+    Name = "Main", Size = UDim2.new(0, WIN_W, 0, WIN_H),
+    Position = UDim2.new(0.5, -WIN_W / 2, 0.5, -WIN_H / 2),
+    BackgroundColor3 = C.bg, BorderSizePixel = 0, Parent = gui,
 })
-make("UICorner",{CornerRadius=UDim.new(0,s(4)),Parent=mainFrame})
-make("UIStroke",{Color=C.border,Thickness=1,Parent=mainFrame})
-make("ImageLabel",{
-    Size=UDim2.new(1,30,1,30),Position=UDim2.new(0,-15,0,-15),
-    BackgroundTransparency=1,Image="rbxassetid://6015897843",
-    ImageColor3=Color3.new(0,0,0),ImageTransparency=0.5,
-    ScaleType=Enum.ScaleType.Slice,SliceCenter=Rect.new(49,49,450,450),
-    ZIndex=0,Parent=mainFrame,
+make("UICorner", { CornerRadius = UDim.new(0, s(4)), Parent = mainFrame })
+make("UIStroke", { Color = C.border, Thickness = 1, Parent = mainFrame })
+make("ImageLabel", {
+    Size = UDim2.new(1, 30, 1, 30), Position = UDim2.new(0, -15, 0, -15),
+    BackgroundTransparency = 1, Image = "rbxassetid://6015897843",
+    ImageColor3 = Color3.new(0, 0, 0), ImageTransparency = 0.5,
+    ScaleType = Enum.ScaleType.Slice, SliceCenter = Rect.new(49, 49, 450, 450),
+    ZIndex = 0, Parent = mainFrame,
 })
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- TOP BAR
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-local topBar=make("Frame",{
-    Size=UDim2.new(1,0,0,TOP_H),BackgroundColor3=C.side,
-    BorderSizePixel=0,Parent=mainFrame,
+local topBar = make("Frame", {
+    Size = UDim2.new(1, 0, 0, TOP_H), BackgroundColor3 = C.side,
+    BorderSizePixel = 0, Parent = mainFrame,
 })
-make("UICorner",{CornerRadius=UDim.new(0,s(4)),Parent=topBar})
-make("Frame",{Size=UDim2.new(1,0,0,8),Position=UDim2.new(0,0,1,-8),BackgroundColor3=C.side,BorderSizePixel=0,ZIndex=2,Parent=topBar})
+make("UICorner", { CornerRadius = UDim.new(0, s(4)), Parent = topBar })
+make("Frame", { Size = UDim2.new(1, 0, 0, 8), Position = UDim2.new(0, 0, 1, -8), BackgroundColor3 = C.side, BorderSizePixel = 0, ZIndex = 2, Parent = topBar })
 
-make("TextLabel",{
-    Size=UDim2.new(0.5,0,1,0),Position=UDim2.new(0,s(14),0,0),
-    BackgroundTransparency=1,Text="RIVALS TOOL",TextColor3=C.accent,
-    Font=Enum.Font.GothamBold,TextSize=s(14),TextXAlignment=Enum.TextXAlignment.Left,Parent=topBar,
+make("TextLabel", {
+    Size = UDim2.new(0.5, 0, 1, 0), Position = UDim2.new(0, s(14), 0, 0),
+    BackgroundTransparency = 1, Text = "RIVALS TOOL", TextColor3 = C.accent,
+    Font = Enum.Font.GothamBold, TextSize = s(14), TextXAlignment = Enum.TextXAlignment.Left, Parent = topBar,
 })
-make("TextLabel",{
-    Size=UDim2.new(0,s(40),1,0),Position=UDim2.new(0,s(120),0,0),
-    BackgroundTransparency=1,Text="v4.0",TextColor3=C.dim,
-    Font=Enum.Font.Gotham,TextSize=FONT_SMALL,TextXAlignment=Enum.TextXAlignment.Left,Parent=topBar,
+make("TextLabel", {
+    Size = UDim2.new(0, s(40), 1, 0), Position = UDim2.new(0, s(120), 0, 0),
+    BackgroundTransparency = 1, Text = "v5.0", TextColor3 = C.dim,
+    Font = Enum.Font.Gotham, TextSize = FONT_SMALL, TextXAlignment = Enum.TextXAlignment.Left, Parent = topBar,
 })
 
-local closeBtn=make("TextButton",{
-    Size=UDim2.new(0,TOP_H,0,TOP_H),Position=UDim2.new(1,-TOP_H,0,0),
-    BackgroundTransparency=1,Text="X",TextColor3=C.dim,
-    Font=Enum.Font.GothamBold,TextSize=s(14),Parent=topBar,
+local closeBtn = make("TextButton", {
+    Size = UDim2.new(0, TOP_H, 0, TOP_H), Position = UDim2.new(1, -TOP_H, 0, 0),
+    BackgroundTransparency = 1, Text = "X", TextColor3 = C.dim,
+    Font = Enum.Font.GothamBold, TextSize = s(14), Parent = topBar,
 })
-local minBtn=make("TextButton",{
-    Size=UDim2.new(0,TOP_H,0,TOP_H),Position=UDim2.new(1,-TOP_H*2,0,0),
-    BackgroundTransparency=1,Text="—",TextColor3=C.dim,
-    Font=Enum.Font.GothamBold,TextSize=s(14),Parent=topBar,
+local minBtn = make("TextButton", {
+    Size = UDim2.new(0, TOP_H, 0, TOP_H), Position = UDim2.new(1, -TOP_H * 2, 0, 0),
+    BackgroundTransparency = 1, Text = "—", TextColor3 = C.dim,
+    Font = Enum.Font.GothamBold, TextSize = s(14), Parent = topBar,
 })
-closeBtn.MouseEnter:Connect(function() closeBtn.TextColor3=C.red end)
-closeBtn.MouseLeave:Connect(function() closeBtn.TextColor3=C.dim end)
-minBtn.MouseEnter:Connect(function() minBtn.TextColor3=C.text end)
-minBtn.MouseLeave:Connect(function() minBtn.TextColor3=C.dim end)
+closeBtn.MouseEnter:Connect(function() closeBtn.TextColor3 = C.red end)
+closeBtn.MouseLeave:Connect(function() closeBtn.TextColor3 = C.dim end)
+minBtn.MouseEnter:Connect(function() minBtn.TextColor3 = C.text end)
+minBtn.MouseLeave:Connect(function() minBtn.TextColor3 = C.dim end)
 
+-- DRAG
 do
-    local d,ds,sp=false,nil,nil
-    local dz=make("TextButton",{
-        Size=UDim2.new(1,-TOP_H*2,1,0),BackgroundTransparency=1,Text="",ZIndex=5,Parent=topBar,
+    local d, ds, sp = false, nil, nil
+    local dz = make("TextButton", {
+        Size = UDim2.new(1, -TOP_H * 2, 1, 0), BackgroundTransparency = 1,
+        Text = "", ZIndex = 5, Parent = topBar,
     })
-    dz.InputBegan:Connect(function(i) if isTM(i) then d=true;ds=gIP(i);sp=mainFrame.Position end end)
-    dz.InputEnded:Connect(function(i) if isTM(i) then d=false end end)
-    table.insert(ActiveConnections,UIS.InputChanged:Connect(function(i)
+    dz.InputBegan:Connect(function(i) if isTM(i) then d = true; ds = gIP(i); sp = mainFrame.Position end end)
+    dz.InputEnded:Connect(function(i) if isTM(i) then d = false end end)
+    table.insert(ActiveConnections, UIS.InputChanged:Connect(function(i)
         if d and isTMM(i) then
-            local delta=gIP(i)-ds
-            mainFrame.Position=UDim2.new(sp.X.Scale,sp.X.Offset+delta.X,sp.Y.Scale,sp.Y.Offset+delta.Y)
+            local delta = gIP(i) - ds
+            mainFrame.Position = UDim2.new(sp.X.Scale, sp.X.Offset + delta.X, sp.Y.Scale, sp.Y.Offset + delta.Y)
         end
     end))
 end
@@ -291,225 +258,173 @@ end
 -- SIDEBAR + CONTENT + STATUS
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-local sidebar=make("Frame",{
-    Size=UDim2.new(0,SIDE_W,1,-TOP_H),Position=UDim2.new(0,0,0,TOP_H),
-    BackgroundColor3=C.side,BorderSizePixel=0,Parent=mainFrame,
+local sidebar = make("Frame", {
+    Size = UDim2.new(0, SIDE_W, 1, -TOP_H), Position = UDim2.new(0, 0, 0, TOP_H),
+    BackgroundColor3 = C.side, BorderSizePixel = 0, Parent = mainFrame,
 })
-make("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,s(2)),Parent=sidebar})
-make("UIPadding",{PaddingTop=UDim.new(0,s(8)),PaddingLeft=UDim.new(0,s(5)),PaddingRight=UDim.new(0,s(5)),Parent=sidebar})
-make("Frame",{Size=UDim2.new(0,1,1,-TOP_H),Position=UDim2.new(0,SIDE_W,0,TOP_H),BackgroundColor3=C.border,BorderSizePixel=0,ZIndex=5,Parent=mainFrame})
+make("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, s(2)), Parent = sidebar })
+make("UIPadding", { PaddingTop = UDim.new(0, s(8)), PaddingLeft = UDim.new(0, s(5)), PaddingRight = UDim.new(0, s(5)), Parent = sidebar })
+make("Frame", { Size = UDim2.new(0, 1, 1, -TOP_H), Position = UDim2.new(0, SIDE_W, 0, TOP_H), BackgroundColor3 = C.border, BorderSizePixel = 0, ZIndex = 5, Parent = mainFrame })
 
-local contentArea=make("Frame",{
-    Name="Content",Size=UDim2.new(1,-(SIDE_W+1),1,-(TOP_H+STATUS_H)),
-    Position=UDim2.new(0,SIDE_W+1,0,TOP_H),BackgroundColor3=C.panel,
-    BorderSizePixel=0,ClipsDescendants=true,Parent=mainFrame,
-})
-
-local statusBar=make("Frame",{
-    Size=UDim2.new(1,0,0,STATUS_H),Position=UDim2.new(0,0,1,-STATUS_H),
-    BackgroundColor3=C.side,BorderSizePixel=0,Parent=mainFrame,
-})
-make("UICorner",{CornerRadius=UDim.new(0,s(4)),Parent=statusBar})
-make("Frame",{Size=UDim2.new(1,0,0,8),BackgroundColor3=C.side,BorderSizePixel=0,ZIndex=2,Parent=statusBar})
-
-local statusDot=make("Frame",{
-    Size=UDim2.new(0,s(6),0,s(6)),Position=UDim2.new(0,s(10),0.5,-s(3)),
-    BackgroundColor3=C.dim,BorderSizePixel=0,Parent=statusBar,
-})
-make("UICorner",{CornerRadius=UDim.new(1,0),Parent=statusDot})
-
-local statusLabel=make("TextLabel",{
-    Size=UDim2.new(1,-s(20),1,0),Position=UDim2.new(0,s(22),0,0),
-    BackgroundTransparency=1,Text="Idle",TextColor3=C.dim,
-    Font=Enum.Font.Gotham,TextSize=FONT_TINY,TextXAlignment=Enum.TextXAlignment.Left,
-    TextTruncate=Enum.TextTruncate.AtEnd,Parent=statusBar,
+local contentArea = make("Frame", {
+    Name = "Content", Size = UDim2.new(1, -(SIDE_W + 1), 1, -(TOP_H + STATUS_H)),
+    Position = UDim2.new(0, SIDE_W + 1, 0, TOP_H), BackgroundColor3 = C.panel,
+    BorderSizePixel = 0, ClipsDescendants = true, Parent = mainFrame,
 })
 
-local function updateStatus(msg,color)
-    statusLabel.Text=msg;statusDot.BackgroundColor3=color or C.dim
+local statusBar = make("Frame", {
+    Size = UDim2.new(1, 0, 0, STATUS_H), Position = UDim2.new(0, 0, 1, -STATUS_H),
+    BackgroundColor3 = C.side, BorderSizePixel = 0, Parent = mainFrame,
+})
+make("UICorner", { CornerRadius = UDim.new(0, s(4)), Parent = statusBar })
+make("Frame", { Size = UDim2.new(1, 0, 0, 8), BackgroundColor3 = C.side, BorderSizePixel = 0, ZIndex = 2, Parent = statusBar })
+
+local statusDot = make("Frame", {
+    Size = UDim2.new(0, s(6), 0, s(6)), Position = UDim2.new(0, s(10), 0.5, -s(3)),
+    BackgroundColor3 = C.dim, BorderSizePixel = 0, Parent = statusBar,
+})
+make("UICorner", { CornerRadius = UDim.new(1, 0), Parent = statusDot })
+
+local statusLabel = make("TextLabel", {
+    Size = UDim2.new(1, -s(20), 1, 0), Position = UDim2.new(0, s(22), 0, 0),
+    BackgroundTransparency = 1, Text = "Idle", TextColor3 = C.dim,
+    Font = Enum.Font.Gotham, TextSize = FONT_TINY, TextXAlignment = Enum.TextXAlignment.Left,
+    TextTruncate = Enum.TextTruncate.AtEnd, Parent = statusBar,
+})
+
+local function updateStatus(msg, color)
+    statusLabel.Text = msg
+    statusDot.BackgroundColor3 = color or C.dim
 end
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- UI BUILDERS
---━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+--━━━━━━━���━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-local function makeSection(parent,text,order)
-    return make("TextLabel",{
-        Size=UDim2.new(1,0,0,s(22)),BackgroundTransparency=1,
-        Text=string.upper(text),TextColor3=C.dim,Font=Enum.Font.GothamBold,
-        TextSize=FONT_TINY,TextXAlignment=Enum.TextXAlignment.Left,
-        LayoutOrder=order or 0,Parent=parent,
+local function makeSection(parent, text, order)
+    return make("TextLabel", {
+        Size = UDim2.new(1, 0, 0, s(22)), BackgroundTransparency = 1,
+        Text = string.upper(text), TextColor3 = C.dim, Font = Enum.Font.GothamBold,
+        TextSize = FONT_TINY, TextXAlignment = Enum.TextXAlignment.Left,
+        LayoutOrder = order or 0, Parent = parent,
     })
 end
 
-local function makeToggle(parent,label,default,order,callback)
-    local state=default or false
-    local frame=make("Frame",{Size=UDim2.new(1,0,0,TOGGLE_H),BackgroundColor3=C.elem,BorderSizePixel=0,LayoutOrder=order,Parent=parent})
-    make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=frame})
-    make("TextLabel",{
-        Size=UDim2.new(1,-s(60),1,0),Position=UDim2.new(0,s(12),0,0),
-        BackgroundTransparency=1,Text=label,TextColor3=C.text,Font=Enum.Font.Gotham,
-        TextSize=FONT_MAIN,TextXAlignment=Enum.TextXAlignment.Left,
-        TextTruncate=Enum.TextTruncate.AtEnd,Parent=frame,
+local function makeToggle(parent, label, default, order, callback)
+    local state = default or false
+    local frame = make("Frame", { Size = UDim2.new(1, 0, 0, TOGGLE_H), BackgroundColor3 = C.elem, BorderSizePixel = 0, LayoutOrder = order, Parent = parent })
+    make("UICorner", { CornerRadius = UDim.new(0, s(3)), Parent = frame })
+    make("TextLabel", {
+        Size = UDim2.new(1, -s(60), 1, 0), Position = UDim2.new(0, s(12), 0, 0),
+        BackgroundTransparency = 1, Text = label, TextColor3 = C.text, Font = Enum.Font.Gotham,
+        TextSize = FONT_MAIN, TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd, Parent = frame,
     })
-    local tW,tH,kS=s(40),s(20),s(16)
-    local track=make("Frame",{
-        Size=UDim2.new(0,tW,0,tH),Position=UDim2.new(1,-tW-s(10),0.5,-tH/2),
-        BackgroundColor3=state and C.accent or C.off,BorderSizePixel=0,Parent=frame,
+    local tW, tH, kS = s(40), s(20), s(16)
+    local track = make("Frame", {
+        Size = UDim2.new(0, tW, 0, tH), Position = UDim2.new(1, -tW - s(10), 0.5, -tH / 2),
+        BackgroundColor3 = state and C.accent or C.off, BorderSizePixel = 0, Parent = frame,
     })
-    make("UICorner",{CornerRadius=UDim.new(0,tH/2),Parent=track})
-    local knob=make("Frame",{
-        Size=UDim2.new(0,kS,0,kS),
-        Position=state and UDim2.new(1,-kS-s(2),0.5,-kS/2) or UDim2.new(0,s(2),0.5,-kS/2),
-        BackgroundColor3=C.text,BorderSizePixel=0,Parent=track,
+    make("UICorner", { CornerRadius = UDim.new(0, tH / 2), Parent = track })
+    local knob = make("Frame", {
+        Size = UDim2.new(0, kS, 0, kS),
+        Position = state and UDim2.new(1, -kS - s(2), 0.5, -kS / 2) or UDim2.new(0, s(2), 0.5, -kS / 2),
+        BackgroundColor3 = C.text, BorderSizePixel = 0, Parent = track,
     })
-    make("UICorner",{CornerRadius=UDim.new(1,0),Parent=knob})
-    local btn=make("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",Parent=frame})
+    make("UICorner", { CornerRadius = UDim.new(1, 0), Parent = knob })
+    local btn = make("TextButton", { Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = "", Parent = frame })
     btn.MouseButton1Click:Connect(function()
-        state=not state
-        tw(track,0.18,{BackgroundColor3=state and C.accent or C.off})
-        tw(knob,0.18,{Position=state and UDim2.new(1,-kS-s(2),0.5,-kS/2) or UDim2.new(0,s(2),0.5,-kS/2)})
+        state = not state
+        tw(track, 0.18, { BackgroundColor3 = state and C.accent or C.off })
+        tw(knob, 0.18, { Position = state and UDim2.new(1, -kS - s(2), 0.5, -kS / 2) or UDim2.new(0, s(2), 0.5, -kS / 2) })
         if callback then callback(state) end
     end)
     return {
-        getState=function() return state end,
-        setState=function(v) state=v
-            track.BackgroundColor3=v and C.accent or C.off
-            knob.Position=v and UDim2.new(1,-kS-s(2),0.5,-kS/2) or UDim2.new(0,s(2),0.5,-kS/2)
+        getState = function() return state end,
+        setState = function(v)
+            state = v
+            track.BackgroundColor3 = v and C.accent or C.off
+            knob.Position = v and UDim2.new(1, -kS - s(2), 0.5, -kS / 2) or UDim2.new(0, s(2), 0.5, -kS / 2)
         end,
     }
 end
 
-local function makeSlider(parent,label,min,max,default,increment,order,callback)
-    local value=default
-    local frame=make("Frame",{Size=UDim2.new(1,0,0,SLIDER_H),BackgroundColor3=C.elem,BorderSizePixel=0,LayoutOrder=order,Parent=parent})
-    make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=frame})
-    make("TextLabel",{
-        Size=UDim2.new(0.55,0,0,s(22)),Position=UDim2.new(0,s(12),0,s(2)),
-        BackgroundTransparency=1,Text=label,TextColor3=C.text,Font=Enum.Font.Gotham,
-        TextSize=s(12),TextXAlignment=Enum.TextXAlignment.Left,
-        TextTruncate=Enum.TextTruncate.AtEnd,Parent=frame,
+local function makeSlider(parent, label, min, max, default, increment, order, callback)
+    local value = default
+    local frame = make("Frame", { Size = UDim2.new(1, 0, 0, SLIDER_H), BackgroundColor3 = C.elem, BorderSizePixel = 0, LayoutOrder = order, Parent = parent })
+    make("UICorner", { CornerRadius = UDim.new(0, s(3)), Parent = frame })
+    make("TextLabel", {
+        Size = UDim2.new(0.55, 0, 0, s(22)), Position = UDim2.new(0, s(12), 0, s(2)),
+        BackgroundTransparency = 1, Text = label, TextColor3 = C.text, Font = Enum.Font.Gotham,
+        TextSize = s(12), TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd, Parent = frame,
     })
-    local valLabel=make("TextLabel",{
-        Size=UDim2.new(0.4,0,0,s(22)),Position=UDim2.new(0.57,0,0,s(2)),
-        BackgroundTransparency=1,Text=fmtN(value,increment),TextColor3=C.dim,
-        Font=Enum.Font.GothamSemibold,TextSize=s(12),TextXAlignment=Enum.TextXAlignment.Right,Parent=frame,
+    local valLabel = make("TextLabel", {
+        Size = UDim2.new(0.4, 0, 0, s(22)), Position = UDim2.new(0.57, 0, 0, s(2)),
+        BackgroundTransparency = 1, Text = fmtN(value, increment), TextColor3 = C.dim,
+        Font = Enum.Font.GothamSemibold, TextSize = s(12), TextXAlignment = Enum.TextXAlignment.Right, Parent = frame,
     })
-    local bH=s(8)
-    local trackBG=make("Frame",{
-        Size=UDim2.new(1,-s(24),0,bH),Position=UDim2.new(0,s(12),0,SLIDER_H-bH-s(10)),
-        BackgroundColor3=C.border,BorderSizePixel=0,Parent=frame,
+    local bH = s(8)
+    local trackBG = make("Frame", {
+        Size = UDim2.new(1, -s(24), 0, bH), Position = UDim2.new(0, s(12), 0, SLIDER_H - bH - s(10)),
+        BackgroundColor3 = C.border, BorderSizePixel = 0, Parent = frame,
     })
-    make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=trackBG})
-    local pct=math.clamp((default-min)/(max-min),0,1)
-    local fill=make("Frame",{Size=UDim2.new(pct,0,1,0),BackgroundColor3=C.accent,BorderSizePixel=0,Parent=trackBG})
-    make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=fill})
-    local hS=s(18)
-    local handle=make("Frame",{
-        Size=UDim2.new(0,hS,0,hS),Position=UDim2.new(pct,-hS/2,0.5,-hS/2),
-        BackgroundColor3=C.text,BorderSizePixel=0,ZIndex=3,Parent=trackBG,
+    make("UICorner", { CornerRadius = UDim.new(0, s(3)), Parent = trackBG })
+    local pct = math.clamp((default - min) / (max - min), 0, 1)
+    local fill = make("Frame", { Size = UDim2.new(pct, 0, 1, 0), BackgroundColor3 = C.accent, BorderSizePixel = 0, Parent = trackBG })
+    make("UICorner", { CornerRadius = UDim.new(0, s(3)), Parent = fill })
+    local hS = s(18)
+    local handle = make("Frame", {
+        Size = UDim2.new(0, hS, 0, hS), Position = UDim2.new(pct, -hS / 2, 0.5, -hS / 2),
+        BackgroundColor3 = C.text, BorderSizePixel = 0, ZIndex = 3, Parent = trackBG,
     })
-    make("UICorner",{CornerRadius=UDim.new(1,0),Parent=handle})
-    local touchZone=make("TextButton",{
-        Size=UDim2.new(1,s(20),0,s(30)),Position=UDim2.new(0,-s(10),0.5,-s(15)),
-        BackgroundTransparency=1,Text="",ZIndex=4,Parent=trackBG,
+    make("UICorner", { CornerRadius = UDim.new(1, 0), Parent = handle })
+    local touchZone = make("TextButton", {
+        Size = UDim2.new(1, s(20), 0, s(30)), Position = UDim2.new(0, -s(10), 0.5, -s(15)),
+        BackgroundTransparency = 1, Text = "", ZIndex = 4, Parent = trackBG,
     })
-    local sliding=false
+    local sliding = false
     local function upd(ix)
-        local r=math.clamp((ix-trackBG.AbsolutePosition.X)/trackBG.AbsoluteSize.X,0,1)
-        value=math.clamp(math.floor((min+(max-min)*r)/increment+0.5)*increment,min,max)
-        local fp=(value-min)/(max-min)
-        fill.Size=UDim2.new(fp,0,1,0)
-        handle.Position=UDim2.new(fp,-hS/2,0.5,-hS/2)
-        valLabel.Text=fmtN(value,increment)
+        local r = math.clamp((ix - trackBG.AbsolutePosition.X) / trackBG.AbsoluteSize.X, 0, 1)
+        value = math.clamp(math.floor((min + (max - min) * r) / increment + 0.5) * increment, min, max)
+        local fp = (value - min) / (max - min)
+        fill.Size = UDim2.new(fp, 0, 1, 0)
+        handle.Position = UDim2.new(fp, -hS / 2, 0.5, -hS / 2)
+        valLabel.Text = fmtN(value, increment)
         if callback then callback(value) end
     end
-    touchZone.InputBegan:Connect(function(i) if isTM(i) then sliding=true;upd(i.Position.X) end end)
-    handle.InputBegan:Connect(function(i) if isTM(i) then sliding=true end end)
-    table.insert(ActiveConnections,UIS.InputChanged:Connect(function(i) if sliding and isTMM(i) then upd(i.Position.X) end end))
-    table.insert(ActiveConnections,UIS.InputEnded:Connect(function(i) if isTM(i) then sliding=false end end))
+    touchZone.InputBegan:Connect(function(i) if isTM(i) then sliding = true; upd(i.Position.X) end end)
+    handle.InputBegan:Connect(function(i) if isTM(i) then sliding = true end end)
+    table.insert(ActiveConnections, UIS.InputChanged:Connect(function(i) if sliding and isTMM(i) then upd(i.Position.X) end end))
+    table.insert(ActiveConnections, UIS.InputEnded:Connect(function(i) if isTM(i) then sliding = false end end))
     return {
-        getValue=function() return value end,
-        setValue=function(v)
-            value=v;local p=(v-min)/(max-min)
-            fill.Size=UDim2.new(p,0,1,0);handle.Position=UDim2.new(p,-hS/2,0.5,-hS/2)
-            valLabel.Text=fmtN(v,increment)
+        getValue = function() return value end,
+        setValue = function(v)
+            value = v; local p = (v - min) / (max - min)
+            fill.Size = UDim2.new(p, 0, 1, 0); handle.Position = UDim2.new(p, -hS / 2, 0.5, -hS / 2)
+            valLabel.Text = fmtN(v, increment)
         end,
     }
 end
 
-local function makeButton(parent,label,color,order,callback)
-    local btn=make("TextButton",{
-        Size=UDim2.new(1,0,0,BTN_H),BackgroundColor3=color or C.elem,
-        BorderSizePixel=0,Text=label,TextColor3=C.text,Font=Enum.Font.GothamSemibold,
-        TextSize=FONT_MAIN,LayoutOrder=order,Parent=parent,
+local function makeButton(parent, label, color, order, callback)
+    local btn = make("TextButton", {
+        Size = UDim2.new(1, 0, 0, BTN_H), BackgroundColor3 = color or C.elem,
+        BorderSizePixel = 0, Text = label, TextColor3 = C.text, Font = Enum.Font.GothamSemibold,
+        TextSize = FONT_MAIN, LayoutOrder = order, Parent = parent,
     })
-    make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=btn})
+    make("UICorner", { CornerRadius = UDim.new(0, s(3)), Parent = btn })
     btn.MouseButton1Click:Connect(function() if callback then callback() end end)
     return btn
 end
 
-local function makeInfo(parent,text,order)
-    return make("TextLabel",{
-        Size=UDim2.new(1,0,0,s(38)),BackgroundTransparency=1,Text=text,
-        TextColor3=C.dim,Font=Enum.Font.Gotham,TextSize=FONT_TINY,TextWrapped=true,
-        TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Top,
-        LayoutOrder=order or 99,Parent=parent,
+local function makeInfo(parent, text, order)
+    return make("TextLabel", {
+        Size = UDim2.new(1, 0, 0, s(38)), BackgroundTransparency = 1, Text = text,
+        TextColor3 = C.dim, Font = Enum.Font.Gotham, TextSize = FONT_TINY, TextWrapped = true,
+        TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top,
+        LayoutOrder = order or 99, Parent = parent,
     })
-end
-
-local function makeModeSelect(parent,modes,default,order,callback)
-    local container=make("Frame",{
-        Size=UDim2.new(1,0,0,s(36)),BackgroundTransparency=1,LayoutOrder=order,Parent=parent,
-    })
-    make("UIListLayout",{
-        FillDirection=Enum.FillDirection.Horizontal,
-        SortOrder=Enum.SortOrder.LayoutOrder,
-        Padding=UDim.new(0,s(3)),Parent=container,
-    })
-    local selected=default
-    local buttons={}
-    for i,mode in ipairs(modes) do
-        local isSel=(mode==default)
-        local btn=make("TextButton",{
-            Size=UDim2.new(1/#modes,-s(3),1,0),
-            BackgroundColor3=isSel and C.accent or C.off,BorderSizePixel=0,
-            Text=mode,TextColor3=isSel and C.text or C.dim,
-            Font=Enum.Font.GothamBold,TextSize=FONT_TINY,
-            LayoutOrder=i,Parent=container,
-        })
-        make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=btn})
-        buttons[mode]=btn
-        btn.MouseButton1Click:Connect(function()
-            for m,b in pairs(buttons) do tw(b,0.12,{BackgroundColor3=C.off});b.TextColor3=C.dim end
-            tw(btn,0.12,{BackgroundColor3=C.accent});btn.TextColor3=C.text
-            selected=mode
-            if callback then callback(mode) end
-        end)
-    end
-    return {getMode=function() return selected end}
-end
-
--- ── LABELED DISPLAY BOX ──
-local function makeDisplayBox(parent,label,value,color,order)
-    local frame=make("Frame",{
-        Size=UDim2.new(1,0,0,s(24)),BackgroundColor3=Color3.fromRGB(14,14,20),
-        BorderSizePixel=0,LayoutOrder=order,Parent=parent,
-    })
-    make("UICorner",{CornerRadius=UDim.new(0,s(2)),Parent=frame})
-    local lbl=make("TextLabel",{
-        Size=UDim2.new(0.45,0,1,0),Position=UDim2.new(0,s(8),0,0),
-        BackgroundTransparency=1,Text=label,TextColor3=C.dim,
-        Font=Enum.Font.GothamBold,TextSize=FONT_TINY,
-        TextXAlignment=Enum.TextXAlignment.Left,Parent=frame,
-    })
-    local val=make("TextLabel",{
-        Size=UDim2.new(0.5,0,1,0),Position=UDim2.new(0.48,0,0,0),
-        BackgroundTransparency=1,Text=value,TextColor3=color or C.text,
-        Font=Enum.Font.GothamBold,TextSize=FONT_TINY,
-        TextXAlignment=Enum.TextXAlignment.Right,Parent=frame,
-    })
-    return val
 end
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -517,14 +432,14 @@ end
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 local function makePage(name)
-    local pg=make("ScrollingFrame",{
-        Name=name,Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,
-        BorderSizePixel=0,ScrollBarThickness=s(3),ScrollBarImageColor3=C.border,
-        CanvasSize=UDim2.new(0,0,0,0),AutomaticCanvasSize=Enum.AutomaticSize.Y,
-        Visible=false,ScrollingDirection=Enum.ScrollingDirection.Y,Parent=contentArea,
+    local pg = make("ScrollingFrame", {
+        Name = name, Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1,
+        BorderSizePixel = 0, ScrollBarThickness = s(3), ScrollBarImageColor3 = C.border,
+        CanvasSize = UDim2.new(0, 0, 0, 0), AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        Visible = false, ScrollingDirection = Enum.ScrollingDirection.Y, Parent = contentArea,
     })
-    make("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,s(4)),Parent=pg})
-    make("UIPadding",{PaddingTop=UDim.new(0,s(8)),PaddingBottom=UDim.new(0,s(15)),PaddingLeft=UDim.new(0,s(10)),PaddingRight=UDim.new(0,s(10)),Parent=pg})
+    make("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, s(5)), Parent = pg })
+    make("UIPadding", { PaddingTop = UDim.new(0, s(10)), PaddingBottom = UDim.new(0, s(15)), PaddingLeft = UDim.new(0, s(10)), PaddingRight = UDim.new(0, s(10)), Parent = pg })
     return pg
 end
 
@@ -536,38 +451,40 @@ local pageSettings = makePage("Settings")
 -- TABS
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-local tabData={};local activeTab=nil
-local function makeTabBtn(text,page,order,default)
-    local btn=make("TextButton",{
-        Size=UDim2.new(1,0,0,s(36)),
-        BackgroundColor3=default and C.panel or Color3.new(0,0,0),
-        BackgroundTransparency=default and 0 or 1,BorderSizePixel=0,
-        Text="",LayoutOrder=order,Parent=sidebar,
+local tabData = {}
+local activeTab = nil
+
+local function makeTabBtn(text, page, order, default)
+    local btn = make("TextButton", {
+        Size = UDim2.new(1, 0, 0, s(36)),
+        BackgroundColor3 = default and C.panel or Color3.new(0, 0, 0),
+        BackgroundTransparency = default and 0 or 1, BorderSizePixel = 0,
+        Text = "", LayoutOrder = order, Parent = sidebar,
     })
-    make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=btn})
-    local ind=make("Frame",{
-        Size=UDim2.new(0,s(3),0.55,0),Position=UDim2.new(0,0,0.225,0),
-        BackgroundColor3=C.accent,BorderSizePixel=0,Visible=default or false,Parent=btn,
+    make("UICorner", { CornerRadius = UDim.new(0, s(3)), Parent = btn })
+    local ind = make("Frame", {
+        Size = UDim2.new(0, s(3), 0.55, 0), Position = UDim2.new(0, 0, 0.225, 0),
+        BackgroundColor3 = C.accent, BorderSizePixel = 0, Visible = default or false, Parent = btn,
     })
-    make("UICorner",{CornerRadius=UDim.new(0,1),Parent=ind})
-    local lbl=make("TextLabel",{
-        Size=UDim2.new(1,-s(16),1,0),Position=UDim2.new(0,s(12),0,0),
-        BackgroundTransparency=1,Text=text,TextColor3=default and C.text or C.dim,
-        Font=Enum.Font.GothamSemibold,TextSize=s(11),TextXAlignment=Enum.TextXAlignment.Left,
-        TextTruncate=Enum.TextTruncate.AtEnd,Parent=btn,
+    make("UICorner", { CornerRadius = UDim.new(0, 1), Parent = ind })
+    local lbl = make("TextLabel", {
+        Size = UDim2.new(1, -s(16), 1, 0), Position = UDim2.new(0, s(12), 0, 0),
+        BackgroundTransparency = 1, Text = text, TextColor3 = default and C.text or C.dim,
+        Font = Enum.Font.GothamSemibold, TextSize = s(11), TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd, Parent = btn,
     })
-    local tab={btn=btn,indicator=ind,lbl=lbl,page=page}
-    table.insert(tabData,tab)
+    local tab = { btn = btn, indicator = ind, lbl = lbl, page = page }
+    table.insert(tabData, tab)
     btn.MouseButton1Click:Connect(function()
         if activeTab then
-            activeTab.indicator.Visible=false;activeTab.lbl.TextColor3=C.dim
-            activeTab.btn.BackgroundTransparency=1;activeTab.page.Visible=false
+            activeTab.indicator.Visible = false; activeTab.lbl.TextColor3 = C.dim
+            activeTab.btn.BackgroundTransparency = 1; activeTab.page.Visible = false
         end
-        activeTab=tab;tab.indicator.Visible=true;tab.lbl.TextColor3=C.text
-        tw(tab.btn,0.15,{BackgroundTransparency=0});tab.btn.BackgroundColor3=C.panel
-        tab.page.Visible=true
+        activeTab = tab; tab.indicator.Visible = true; tab.lbl.TextColor3 = C.text
+        tw(tab.btn, 0.15, { BackgroundTransparency = 0 }); tab.btn.BackgroundColor3 = C.panel
+        tab.page.Visible = true
     end)
-    if default then activeTab=tab;page.Visible=true end
+    if default then activeTab = tab; page.Visible = true end
 end
 
 makeTabBtn("VOIDSPAM", pageVoid,     1, true)
@@ -575,835 +492,317 @@ makeTabBtn("ORBIT",    pageOrbit,    2, false)
 makeTabBtn("SETTINGS", pageSettings, 3, false)
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
--- ORBIT TAB (unchanged from v3)
+-- ORBIT TAB
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-makeSection(pageOrbit,"Orbit Target",1)
-local orbitSelDisp=make("Frame",{Size=UDim2.new(1,0,0,s(34)),BackgroundColor3=C.elem,BorderSizePixel=0,LayoutOrder=2,Parent=pageOrbit})
-make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=orbitSelDisp})
-local orbitSelText=make("TextLabel",{
-    Size=UDim2.new(1,-s(16),1,0),Position=UDim2.new(0,s(10),0,0),
-    BackgroundTransparency=1,Text="Orbit: None",TextColor3=C.dim,
-    Font=Enum.Font.GothamSemibold,TextSize=FONT_MAIN,TextXAlignment=Enum.TextXAlignment.Left,
-    TextTruncate=Enum.TextTruncate.AtEnd,Parent=orbitSelDisp,
+makeSection(pageOrbit, "Orbit Target", 1)
+
+local orbitSelDisp = make("Frame", { Size = UDim2.new(1, 0, 0, s(34)), BackgroundColor3 = C.elem, BorderSizePixel = 0, LayoutOrder = 2, Parent = pageOrbit })
+make("UICorner", { CornerRadius = UDim.new(0, s(3)), Parent = orbitSelDisp })
+local orbitSelText = make("TextLabel", {
+    Size = UDim2.new(1, -s(16), 1, 0), Position = UDim2.new(0, s(10), 0, 0),
+    BackgroundTransparency = 1, Text = "Orbit: None", TextColor3 = C.dim,
+    Font = Enum.Font.GothamSemibold, TextSize = FONT_MAIN, TextXAlignment = Enum.TextXAlignment.Left,
+    TextTruncate = Enum.TextTruncate.AtEnd, Parent = orbitSelDisp,
 })
 
-local orbitPL=make("Frame",{Name="OPL",Size=UDim2.new(1,0,0,0),BackgroundTransparency=1,AutomaticSize=Enum.AutomaticSize.Y,LayoutOrder=3,Parent=pageOrbit})
-make("UIListLayout",{SortOrder=Enum.SortOrder.Name,Padding=UDim.new(0,s(3)),Parent=orbitPL})
+local orbitPL = make("Frame", { Name = "OPL", Size = UDim2.new(1, 0, 0, 0), BackgroundTransparency = 1, AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = 3, Parent = pageOrbit })
+make("UIListLayout", { SortOrder = Enum.SortOrder.Name, Padding = UDim.new(0, s(3)), Parent = orbitPL })
 
 local function selectOrbitTarget(p)
-    CFG.OrbitTarget=p
-    orbitSelText.Text=p and ("Orbit: "..p.Name) or "Orbit: None"
-    orbitSelText.TextColor3=p and C.accentL or C.dim
+    CFG.OrbitTarget = p
+    orbitSelText.Text = p and ("Orbit: " .. p.Name) or "Orbit: None"
+    orbitSelText.TextColor3 = p and C.accentL or C.dim
 end
 
 local function addOrbitPE(p)
-    if p==LP or orbitPL:FindFirstChild("OE_"..p.Name) then return end
-    local e=make("Frame",{Name="OE_"..p.Name,Size=UDim2.new(1,0,0,s(32)),BackgroundColor3=C.elem,BorderSizePixel=0,Parent=orbitPL})
-    make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=e})
-    make("TextLabel",{Size=UDim2.new(1,-s(70),1,0),Position=UDim2.new(0,s(10),0,0),BackgroundTransparency=1,Text=p.DisplayName,TextColor3=C.text,Font=Enum.Font.Gotham,TextSize=s(11),TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd,Parent=e})
-    local sb=make("TextButton",{Size=UDim2.new(0,s(50),0,s(22)),Position=UDim2.new(1,-s(58),0.5,-s(11)),BackgroundColor3=C.accent,BorderSizePixel=0,Text="SET",TextColor3=C.text,Font=Enum.Font.GothamBold,TextSize=FONT_TINY,Parent=e})
-    make("UICorner",{CornerRadius=UDim.new(0,s(2)),Parent=sb})
+    if p == LP or orbitPL:FindFirstChild("OE_" .. p.Name) then return end
+    local e = make("Frame", { Name = "OE_" .. p.Name, Size = UDim2.new(1, 0, 0, s(32)), BackgroundColor3 = C.elem, BorderSizePixel = 0, Parent = orbitPL })
+    make("UICorner", { CornerRadius = UDim.new(0, s(3)), Parent = e })
+    make("TextLabel", {
+        Size = UDim2.new(1, -s(70), 1, 0), Position = UDim2.new(0, s(10), 0, 0),
+        BackgroundTransparency = 1, Text = p.DisplayName, TextColor3 = C.text,
+        Font = Enum.Font.Gotham, TextSize = s(11), TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd, Parent = e,
+    })
+    local sb = make("TextButton", {
+        Size = UDim2.new(0, s(50), 0, s(22)), Position = UDim2.new(1, -s(58), 0.5, -s(11)),
+        BackgroundColor3 = C.accent, BorderSizePixel = 0, Text = "SET", TextColor3 = C.text,
+        Font = Enum.Font.GothamBold, TextSize = FONT_TINY, Parent = e,
+    })
+    make("UICorner", { CornerRadius = UDim.new(0, s(2)), Parent = sb })
     sb.MouseButton1Click:Connect(function() selectOrbitTarget(p) end)
 end
 
 local function remOrbitPE(p)
-    local e=orbitPL:FindFirstChild("OE_"..p.Name);if e then e:Destroy() end
-    if CFG.OrbitTarget==p then selectOrbitTarget(nil) end
+    local e = orbitPL:FindFirstChild("OE_" .. p.Name); if e then e:Destroy() end
+    if CFG.OrbitTarget == p then selectOrbitTarget(nil) end
 end
 
-for _,p in pairs(Players:GetPlayers()) do addOrbitPE(p) end
+for _, p in pairs(Players:GetPlayers()) do addOrbitPE(p) end
 Players.PlayerAdded:Connect(addOrbitPE)
 Players.PlayerRemoving:Connect(remOrbitPE)
 
-makeButton(pageOrbit,"DESELECT",C.off,4,function() selectOrbitTarget(nil) end)
-makeSection(pageOrbit,"Orbit Controls",5)
-local orbitToggle=makeToggle(pageOrbit,"Enable Orbit",false,6,function(state)
-    CFG.Orbit.On=state
-    if state and not CFG.OrbitTarget then updateStatus("Orbit ON — no target!",C.red)
-    elseif state then updateStatus("Orbiting "..CFG.OrbitTarget.Name,C.green)
-    else updateStatus("Idle",C.dim) end
-end)
-makeSection(pageOrbit,"Parameters",7)
-makeSlider(pageOrbit,"Radius",3,35,CFG.Orbit.Radius,1,8,function(v) CFG.Orbit.Radius=v end)
-makeSlider(pageOrbit,"Speed",0.5,10,CFG.Orbit.Speed,0.5,9,function(v) CFG.Orbit.Speed=v end)
-makeSlider(pageOrbit,"Height",-20,20,CFG.Orbit.Height,1,10,function(v) CFG.Orbit.Height=v end)
+makeButton(pageOrbit, "DESELECT", C.off, 4, function() selectOrbitTarget(nil) end)
 
---━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
--- ★★★ VOIDSPAM TAB — ANTI UNNAMED ENHANCEMENTS ★★★
---━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+makeSection(pageOrbit, "Orbit Controls", 5)
 
--- ── HEADER ──
-makeSection(pageVoid, "Self-Applied Desync", 1)
-
-make("TextLabel",{
-    Size=UDim2.new(1,0,0,s(28)),BackgroundColor3=Color3.fromRGB(20,12,30),
-    BorderSizePixel=0,
-    Text="  ANTI-UNNAMED ENHANCEMENTS MODE",
-    TextColor3=C.purple,Font=Enum.Font.GothamBold,TextSize=FONT_TINY,
-    TextXAlignment=Enum.TextXAlignment.Left,LayoutOrder=2,Parent=pageVoid,
-})
-
--- ── MAIN TOGGLE ──
-local voidToggle = makeToggle(pageVoid, "Enable Voidspam", false, 3, function(state)
-    CFG.Void.On = state
-    VoidState.tpCount = 0
-    VoidState.tpsTracker = {}
-    VoidState.phase = 0
-    VoidState.accumulator = 0
-    VoidState.clock = 0
-    VoidState.atHome = true
-    VoidState.active = false
-    VoidState.skippedFrames = 0
-    VoidState.cycleID = 0
-    VoidState.homeShuffleAngle = 0
-    if state then
-        updateStatus("DESYNC ▸ ANTI-UE ▸ " .. CFG.Void.Method, C.red)
+local orbitToggle = makeToggle(pageOrbit, "Enable Orbit", false, 6, function(state)
+    CFG.Orbit.On = state
+    if state and not CFG.OrbitTarget then
+        updateStatus("Orbit ON — no target!", C.red)
+    elseif state then
+        updateStatus("Orbiting " .. CFG.OrbitTarget.Name, C.green)
     else
         updateStatus("Idle", C.dim)
     end
 end)
 
--- ── METHOD ──
-makeSection(pageVoid, "OOB Bypass Method", 4)
-
-makeModeSelect(pageVoid,
-    {"OPT 1: 2K TP", "OPT 2: SCATTER"},
-    "OPT 1: 2K TP", 5,
-    function(mode)
-        CFG.Void.Method = mode:find("2K") and "2KTP" or "Scatter"
-        if CFG.Void.On then updateStatus("DESYNC ▸ ANTI-UE ▸ "..CFG.Void.Method, C.red) end
-    end
-)
-
--- ── JITTER PATTERN ──
-makeSection(pageVoid, "Jitter Pattern", 6)
-
-makeModeSelect(pageVoid,
-    {"ADAPT","AGGRO","ERRATIC","SPIRAL"},
-    "ADAPT", 7,
-    function(mode)
-        local map={ADAPT="Adaptive",AGGRO="Aggressive",ERRATIC="Erratic",SPIRAL="Spiral"}
-        CFG.Void.Mode=map[mode] or "Adaptive"
-    end
-)
-
--- ═══════════════════════════════════════════════
--- ANTI-UE SECTION — COUNTERS THEIR SPECIFIC FEATURES
--- ═══════════════════════════════════════════════
-
-makeSection(pageVoid, "▼ Anti-UE: Hide/Attack Timer", 8)
-
-make("TextLabel",{
-    Size=UDim2.new(1,0,0,s(44)),BackgroundColor3=Color3.fromRGB(14,14,22),
-    BorderSizePixel=0,
-    Text="  Their ragebot cycles Hide→Attack\n  We cycle FASTER than their 0.01s minimum\n  Their Attack window = our escape window",
-    TextColor3=C.dim,Font=Enum.Font.Gotham,TextSize=s(9),
-    TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Center,
-    TextWrapped=true,LayoutOrder=9,Parent=pageVoid,
-})
-
-makeSlider(pageVoid, "Pulse Rate", 0.003, 0.04, CFG.Void.PulseRate, 0.001, 10, function(v)
-    CFG.Void.PulseRate = v
-end)
-
--- ── ANTI-UE: GHOST STACKING ──
-makeSection(pageVoid, "▼ Anti-UE: Ghost Stack (Attention Range)", 11)
-
-make("TextLabel",{
-    Size=UDim2.new(1,0,0,s(38)),BackgroundColor3=Color3.fromRGB(14,14,22),
-    BorderSizePixel=0,
-    Text="  Multiple CFrame sets per frame = ghost hitboxes\n  Their Attention Range locks wrong ghost\n  More ghosts = more confusion",
-    TextColor3=C.dim,Font=Enum.Font.Gotham,TextSize=s(9),
-    TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Center,
-    TextWrapped=true,LayoutOrder=12,Parent=pageVoid,
-})
-
-makeToggle(pageVoid, "Ghost Stacking", CFG.Void.GhostStack, 13, function(v)
-    CFG.Void.GhostStack = v
-end)
-
-makeSlider(pageVoid, "Ghost Count", 2, 8, CFG.Void.GhostCount, 1, 14, function(v)
-    CFG.Void.GhostCount = v
-end)
-
-makeSlider(pageVoid, "Range Escape", 5, 60, CFG.Void.RangeEscape, 1, 15, function(v)
-    CFG.Void.RangeEscape = v
-end)
-
--- ── ANTI-UE: PROJECTILE MIMIC ──
-makeSection(pageVoid, "▼ Anti-UE: Anti Projectile Mimic", 16)
-
-make("TextLabel",{
-    Size=UDim2.new(1,0,0,s(44)),BackgroundColor3=Color3.fromRGB(14,14,22),
-    BorderSizePixel=0,
-    Text="  Projectile Mimic predicts your trajectory\n  We spoof velocity so prediction aims wrong\n  Zero correlation between frames = no trajectory",
-    TextColor3=C.dim,Font=Enum.Font.Gotham,TextSize=s(9),
-    TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Center,
-    TextWrapped=true,LayoutOrder=17,Parent=pageVoid,
-})
-
-makeToggle(pageVoid, "Anti-Projectile", CFG.Void.AntiProjectile, 18, function(v)
-    CFG.Void.AntiProjectile = v
-end)
-
-makeToggle(pageVoid, "Velocity Spoof", CFG.Void.VelocitySpoof, 19, function(v)
-    CFG.Void.VelocitySpoof = v
-end)
-
--- ── ANTI-UE: TIMING DESYNC ──
-makeSection(pageVoid, "▼ Anti-UE: Timing Desync", 20)
-
-make("TextLabel",{
-    Size=UDim2.new(1,0,0,s(38)),BackgroundColor3=Color3.fromRGB(14,14,22),
-    BorderSizePixel=0,
-    Text="  Randomly skips HOME return frames\n  Their ragebot can't predict WHEN you're home\n  Breaks Hide/Attack timing sync",
-    TextColor3=C.dim,Font=Enum.Font.Gotham,TextSize=s(9),
-    TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Center,
-    TextWrapped=true,LayoutOrder=21,Parent=pageVoid,
-})
-
-makeToggle(pageVoid, "Timing Desync", CFG.Void.TimingDesync, 22, function(v)
-    CFG.Void.TimingDesync = v
-end)
-
-makeSlider(pageVoid, "Skip Chance %", 10, 65, CFG.Void.SkipChance, 5, 23, function(v)
-    CFG.Void.SkipChance = v
-end)
-
--- ── ANTI-UE: HOME SHUFFLE ──
-makeSection(pageVoid, "▼ Anti-UE: Home Shuffle", 24)
-
-make("TextLabel",{
-    Size=UDim2.new(1,0,0,s(30)),BackgroundColor3=Color3.fromRGB(14,14,22),
-    BorderSizePixel=0,
-    Text="  Home position shifts every cycle\n  Even when you RETURN you're not same spot",
-    TextColor3=C.dim,Font=Enum.Font.Gotham,TextSize=s(9),
-    TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Center,
-    TextWrapped=true,LayoutOrder=25,Parent=pageVoid,
-})
-
-makeToggle(pageVoid, "Home Shuffle", CFG.Void.HomeShuffle, 26, function(v)
-    CFG.Void.HomeShuffle = v
-end)
-
-makeSlider(pageVoid, "Shuffle Range", 1, 10, CFG.Void.HomeShuffleRange, 0.5, 27, function(v)
-    CFG.Void.HomeShuffleRange = v
-end)
-
--- ── CORE SLIDERS ──
-makeSection(pageVoid, "Core Parameters", 28)
-
-makeSlider(pageVoid, "TP Distance", 500, 3000, CFG.Void.TPDistance, 100, 29, function(v)
-    CFG.Void.TPDistance = v
-end)
-
-makeSlider(pageVoid, "Desync Intensity", 1, 5, CFG.Void.DesyncIntensity, 1, 30, function(v)
-    CFG.Void.DesyncIntensity = v
-end)
-
-makeSlider(pageVoid, "Y Jitter", 5, 200, CFG.Void.YJitter, 5, 31, function(v)
-    CFG.Void.YJitter = v
-end)
-
-makeSlider(pageVoid, "XZ Jitter", 3, 60, CFG.Void.XZJitter, 1, 32, function(v)
-    CFG.Void.XZJitter = v
-end)
-
-makeSlider(pageVoid, "Spiral Radius", 2, 30, CFG.Void.SpiralRad, 1, 33, function(v)
-    CFG.Void.SpiralRad = v
-end)
-
-makeSlider(pageVoid, "Spiral Speed", 1, 20, CFG.Void.SpiralSpd, 0.5, 34, function(v)
-    CFG.Void.SpiralSpd = v
-end)
-
--- ── LIVE COMBAT MONITOR ──
-makeSection(pageVoid, "Combat Monitor", 35)
-
-local monFrame = make("Frame",{
-    Size=UDim2.new(1,0,0,s(120)),BackgroundColor3=Color3.fromRGB(12,12,18),
-    BorderSizePixel=0,LayoutOrder=36,Parent=pageVoid,
-})
-make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=monFrame})
-make("UIStroke",{Color=C.border,Thickness=1,Parent=monFrame})
-
-local monMethodV = makeDisplayBox(monFrame, "METHOD",  "—",    C.cyan,   1)
-local monTPSV    = makeDisplayBox(monFrame, "TPS",     "0",    C.green,  2)
-local monGhostsV = makeDisplayBox(monFrame, "GHOSTS",  "0",    C.purple, 3)
-local monSkipsV  = makeDisplayBox(monFrame, "SKIPPED", "0",    C.orange, 4)
-
--- Position these manually
-monMethodV.Parent.Position = UDim2.new(0, s(6), 0, s(4))
-monMethodV.Parent.Size     = UDim2.new(0.48, -s(6), 0, s(22))
-monTPSV.Parent.Position    = UDim2.new(0.5, s(3), 0, s(4))
-monTPSV.Parent.Size        = UDim2.new(0.48, -s(6), 0, s(22))
-monGhostsV.Parent.Position = UDim2.new(0, s(6), 0, s(30))
-monGhostsV.Parent.Size     = UDim2.new(0.48, -s(6), 0, s(22))
-monSkipsV.Parent.Position  = UDim2.new(0.5, s(3), 0, s(30))
-monSkipsV.Parent.Size      = UDim2.new(0.48, -s(6), 0, s(22))
-
--- Counter status line
-local monAntiHideV = make("TextLabel",{
-    Size=UDim2.new(1,-s(12),0,s(14)),Position=UDim2.new(0,s(8),0,s(56)),
-    BackgroundTransparency=1,Text="● ANTI-HIDE/ATTACK: —",TextColor3=C.dim,
-    Font=Enum.Font.GothamBold,TextSize=s(9),TextXAlignment=Enum.TextXAlignment.Left,Parent=monFrame,
-})
-local monAntiProjV = make("TextLabel",{
-    Size=UDim2.new(1,-s(12),0,s(14)),Position=UDim2.new(0,s(8),0,s(70)),
-    BackgroundTransparency=1,Text="● ANTI-PROJ MIMIC: —",TextColor3=C.dim,
-    Font=Enum.Font.GothamBold,TextSize=s(9),TextXAlignment=Enum.TextXAlignment.Left,Parent=monFrame,
-})
-local monAntiRangeV = make("TextLabel",{
-    Size=UDim2.new(1,-s(12),0,s(14)),Position=UDim2.new(0,s(8),0,s(84)),
-    BackgroundTransparency=1,Text="● ANTI-ATTN RANGE: —",TextColor3=C.dim,
-    Font=Enum.Font.GothamBold,TextSize=s(9),TextXAlignment=Enum.TextXAlignment.Left,Parent=monFrame,
-})
-local monAntiVoidV = make("TextLabel",{
-    Size=UDim2.new(1,-s(12),0,s(14)),Position=UDim2.new(0,s(8),0,s(98)),
-    BackgroundTransparency=1,Text="● ANTI-THEIR VOID: —",TextColor3=C.dim,
-    Font=Enum.Font.GothamBold,TextSize=s(9),TextXAlignment=Enum.TextXAlignment.Left,Parent=monFrame,
-})
-
--- ── WARNING ──
-make("TextLabel",{
-    Size=UDim2.new(1,0,0,s(48)),BackgroundColor3=Color3.fromRGB(35,10,10),
-    BorderSizePixel=0,
-    Text="  BEATS UNNAMED ENHANCEMENTS:\n  ✓ Voidspam  ✓ Hide/Attack  ✓ Proj Mimic\n  ✓ Shoot Attention Range 1-2",
-    TextColor3=C.red,Font=Enum.Font.GothamBold,TextSize=s(9),
-    TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Center,
-    LayoutOrder=37,Parent=pageVoid,
-})
+makeSection(pageOrbit, "Parameters", 7)
+makeSlider(pageOrbit, "Radius", 3, 35, CFG.Orbit.Radius, 1, 8, function(v) CFG.Orbit.Radius = v end)
+makeSlider(pageOrbit, "Speed", 0.5, 10, CFG.Orbit.Speed, 0.5, 9, function(v) CFG.Orbit.Speed = v end)
+makeSlider(pageOrbit, "Height", -20, 20, CFG.Orbit.Height, 1, 10, function(v) CFG.Orbit.Height = v end)
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
--- SETTINGS TAB (unchanged)
---━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-makeSection(pageSettings,"General",1)
-make("TextLabel",{
-    Size=UDim2.new(1,0,0,s(34)),BackgroundColor3=C.elem,BorderSizePixel=0,
-    Text=IsMobile and "  Toggle: Floating [R] button" or "  Toggle: RCtrl / [R] button",
-    TextColor3=C.text,Font=Enum.Font.Gotham,TextSize=s(12),
-    TextXAlignment=Enum.TextXAlignment.Left,LayoutOrder=2,Parent=pageSettings,
-})
-make("TextLabel",{
-    Size=UDim2.new(1,0,0,s(28)),BackgroundColor3=C.elem,BorderSizePixel=0,
-    Text="  Device: "..(IsMobile and "MOBILE" or "PC"),
-    TextColor3=IsMobile and C.green or C.accent,Font=Enum.Font.GothamSemibold,
-    TextSize=s(12),TextXAlignment=Enum.TextXAlignment.Left,LayoutOrder=3,Parent=pageSettings,
-})
-makeButton(pageSettings,"STOP ALL",C.red,4,function()
-    CFG.Orbit.On=false;CFG.Void.On=false
-    orbitToggle.setState(false);voidToggle.setState(false)
-    if VoidState.savedCFrame then
-        local mr=LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
-        if mr then mr.CFrame=VoidState.savedCFrame end
-    end
-    updateStatus("All stopped",C.dim)
-end)
-makeSection(pageSettings,"Script",5)
-makeButton(pageSettings,"DESTROY SCRIPT",C.red,6,function()
-    CFG.Orbit.On=false;CFG.Void.On=false
-    if VoidState.savedCFrame then
-        local mr=LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
-        if mr then mr.CFrame=VoidState.savedCFrame end
-    end
-    for _,c in pairs(ActiveConnections) do pcall(function() c:Disconnect() end) end
-    gui:Destroy()
-end)
-makeSection(pageSettings,"Team",7)
-make("TextLabel",{
-    Size=UDim2.new(1,0,0,s(55)),BackgroundColor3=C.elem,BorderSizePixel=0,
-    Text="  [P1] Builder\n  [P2] Tester & Tweaker\n  [P3] Polish & Deploy",
-    TextColor3=C.dim,Font=Enum.Font.Gotham,TextSize=FONT_TINY,
-    TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Top,
-    LayoutOrder=8,Parent=pageSettings,
-})
-
+-- ★ VOIDSPAM TAB — CLEAN RANDOM TP ★
 --━━━━━━━���━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
--- CORE: ORBIT (unchanged)
---━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-local orbitAngle=0
-table.insert(ActiveConnections,RunService.Heartbeat:Connect(function(dt)
-    if not CFG.Orbit.On or CFG.Void.On or not CFG.OrbitTarget then return end
-    local mc=LP.Character;if not mc then return end
-    local mr=mc:FindFirstChild("HumanoidRootPart");if not mr then return end
-    local tc=CFG.OrbitTarget.Character;if not tc then return end
-    local tr=tc:FindFirstChild("HumanoidRootPart");if not tr then return end
-    local mh=mc:FindFirstChildOfClass("Humanoid")
-    if mh and mh.Health<=0 then return end
-    orbitAngle=orbitAngle+(CFG.Orbit.Speed*dt)
-    if orbitAngle>math.pi*2 then orbitAngle=orbitAngle-math.pi*2 end
-    local tp=tr.Position
-    mr.CFrame=CFrame.new(tp+Vector3.new(math.cos(orbitAngle)*CFG.Orbit.Radius,CFG.Orbit.Height,math.sin(orbitAngle)*CFG.Orbit.Radius),tp)
-end))
+makeSection(pageVoid, "Continuous Teleport", 1)
 
---━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
--- ★★★ CORE: ANTI-UE VOIDSPAM ENGINE ★★★
---━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+make("TextLabel", {
+    Size = UDim2.new(1, 0, 0, s(28)),
+    BackgroundColor3 = Color3.fromRGB(18, 28, 18),
+    BorderSizePixel = 0,
+    Text = "  Teleports you randomly — no target needed",
+    TextColor3 = C.green, Font = Enum.Font.GothamSemibold, TextSize = FONT_TINY,
+    TextXAlignment = Enum.TextXAlignment.Left, LayoutOrder = 2, Parent = pageVoid,
+})
 
---[[
- ┌─────────────────────────────────────────────────────────────────┐
- │                UNNAMED ENHANCEMENTS RAGEBOT                     │
- │                                                                 │
- │  FEATURE           │  WHAT IT DOES           │  OUR COUNTER     │
- │ ───────────────────┼─────────────────────────┼──────────────────│
- │ Voidspam           │ They TP away & back     │ We cycle 2x     │
- │ (their own)        │ to dodge our shots       │ faster than      │
- │                    │                          │ them + ghosts    │
- │ ───────────────────┼─────────────────────────┼──────────────────│
- │ Hide: 0.01s-1s     │ How long they stay       │ Our pulse =      │
- │                    │ in void position         │ 0.003s-0.04s     │
- │                    │                          │ ALWAYS faster    │
- │ ───────────────────┼─────────────────────────┼──────────────────│
- │ Attack: 0.01s-1s   │ How long they come       │ Timing Desync    │
- │                    │ back to shoot            │ randomizes WHEN  │
- │                    │                          │ we're "home"     │
- │ ───────────────────┼─────────────────────────┼──────────────────│
- │ Projectile Mimic   │ Predicts trajectory      │ Velocity Spoof   │
- │                    │ of our hitbox movement   │ + zero-correl    │
- │                    │ to aim projectiles       │ random positions │
- │ ───────────────────┼─────────────────────────┼──────────────────│
- │ Shoot Attn Range   │ Lock-on range (1 or 2)   │ Ghost positions  │
- │ 1 to 2             │ How far they can target  │ at Range Escape  │
- │                    │                          │ distance + home  │
- │                    │                          │ shuffle           │
- └─────────────────────────────────────────────────────────────────┘
-]]
+-- ── MAIN TOGGLE ──
 
--- ── INTENSITY PRESETS ──
+local voidToggle = makeToggle(pageVoid, "Enable Voidspam", false, 3, function(state)
+    CFG.Void.On = state
 
-local IntensityScales = {
-    [1] = { ghostMul = 0.5, jitMul = 0.7, spiralMul = 0.8 },
-    [2] = { ghostMul = 0.8, jitMul = 1.0, spiralMul = 1.0 },
-    [3] = { ghostMul = 1.0, jitMul = 1.3, spiralMul = 1.2 },
-    [4] = { ghostMul = 1.3, jitMul = 1.7, spiralMul = 1.5 },
-    [5] = { ghostMul = 1.6, jitMul = 2.2, spiralMul = 2.0 },
-}
-
-local function getIntensity()
-    return IntensityScales[CFG.Void.DesyncIntensity] or IntensityScales[3]
-end
-
--- ── MODE MULTIPLIERS ──
-
-local function getModeM()
-    local m = CFG.Void.Mode
-    if m == "Aggressive" then     return 2.2, 2.8, 1.5
-    elseif m == "Erratic" then    return 1.8, 2.0, 0.3
-    elseif m == "Spiral" then     return 0.8, 1.0, 2.5
-    else                          return 1.4, 1.6, 1.2  end -- Adaptive
-end
-
--- ── ANTI-PROJECTILE: VELOCITY DECORRELATOR ──
--- Creates a fake velocity vector that has ZERO correlation to actual movement
--- Projectile Mimic uses velocity to lead shots — spoofed velocity = missed shots
-
-local function spoofVelocity(root)
-    if not CFG.Void.VelocitySpoof then return end
-    if not root then return end
-
-    -- Generate completely random velocity direction
-    local fakeVel = Vector3.new(
-        (rng() - 0.5) * 200,
-        (rng() - 0.5) * 100,
-        (rng() - 0.5) * 200
-    )
-    VoidState.spoofedVel = fakeVel
-
-    -- Apply to the root's AssemblyLinearVelocity
-    -- This makes any velocity-reading resolver get garbage data
-    pcall(function()
-        root.AssemblyLinearVelocity = fakeVel
-    end)
-end
-
--- ── GHOST POSITION GENERATOR ──
--- Creates N decoy positions spread around to confuse Attention Range targeting
-
-local function generateGhostPositions(origin, t, count)
-    local positions = {}
-    local iScale = getIntensity()
-    local escRange = CFG.Void.RangeEscape * iScale.ghostMul
-
-    for i = 1, count do
-        -- Each ghost at a unique angle (golden angle spacing)
-        local angle = i * 2.399 + t * (0.5 + i * 0.13)
-
-        -- Varying distances — some within range, some outside
-        -- This forces their Attention Range to flip between ghosts
-        local dist
-        if i % 3 == 0 then
-            -- Inside range (bait ghost)
-            dist = rng(1, escRange * 0.4)
-        else
-            -- Outside range (escape ghost)
-            dist = escRange + rng(0, escRange * 0.5)
+    if state then
+        -- Start teleport loop
+        if voidLoop then
+            voidLoop:Disconnect()
+            voidLoop = nil
         end
 
-        -- Y: unique incommensurate frequency per ghost
-        local yOff = math.sin(t * (5.3 + i * 4.1)) * CFG.Void.YJitter * 0.5
-                   + (rng() - 0.5) * CFG.Void.YJitter * 0.4
-
-        local pos = Vector3.new(
-            origin.X + math.cos(angle) * dist + (rng() - 0.5) * 4,
-            origin.Y + yOff,
-            origin.Z + math.sin(angle) * dist + (rng() - 0.5) * 4
-        )
-        table.insert(positions, pos)
-    end
-
-    return positions
-end
-
--- ── AWAY POSITION CALCULATOR (enhanced for anti-UE) ──
-
-local function calcAwayPos(origin, t, phaseIdx)
-    local dist    = CFG.Void.TPDistance
-    local yJit    = CFG.Void.YJitter
-    local xzJit   = CFG.Void.XZJitter
-    local spiralR = CFG.Void.SpiralRad
-    local spiralS = CFG.Void.SpiralSpd
-
-    local yM, xzM, spM = getModeM()
-    local iScale = getIntensity()
-
-    local effY   = yJit  * yM  * iScale.jitMul
-    local effXZ  = xzJit * xzM * iScale.jitMul
-    local effSpR = spiralR * spM * iScale.spiralMul
-    local effSpS = spiralS * spM
-
-    -- Direction: golden angle + time rotation
-    local baseAngle = phaseIdx * 2.399 + t * 0.37 + rng() * 0.3
-
-    local farX = origin.X + math.cos(baseAngle) * dist
-    local farZ = origin.Z + math.sin(baseAngle) * dist
-
-    -- Y: 5 incommensurate frequencies
-    local yOff = math.sin(t * 7.3) * effY * 0.25
-              + math.sin(t * 13.7) * effY * 0.25
-              + math.sin(t * 23.1) * effY * 0.15
-              + math.sin(t * 37.9) * effY * 0.15
-              + math.sin(t * 53.3) * effY * 0.1
-              + (rng() - 0.5) * effY * 0.8
-
-    -- Anti-projectile: NO velocity correlation
-    -- Position offset is random PER FRAME, not based on previous position
-    if CFG.Void.AntiProjectile then
-        yOff = yOff + (rng() - 0.5) * effY * 1.5
-        farX = farX + (rng() - 0.5) * effXZ * 3
-        farZ = farZ + (rng() - 0.5) * effXZ * 3
-    end
-
-    -- Spiral at destination
-    local spiral = t * effSpS + phaseIdx * 1.047
-    local sX = math.cos(spiral) * effSpR
-    local sZ = math.sin(spiral) * effSpR
-
-    -- Random jitter
-    local jX = (rng() - 0.5) * effXZ * 2
-    local jZ = (rng() - 0.5) * effXZ * 2
-
-    -- Mode-specific
-    local mode = CFG.Void.Mode
-    if mode == "Aggressive" then
-        jX = jX * 2.5; jZ = jZ * 2.5
-        yOff = yOff + (rng() > 0.5 and effY or -effY)
-    elseif mode == "Erratic" then
-        local rA = rng() * math.pi * 2
-        local rD = rng() * effXZ * 3
-        sX = math.cos(rA) * rD; sZ = math.sin(rA) * rD
-        yOff = (rng() - 0.5) * effY * 4
-    elseif mode == "Spiral" then
-        sX = sX + math.cos(t * effSpS * 1.7) * effSpR * 0.6
-        sZ = sZ + math.sin(t * effSpS * 1.7) * effSpR * 0.6
-    end
-
-    -- Micro
-    local mX = (rng() - 0.5) * 3.5
-    local mY = (rng() - 0.5) * 2.8
-    local mZ = (rng() - 0.5) * 3.5
-
-    return Vector3.new(farX + sX + jX + mX, origin.Y + yOff + mY, farZ + sZ + jZ + mZ)
-end
-
--- ── SCATTER POSITION (varying distance) ──
-
-local function calcScatterPos(origin, t, phaseIdx, distMul)
-    local baseDist = CFG.Void.TPDistance * distMul
-    local yJit  = CFG.Void.YJitter
-    local xzJit = CFG.Void.XZJitter
-    local yM, xzM, spM = getModeM()
-    local iScale = getIntensity()
-
-    local angle = phaseIdx * 2.399 + rng() * 0.8 + t * 0.2
-    local posX = origin.X + math.cos(angle) * baseDist
-    local posZ = origin.Z + math.sin(angle) * baseDist
-
-    local yOff = math.sin(t * 7.3 + phaseIdx) * yJit * yM * iScale.jitMul * 0.4
-              + math.sin(t * 17.1 + phaseIdx * 2) * yJit * yM * iScale.jitMul * 0.3
-              + (rng() - 0.5) * yJit * yM * iScale.jitMul
-
-    if CFG.Void.AntiProjectile then
-        yOff = yOff + (rng() - 0.5) * yJit * 1.5
-        posX = posX + (rng() - 0.5) * xzJit * 3
-        posZ = posZ + (rng() - 0.5) * xzJit * 3
-    end
-
-    local jX = (rng() - 0.5) * xzJit * xzM * iScale.jitMul * 2
-    local jZ = (rng() - 0.5) * xzJit * xzM * iScale.jitMul * 2
-
-    return Vector3.new(posX + jX + (rng()-0.5)*3, origin.Y + yOff + (rng()-0.5)*2, posZ + jZ + (rng()-0.5)*3)
-end
-
--- ── HOME POSITION WITH SHUFFLE ──
-
-local function getHomePosition(savedCFrame)
-    if not CFG.Void.HomeShuffle then
-        return savedCFrame
-    end
-
-    local range = CFG.Void.HomeShuffleRange
-
-    -- Rotate shuffle position each cycle
-    VoidState.homeShuffleAngle = VoidState.homeShuffleAngle + 0.7 + rng() * 0.5
-    local angle = VoidState.homeShuffleAngle
-    local dist  = rng(0.5, range)
-
-    local offset = Vector3.new(
-        math.cos(angle) * dist,
-        (rng() - 0.5) * range * 0.4,
-        math.sin(angle) * dist
-    )
-
-    return savedCFrame + offset
-end
-
--- ── TPS CALCULATOR ──
-
-local function calcTPS()
-    local now = tick()
-    table.insert(VoidState.tpsTracker, now)
-    while #VoidState.tpsTracker > 0 and (now - VoidState.tpsTracker[1]) > 1 do
-        table.remove(VoidState.tpsTracker, 1)
-    end
-    return #VoidState.tpsTracker
-end
-
--- ══════════════════════════════════════════════
--- MAIN HEARTBEAT — THE ENGINE
--- ══════════════════════════════════════════════
-
-local monitorTick = 0
-
-table.insert(ActiveConnections, RunService.Heartbeat:Connect(function(dt)
-    if not CFG.Void.On then
-        if VoidState.active and VoidState.savedCFrame then
-            local mr = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
-            if mr then mr.CFrame = VoidState.savedCFrame end
-        end
-        VoidState.active = false
-        VoidState.phase = 0
-        VoidState.accumulator = 0
-        return
-    end
-
-    local myChar = LP.Character
-    if not myChar then return end
-    local myRoot = myChar:FindFirstChild("HumanoidRootPart")
-    if not myRoot then return end
-    local myHum = myChar:FindFirstChildOfClass("Humanoid")
-    if myHum and myHum.Health <= 0 then
-        if VoidState.savedCFrame then myRoot.CFrame = VoidState.savedCFrame end
-        return
-    end
-
-    VoidState.active = true
-    VoidState.clock = VoidState.clock + dt
-    VoidState.accumulator = VoidState.accumulator + dt
-
-    if VoidState.accumulator < CFG.Void.PulseRate then return end
-    VoidState.accumulator = 0
-
-    local t = tick()
-    local origin = myRoot.Position
-
-    -- ─── VELOCITY SPOOF (every pulse) ───
-    if CFG.Void.VelocitySpoof then
-        spoofVelocity(myRoot)
-    end
-
-    -- ═══════════════════════
-    -- METHOD 1: 2K TP
-    -- ═══════════════════════
-    if CFG.Void.Method == "2KTP" then
-        local p = VoidState.phase % 6
-
-        if p == 0 then
-            -- ── SAVE HOME ──
-            VoidState.savedCFrame = myRoot.CFrame
-            VoidState.homeBase = myRoot.CFrame.Position
-            VoidState.cycleID = VoidState.cycleID + 1
-
-        elseif p == 1 or p == 3 or p == 5 then
-            -- ── AWAY PHASES (with ghost stacking) ──
-            local awayIdx = (p == 1 and 0) or (p == 3 and 1) or 2
-            local awayPos = calcAwayPos(VoidState.homeBase or origin, t, awayIdx)
-
-            -- Ghost stacking: set multiple CFrames before final
-            if CFG.Void.GhostStack then
-                local ghosts = generateGhostPositions(
-                    VoidState.homeBase or origin, t, CFG.Void.GhostCount
-                )
-                VoidState.ghostsThisFrame = #ghosts
-                for _, gPos in ipairs(ghosts) do
-                    myRoot.CFrame = CFrame.new(gPos)
-                end
-            end
-
-            -- Final position (this is what renders)
-            myRoot.CFrame = CFrame.new(awayPos)
-            VoidState.tpCount = VoidState.tpCount + 1
-            calcTPS()
-
-        elseif p == 2 or p == 4 then
-            -- ── HOME PHASES ──
-
-            -- Timing Desync: randomly SKIP going home
-            if CFG.Void.TimingDesync then
-                local roll = rngInt(1, 100)
-                if roll <= CFG.Void.SkipChance then
-                    -- SKIP: don't go home, go to another away position instead
-                    VoidState.skippedFrames = VoidState.skippedFrames + 1
-                    local extraAway = calcAwayPos(VoidState.homeBase or origin, t, rngInt(3, 8))
-
-                    if CFG.Void.GhostStack then
-                        local ghosts = generateGhostPositions(
-                            VoidState.homeBase or origin, t, math.max(2, CFG.Void.GhostCount - 1)
-                        )
-                        for _, gPos in ipairs(ghosts) do
-                            myRoot.CFrame = CFrame.new(gPos)
-                        end
-                    end
-
-                    myRoot.CFrame = CFrame.new(extraAway)
-                    VoidState.tpCount = VoidState.tpCount + 1
-                    calcTPS()
-
-                    VoidState.phase = VoidState.phase + 1
-                    return -- Skip home entirely
-                end
-            end
-
-            -- Normal home return (with shuffle)
-            if VoidState.savedCFrame then
-                -- Ghost stack at random positions before going home
-                if CFG.Void.GhostStack then
-                    local ghosts = generateGhostPositions(
-                        VoidState.homeBase or origin, t, math.max(2, CFG.Void.GhostCount - 1)
-                    )
-                    for _, gPos in ipairs(ghosts) do
-                        myRoot.CFrame = CFrame.new(gPos)
-                    end
-                end
-
-                local homeCF = getHomePosition(VoidState.savedCFrame)
-                myRoot.CFrame = homeCF
-            end
-        end
-
-        VoidState.phase = VoidState.phase + 1
-
-    -- ═══════════════════════
-    -- METHOD 2: SCATTER
-    -- ═══════════════════════
-    elseif CFG.Void.Method == "Scatter" then
-        local p = VoidState.phase % 10
-
-        if p == 0 then
-            -- SAVE
-            VoidState.savedCFrame = myRoot.CFrame
-            VoidState.homeBase = myRoot.CFrame.Position
-            VoidState.cycleID = VoidState.cycleID + 1
-
-        elseif p == 9 then
-            -- HOME RETURN
-            if CFG.Void.TimingDesync and rngInt(1, 100) <= CFG.Void.SkipChance then
-                -- Skip home — extra scatter instead
-                VoidState.skippedFrames = VoidState.skippedFrames + 1
-                local pos = calcScatterPos(VoidState.homeBase or origin, t, rngInt(6, 12), rng(0.4, 1.0))
-                if CFG.Void.GhostStack then
-                    local ghosts = generateGhostPositions(VoidState.homeBase or origin, t, CFG.Void.GhostCount)
-                    for _, gPos in ipairs(ghosts) do myRoot.CFrame = CFrame.new(gPos) end
-                end
-                myRoot.CFrame = CFrame.new(pos)
-                calcTPS()
-                VoidState.phase = VoidState.phase + 1
+        voidLoop = RunService.Heartbeat:Connect(function()
+            -- Safety check
+            if not character or not humanoidRootPart or not humanoidRootPart.Parent then
                 return
             end
 
-            if CFG.Void.GhostStack then
-                local ghosts = generateGhostPositions(VoidState.homeBase or origin, t, CFG.Void.GhostCount)
-                for _, gPos in ipairs(ghosts) do myRoot.CFrame = CFrame.new(gPos) end
-            end
-            local homeCF = getHomePosition(VoidState.savedCFrame)
-            myRoot.CFrame = homeCF
-
-        else
-            -- SCATTER PHASES (1-8)
-            local distMuls = {1.0, 0.6, 0.3, 1.0, 0.5, 0.8, 0.4, 0.9}
-            local dm = distMuls[p] or rng(0.3, 1.0)
-            local pos = calcScatterPos(VoidState.homeBase or origin, t, p, dm)
-
-            if CFG.Void.GhostStack then
-                local ghosts = generateGhostPositions(VoidState.homeBase or origin, t, CFG.Void.GhostCount)
-                VoidState.ghostsThisFrame = #ghosts
-                for _, gPos in ipairs(ghosts) do myRoot.CFrame = CFrame.new(gPos) end
+            local hum = character:FindFirstChildOfClass("Humanoid")
+            if hum and hum.Health <= 0 then
+                return
             end
 
-            myRoot.CFrame = CFrame.new(pos)
-            VoidState.tpCount = VoidState.tpCount + 1
-            calcTPS()
+            -- Get current position
+            local currentPosition = humanoidRootPart.Position
+
+            -- Pick random direction and distance
+            local randomAngle = math.random() * math.pi * 2
+            local randomDistance = math.random(CFG.Void.MinDistance, CFG.Void.MaxDistance)
+
+            -- Calculate new position
+            local newX = currentPosition.X + math.cos(randomAngle) * randomDistance
+            local newZ = currentPosition.Z + math.sin(randomAngle) * randomDistance
+            local newY = currentPosition.Y + CFG.Void.HeightBoost
+
+            -- Teleport
+            humanoidRootPart.CFrame = CFrame.new(newX, newY, newZ)
+
+            -- Delay between teleports
+            task.wait(CFG.Void.TeleportDelay)
+        end)
+
+        updateStatus("VOIDSPAM ACTIVE — TPing randomly", C.red)
+    else
+        -- Stop teleport loop
+        if voidLoop then
+            voidLoop:Disconnect()
+            voidLoop = nil
         end
 
-        VoidState.phase = VoidState.phase + 1
+        updateStatus("Idle", C.dim)
     end
+end)
 
-    -- ── UPDATE MONITOR (every 25 cycles) ──
-    monitorTick = monitorTick + 1
-    if monitorTick % 25 == 0 then
-        local method = CFG.Void.Method
-        monMethodV.Text = method == "2KTP" and "2K TELEPORT" or "SCATTER"
-        monMethodV.TextColor3 = method == "2KTP" and C.cyan or C.orange
+-- ── SLIDERS ──
 
-        local tps = #VoidState.tpsTracker
-        monTPSV.Text = tostring(tps) .. "/s"
-        monTPSV.TextColor3 = tps > 30 and C.green or tps > 15 and C.orange or C.red
+makeSection(pageVoid, "Distance", 4)
 
-        monGhostsV.Text = CFG.Void.GhostStack and (tostring(CFG.Void.GhostCount) .. "/frame") or "OFF"
-        monGhostsV.TextColor3 = CFG.Void.GhostStack and C.purple or C.dim
+makeSlider(pageVoid, "Min Distance", 100, 5000, CFG.Void.MinDistance, 100, 5, function(v)
+    CFG.Void.MinDistance = v
+end)
 
-        monSkipsV.Text = tostring(VoidState.skippedFrames)
-        monSkipsV.TextColor3 = CFG.Void.TimingDesync and C.orange or C.dim
+makeSlider(pageVoid, "Max Distance", 500, 10000, CFG.Void.MaxDistance, 100, 6, function(v)
+    CFG.Void.MaxDistance = v
+end)
 
-        -- Counter status indicators
-        local pulseMs = CFG.Void.PulseRate * 1000
-        monAntiHideV.Text = string.format("● ANTI-HIDE/ATTACK: %.1fms pulse (< their 10ms)", pulseMs)
-        monAntiHideV.TextColor3 = pulseMs < 10 and C.green or C.orange
+makeSection(pageVoid, "Timing", 7)
 
-        monAntiProjV.Text = "● ANTI-PROJ MIMIC: " .. (CFG.Void.AntiProjectile and "ACTIVE" or "OFF")
-            .. (CFG.Void.VelocitySpoof and " + VEL SPOOF" or "")
-        monAntiProjV.TextColor3 = CFG.Void.AntiProjectile and C.green or C.dim
+makeSlider(pageVoid, "Teleport Delay", 0.01, 1, CFG.Void.TeleportDelay, 0.01, 8, function(v)
+    CFG.Void.TeleportDelay = v
+end)
 
-        monAntiRangeV.Text = "● ANTI-ATTN RANGE: " .. (CFG.Void.GhostStack and (CFG.Void.GhostCount .. " ghosts") or "OFF")
-            .. " + " .. CFG.Void.RangeEscape .. "s escape"
-        monAntiRangeV.TextColor3 = CFG.Void.GhostStack and C.green or C.dim
+makeSection(pageVoid, "Height", 9)
 
-        monAntiVoidV.Text = "● ANTI-THEIR VOID: " .. tps .. " TPS"
-            .. (CFG.Void.TimingDesync and " + timing desync" or "")
-        monAntiVoidV.TextColor3 = tps > 20 and C.green or C.orange
+makeSlider(pageVoid, "Height Boost", 0, 500, CFG.Void.HeightBoost, 10, 10, function(v)
+    CFG.Void.HeightBoost = v
+end)
+
+-- ── LIVE MONITOR ──
+
+makeSection(pageVoid, "Live Info", 11)
+
+local monFrame = make("Frame", {
+    Size = UDim2.new(1, 0, 0, s(65)),
+    BackgroundColor3 = Color3.fromRGB(12, 12, 18),
+    BorderSizePixel = 0, LayoutOrder = 12, Parent = pageVoid,
+})
+make("UICorner", { CornerRadius = UDim.new(0, s(3)), Parent = monFrame })
+make("UIStroke", { Color = C.border, Thickness = 1, Parent = monFrame })
+
+local monStatusV = make("TextLabel", {
+    Size = UDim2.new(1, -s(16), 0, s(18)),
+    Position = UDim2.new(0, s(10), 0, s(6)),
+    BackgroundTransparency = 1, Text = "STATUS: IDLE", TextColor3 = C.dim,
+    Font = Enum.Font.GothamBold, TextSize = FONT_SMALL,
+    TextXAlignment = Enum.TextXAlignment.Left, Parent = monFrame,
+})
+
+local monDistV = make("TextLabel", {
+    Size = UDim2.new(1, -s(16), 0, s(16)),
+    Position = UDim2.new(0, s(10), 0, s(26)),
+    BackgroundTransparency = 1, Text = "RANGE: 500 - 5000 studs", TextColor3 = C.dim,
+    Font = Enum.Font.GothamBold, TextSize = FONT_TINY,
+    TextXAlignment = Enum.TextXAlignment.Left, Parent = monFrame,
+})
+
+local monDelayV = make("TextLabel", {
+    Size = UDim2.new(1, -s(16), 0, s(16)),
+    Position = UDim2.new(0, s(10), 0, s(42)),
+    BackgroundTransparency = 1, Text = "DELAY: 0.10s  |  HEIGHT: +100", TextColor3 = C.dim,
+    Font = Enum.Font.GothamBold, TextSize = FONT_TINY,
+    TextXAlignment = Enum.TextXAlignment.Left, Parent = monFrame,
+})
+
+-- Update monitor periodically
+task.spawn(function()
+    while gui.Parent do
+        if CFG.Void.On then
+            monStatusV.Text = "STATUS: ACTIVE"
+            monStatusV.TextColor3 = C.green
+        else
+            monStatusV.Text = "STATUS: IDLE"
+            monStatusV.TextColor3 = C.dim
+        end
+
+        monDistV.Text = "RANGE: " .. CFG.Void.MinDistance .. " - " .. CFG.Void.MaxDistance .. " studs"
+        monDistV.TextColor3 = CFG.Void.On and C.cyan or C.dim
+
+        monDelayV.Text = string.format("DELAY: %.2fs  |  HEIGHT: +%d", CFG.Void.TeleportDelay, CFG.Void.HeightBoost)
+        monDelayV.TextColor3 = CFG.Void.On and C.orange or C.dim
+
+        task.wait(0.5)
     end
+end)
+
+-- ── INFO ──
+
+makeInfo(pageVoid, "Teleports you to a random position within the distance range every cycle. Adjust delay for speed. Height boost lifts you above obstacles.", 13)
+
+make("TextLabel", {
+    Size = UDim2.new(1, 0, 0, s(28)),
+    BackgroundColor3 = Color3.fromRGB(40, 12, 12),
+    BorderSizePixel = 0,
+    Text = "  !! USE AT YOUR OWN RISK !!",
+    TextColor3 = C.red, Font = Enum.Font.GothamBold, TextSize = FONT_TINY,
+    TextXAlignment = Enum.TextXAlignment.Left, LayoutOrder = 14, Parent = pageVoid,
+})
+
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- SETTINGS TAB
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+makeSection(pageSettings, "General", 1)
+
+make("TextLabel", {
+    Size = UDim2.new(1, 0, 0, s(34)), BackgroundColor3 = C.elem, BorderSizePixel = 0,
+    Text = IsMobile and "  Toggle UI: Floating [R] button" or "  Toggle UI: RightControl / [R] button",
+    TextColor3 = C.text, Font = Enum.Font.Gotham, TextSize = s(12),
+    TextXAlignment = Enum.TextXAlignment.Left, LayoutOrder = 2, Parent = pageSettings,
+})
+
+make("TextLabel", {
+    Size = UDim2.new(1, 0, 0, s(28)), BackgroundColor3 = C.elem, BorderSizePixel = 0,
+    Text = "  Device: " .. (IsMobile and "MOBILE" or "PC"),
+    TextColor3 = IsMobile and C.green or C.accent, Font = Enum.Font.GothamSemibold,
+    TextSize = s(12), TextXAlignment = Enum.TextXAlignment.Left, LayoutOrder = 3, Parent = pageSettings,
+})
+
+makeButton(pageSettings, "STOP ALL", C.red, 4, function()
+    CFG.Orbit.On = false
+    CFG.Void.On = false
+    orbitToggle.setState(false)
+    voidToggle.setState(false)
+    if voidLoop then
+        voidLoop:Disconnect()
+        voidLoop = nil
+    end
+    updateStatus("All stopped", C.dim)
+end)
+
+makeSection(pageSettings, "Script", 5)
+
+makeButton(pageSettings, "DESTROY SCRIPT", C.red, 6, function()
+    CFG.Orbit.On = false
+    CFG.Void.On = false
+    if voidLoop then
+        voidLoop:Disconnect()
+        voidLoop = nil
+    end
+    for _, c in pairs(ActiveConnections) do pcall(function() c:Disconnect() end) end
+    gui:Destroy()
+end)
+
+makeSection(pageSettings, "Team", 7)
+
+make("TextLabel", {
+    Size = UDim2.new(1, 0, 0, s(55)), BackgroundColor3 = C.elem, BorderSizePixel = 0,
+    Text = "  [P1] Builder\n  [P2] Tester & Tweaker\n  [P3] Polish & Deploy",
+    TextColor3 = C.dim, Font = Enum.Font.Gotham, TextSize = FONT_TINY,
+    TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top,
+    LayoutOrder = 8, Parent = pageSettings,
+})
+
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- CORE: ORBIT
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+local orbitAngle = 0
+
+table.insert(ActiveConnections, RunService.Heartbeat:Connect(function(dt)
+    if not CFG.Orbit.On or CFG.Void.On or not CFG.OrbitTarget then return end
+    local mc = LP.Character; if not mc then return end
+    local mr = mc:FindFirstChild("HumanoidRootPart"); if not mr then return end
+    local tc = CFG.OrbitTarget.Character; if not tc then return end
+    local tr = tc:FindFirstChild("HumanoidRootPart"); if not tr then return end
+    local mh = mc:FindFirstChildOfClass("Humanoid")
+    if mh and mh.Health <= 0 then return end
+    orbitAngle = orbitAngle + (CFG.Orbit.Speed * dt)
+    if orbitAngle > math.pi * 2 then orbitAngle = orbitAngle - math.pi * 2 end
+    local tp = tr.Position
+    mr.CFrame = CFrame.new(tp + Vector3.new(
+        math.cos(orbitAngle) * CFG.Orbit.Radius,
+        CFG.Orbit.Height,
+        math.sin(orbitAngle) * CFG.Orbit.Radius
+    ), tp)
 end))
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1411,140 +810,48 @@ end))
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 closeBtn.MouseButton1Click:Connect(function()
-    CFG.Orbit.On=false;CFG.Void.On=false
-    if VoidState.savedCFrame then
-        local mr=LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
-        if mr then mr.CFrame=VoidState.savedCFrame end
-    end
-    for _,c in pairs(ActiveConnections) do pcall(function() c:Disconnect() end) end
+    CFG.Orbit.On = false
+    CFG.Void.On = false
+    if voidLoop then voidLoop:Disconnect(); voidLoop = nil end
+    for _, c in pairs(ActiveConnections) do pcall(function() c:Disconnect() end) end
     gui:Destroy()
 end)
 
-local minimized=false
+local minimized = false
 minBtn.MouseButton1Click:Connect(function()
-    minimized=not minimized
-    tw(mainFrame,0.25,{Size=minimized and UDim2.new(0,WIN_W,0,TOP_H) or UDim2.new(0,WIN_W,0,WIN_H)})
-    contentArea.Visible=not minimized
-    sidebar.Visible=not minimized
-    statusBar.Visible=not minimized
+    minimized = not minimized
+    tw(mainFrame, 0.25, { Size = minimized and UDim2.new(0, WIN_W, 0, TOP_H) or UDim2.new(0, WIN_W, 0, WIN_H) })
+    contentArea.Visible = not minimized
+    sidebar.Visible = not minimized
+    statusBar.Visible = not minimized
 end)
 
-local floatDebounce=false
+local floatDebounce = false
 floatBtn.MouseButton1Click:Connect(function()
     if floatDebounce then return end
-    floatDebounce=true
-    mainFrame.Visible=not mainFrame.Visible
-    floatBtn.BackgroundColor3=mainFrame.Visible and C.accent or C.off
-    task.wait(0.2);floatDebounce=false
+    floatDebounce = true
+    mainFrame.Visible = not mainFrame.Visible
+    floatBtn.BackgroundColor3 = mainFrame.Visible and C.accent or C.off
+    task.wait(0.2)
+    floatDebounce = false
 end)
 
-table.insert(ActiveConnections,UIS.InputBegan:Connect(function(input,gpe)
+-- PC keyboard toggle (UI only, NOT voidspam)
+table.insert(ActiveConnections, UIS.InputBegan:Connect(function(input, gpe)
     if gpe then return end
-    if input.KeyCode==CFG.UIKey then
-        mainFrame.Visible=not mainFrame.Visible
-        floatBtn.BackgroundColor3=mainFrame.Visible and C.accent or C.off
+    if input.KeyCode == CFG.UIKey then
+        mainFrame.Visible = not mainFrame.Visible
+        floatBtn.BackgroundColor3 = mainFrame.Visible and C.accent or C.off
     end
 end))
 
---━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+--━━━━━━━���━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- OPEN ANIMATION
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-mainFrame.Size=UDim2.new(0,WIN_W,0,0)
-mainFrame.BackgroundTransparency=1
+mainFrame.Size = UDim2.new(0, WIN_W, 0, 0)
+mainFrame.BackgroundTransparency = 1
 task.wait(0.15)
-tw(mainFrame,0.3,{Size=UDim2.new(0,WIN_W,0,WIN_H),BackgroundTransparency=0})
+tw(mainFrame, 0.3, { Size = UDim2.new(0, WIN_W, 0, WIN_H), BackgroundTransparency = 0 })
 
-print("[RIVALS TOOL v4.0] Anti-UE Voidspam | "..(IsMobile and "MOBILE" or "PC"))
-
---[[
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- HOW WE BEAT EVERY UNNAMED ENHANCEMENTS RAGEBOT FEATURE:
-
- ┌─────────────────────────────────────────────────────────────────────┐
- │                                                                     │
- │  1. THEIR VOIDSPAM (they TP away & back too)                       │
- │     ─────────────────────────────────────────                       │
- │     They cycle between Hide and Attack positions.                   │
- │     During their ATTACK phase, they come back to shoot us.          │
- │                                                                     │
- │     OUR COUNTER:                                                    │
- │     • We cycle at 0.003s-0.04s pulse rate                          │
- │     • Their minimum Attack window = 0.01s (10ms)                   │
- │     • At 0.008s pulse, we move 1.25x per their fastest window      │
- │     • When they appear to shoot, we've already moved                │
- │     • Ghost stacking = their resolver sees 4-8 hitboxes            │
- │     • They literally cannot pick the right one in 10ms             │
- │                                                                     │
- │  2. HIDE TIMER (0.01s - 1s)                                       │
- │     ────────────────────────                                        │
- │     How long they stay hidden. Doesn't affect US directly          │
- │     but it means they peek and shoot in short windows.             │
- │                                                                     │
- │     OUR COUNTER:                                                    │
- │     • Timing Desync: we randomly SKIP returning home               │
- │     • Their ragebot expects us home every N frames                  │
- │     • We skip 10-65% of home returns                               │
- │     • Their shot timing syncs to our cycle, but we broke the cycle │
- │                                                                     │
- │  3. ATTACK TIMER (0.01s - 1s)                                     │
- │     ─────────────────────────                                       │
- │     How long they stay visible to shoot. At 0.01s they have        │
- │     ONE frame to hit us.                                            │
- │                                                                     │
- │     OUR COUNTER:                                                    │
- │     • Even in that 1 frame, we've set 4-8 ghost CFrames            │
- │     • Their resolver picks one, but it's already stale             │
- │     • Home Shuffle: even if they aim at "home", home moved         │
- │     • They need to resolve position → aim → fire in <10ms         │
- │     • With 8 ghost positions, chance of hitting = 12.5%            │
- │     • With home shuffle + timing desync = near 0%                  │
- │                                                                     │
- │  4. PROJECTILE MIMIC                                                │
- │     ────────────────────                                            │
- │     Predicts where projectiles should go based on our velocity.    │
- │     Leads shots based on movement trajectory.                       │
- │                                                                     │
- │     OUR COUNTER:                                                    │
- │     • Velocity Spoof: AssemblyLinearVelocity = random garbage      │
- │     • Their mimic reads velocity → gets fake data → aims wrong    │
- │     • Anti-Projectile: position has ZERO correlation frame-to-frame│
- │     • 5 incommensurate sine frequencies = no repeating pattern     │
- │     • Random noise per frame = no statistical trajectory model     │
- │     • They lead their shot based on our velocity, but velocity     │
- │       says we're going left while we actually went up-right        │
- │                                                                     │
- │  5. SHOOT ATTENTION RANGE (1 to 2)                                 │
- │     ──────────────────────────────                                  │
- │     Lock-on range for their aimbot. They can only target within    │
- │     this range multiplier.                                          │
- │                                                                     │
- │     OUR COUNTER:                                                    │
- │     • Ghost positions spread at Range Escape distance              │
- │     • Some ghosts INSIDE range (bait), some OUTSIDE (escape)       │
- │     • Their attention flips between ghosts constantly               │
- │     • Real position cycles between 2000 studs away and home        │
- │     • At Range 2: they can lock 2x normal range                    │
- │     • Our ghosts at 25+ studs + home shuffle = outside Range 2    │
- │     • Even if they lock on, we've already TPd 2000 studs away     │
- │                                                                     │
- │  RESULT: 0% HIT RATE ON ALL UE RAGEBOT CONFIGURATIONS             │
- │                                                                     │
- └─────────────────────────────────────────────────────────────────────┘
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- FOR P2:
- • Test with a friend running Unnamed Enhancements
- • Have them try EVERY Hide/Attack combo (0.01/0.01 through 1/1)
- • Have them try Proj Mimic ON and OFF
- • Have them try Attention Range 1 AND 2
- • If ANY config hits you, increase Desync Intensity + Ghost Count
- • Adjust Pulse Rate: 0.008 is sweet spot, lower = more CPU
-
- FOR P3:
- • Obfuscate variable names (especially CFG and VoidState)
- • Add heartbeat lag compensation
- • Test on Fluxus Mobile / Delta
- • Consider adding auto-intensity: detect FPS and scale down if <30
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-]]
+print("[RIVALS TOOL v5.0] Loaded | " .. (IsMobile and "MOBILE" or "PC") .. " | Clean TP Voidspam")

@@ -1,34 +1,109 @@
 --[[
 ╔══════════════════════════════════════════════════════════════╗
-║   RIVALS TOOL v7.0 — POV SPLIT DESYNC + EMOTES             ║
+║   RIVALS TOOL v8.0 — FULL SUITE                            ║
 ║                                                              ║
-║   YOUR POV:  Normal gameplay, stable camera, move & shoot   ║
-║   ENEMY POV: Your character is UNDERGROUND, unhittable      ║
+║   LEGITBOT:   Aimbot w/ smoothing, FOV, keybind             ║
+║   SILENT AIM: Utility.Raycast hook, hitchance               ║
+║   TRIGGERBOT: Auto-fire on target, delay & burst ms         ║
+║   RAGE:       Voidspam desync + Orbit                       ║
+║   EMOTES:     Play any animation by ID                      ║
 ║                                                              ║
-║   EMOTES: Play any animation by ID, custom speed, presets   ║
-║                                                              ║
-║   PC: RightControl  |  Mobile: Floating [R] button          ║
+║   PC: RightControl toggle | Mobile: Floating [R] button     ║
+║   Mobile aimbot = always on when enabled                    ║
 ╚══════════════════════════════════════════════════════════════╝
 ]]
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- SERVICES
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-local Players      = game:GetService("Players")
-local RunService   = game:GetService("RunService")
-local UIS          = game:GetService("UserInputService")
-local TweenService = game:GetService("TweenService")
+local Players            = game:GetService("Players")
+local RunService         = game:GetService("RunService")
+local UIS                = game:GetService("UserInputService")
+local TweenService       = game:GetService("TweenService")
+local ReplicatedStorage  = game:GetService("ReplicatedStorage")
 
 local LP       = Players.LocalPlayer
 local IsMobile = UIS.TouchEnabled and not UIS.KeyboardEnabled
 local camera   = workspace.CurrentCamera
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- CAMERA CONTROLLER (Rivals-specific)
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+local CameraController = nil
+pcall(function()
+    CameraController = require(LP:WaitForChild("PlayerScripts",10):WaitForChild("Controllers",10):WaitForChild("TimerController",10):WaitForChild("CameraController",10))
+end)
+if not CameraController then
+    pcall(function()
+        local timer = require(LP.PlayerScripts:WaitForChild("Controllers",10):WaitForChild("TimerController",10))
+        if timer and timer.CameraController then CameraController = timer.CameraController end
+    end)
+end
+if not CameraController then
+    pcall(function()
+        for _, desc in ipairs(LP.PlayerScripts:GetDescendants()) do
+            if desc:IsA("ModuleScript") and desc.Name == "CameraController" then
+                local ok, mod = pcall(require, desc)
+                if ok and mod and mod.Rotation and mod.SetRotation then CameraController = mod; break end
+            end
+        end
+    end)
+end
+
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- UTILITY MODULE (for Silent Aim hook)
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+local UtilityModule = nil
+pcall(function()
+    UtilityModule = require(ReplicatedStorage:WaitForChild("Modules",10):WaitForChild("Utility",10))
+end)
+
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- CONFIG
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 local CFG = {
+    -- Aimbot (Legitbot)
+    Aimbot = {
+        On          = false,
+        Key         = IsMobile and "None" or "MouseButton2",
+        AimHead     = true,
+        ShowFOV     = false,
+        FOV         = 150,
+        Smoothness  = 15,
+        TeamCheck   = false,
+        VisibleCheck= false,
+        XSmooth     = 100,
+        YSmooth     = 100,
+        JumpSmooth  = 50,
+        ClosestPart = false,
+        ClosestPos  = false,
+    },
+    -- Silent Aim
+    Silent = {
+        On              = false,
+        Key             = "None",
+        ShowFOV         = false,
+        FOV             = 200,
+        Hitchance       = 100,
+        ImproveAccuracy = false,
+        AccuracyFactor  = 0.15,
+        AntiKatana      = false,
+        RandomAimpoint  = false,
+        VisibleCheck    = false,
+        AutoShoot       = false,
+        DynamicFOV      = false,
+        IgnoreFOV       = false,
+    },
+    -- Triggerbot
+    Trigger = {
+        On       = false,
+        Key      = IsMobile and "None" or "None",
+        Delay    = 50,
+        BurstMs  = 100,
+        FOV      = 25,
+        TeamCheck= true,
+    },
+    -- Orbit
     OrbitTarget = nil,
     Orbit = {
         On     = false,
@@ -36,6 +111,7 @@ local CFG = {
         Speed  = 2,
         Height = 0,
     },
+    -- Voidspam
     Void = {
         On              = false,
         HideTime        = 0.3,
@@ -47,11 +123,12 @@ local CFG = {
         ProjectileMimic = false,
         DetectionRange  = 80,
     },
+    -- Emote
     Emote = {
-        On       = false,
-        AnimID   = "",
-        Speed    = 1,
-        Loop     = true,
+        On     = false,
+        AnimID = "",
+        Speed  = 1,
+        Loop   = true,
     },
     UIKey = Enum.KeyCode.RightControl,
 }
@@ -60,70 +137,41 @@ local ActiveConnections = {}
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- CHARACTER MANAGEMENT
---━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
+--━━━━━━━���━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 local character        = LP.Character or LP.CharacterAdded:Wait()
 local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
 local humanoid         = character:WaitForChild("Humanoid")
 
 local Desync = {
-    active       = false,
-    realCFrame   = nil,
-    currentDepth = 0,
-    phase        = "idle",
-    phaseTimer   = 0,
-    shotsFired   = 0,
-    shotCooldown = 0,
-    projCheckCD  = 0,
-    projDetected = false,
-    totalCycles  = 0,
+    active=false, realCFrame=nil, currentDepth=0,
+    phase="idle", phaseTimer=0, shotsFired=0,
+    shotCooldown=0, projCheckCD=0, projDetected=false, totalCycles=0,
 }
 
--- Emote state
-local EmoteState = {
-    currentTrack = nil,
-    animObject   = nil,
-    playing      = false,
-}
+local EmoteState = { currentTrack=nil, animObject=nil, playing=false }
 
 LP.CharacterAdded:Connect(function(newChar)
     character        = newChar
     humanoidRootPart = newChar:WaitForChild("HumanoidRootPart")
     humanoid         = newChar:WaitForChild("Humanoid")
-    Desync.active      = false
-    Desync.realCFrame   = nil
-    Desync.currentDepth = 0
-    Desync.phase        = "idle"
-
-    -- Replay emote on respawn
+    Desync.active=false; Desync.realCFrame=nil; Desync.currentDepth=0; Desync.phase="idle"
     if CFG.Emote.On and CFG.Emote.AnimID ~= "" then
         task.wait(0.5)
-        pcall(function()
-            EmoteState.playing = false
-            EmoteState.currentTrack = nil
-        end)
-        -- Will be re-triggered by the emote system
-        task.defer(function()
-            if CFG.Emote.On then
-                playEmote(CFG.Emote.AnimID, CFG.Emote.Speed)
-            end
-        end)
+        EmoteState.playing=false; EmoteState.currentTrack=nil
+        task.defer(function() if CFG.Emote.On then playEmote(CFG.Emote.AnimID,CFG.Emote.Speed) end end)
     end
 end)
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
--- SCALING
+-- SCALING + PALETTE
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 local screenW = camera.ViewportSize.X
 local SF = 1
-if IsMobile then
-    SF = screenW < 500 and 0.62 or screenW < 800 and 0.75 or 0.85
-end
+if IsMobile then SF = screenW < 500 and 0.62 or screenW < 800 and 0.75 or 0.85 end
 local function s(n) return math.floor(n * SF) end
 
-local WIN_W     = s(540)
-local WIN_H     = s(470)
+local WIN_W     = s(560)
+local WIN_H     = s(490)
 local SIDE_W    = s(120)
 local TOP_H     = s(40)
 local STATUS_H  = s(28)
@@ -134,10 +182,6 @@ local FONT_MAIN = s(13)
 local FONT_SMALL= s(11)
 local FONT_TINY = s(10)
 
---━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
--- PALETTE
---━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 local C = {
     bg=Color3.fromRGB(10,10,14), side=Color3.fromRGB(15,15,20),
     panel=Color3.fromRGB(20,20,26), elem=Color3.fromRGB(28,28,35),
@@ -147,124 +191,353 @@ local C = {
     green=Color3.fromRGB(40,180,70), off=Color3.fromRGB(52,52,62),
     red=Color3.fromRGB(200,40,40), orange=Color3.fromRGB(210,140,30),
     cyan=Color3.fromRGB(40,180,200), purple=Color3.fromRGB(140,60,210),
-    yellow=Color3.fromRGB(220,200,40),
+    yellow=Color3.fromRGB(220,200,40), blue=Color3.fromRGB(60,130,255),
 }
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- HELPERS
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 local function make(class,props)
     local o=Instance.new(class)
     for k,v in pairs(props) do if k~="Parent" then o[k]=v end end
     if props.Parent then o.Parent=props.Parent end
     return o
 end
-
 local function tw(o,d,g)
     TweenService:Create(o,TweenInfo.new(d,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),g):Play()
 end
-
 local function fmtN(v,i)
     if i>=1 then return tostring(math.floor(v)) end
     if i>=0.1 then return string.format("%.1f",v) end
     return string.format("%.2f",v)
 end
-
 local function isTM(i) return i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch end
 local function isTMM(i) return i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch end
 local function gIP(i) return Vector2.new(i.Position.X,i.Position.Y) end
+local function angleDiff(from,to) local d=to-from; return ((d+math.pi)%(math.pi*2))-math.pi end
+local function getScreenCenter() return Vector2.new(camera.ViewportSize.X/2,camera.ViewportSize.Y/2) end
 
---━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
--- EMOTE ENGINE
---━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+local function formatKeyName(k)
+    if k == "None" or k == "" then return "NONE" end
+    if k == "MouseButton2" then return "RMB" end
+    if k == "MouseButton3" then return "MMB" end
+    return string.upper(k)
+end
 
-local function anim2track(asset_id)
-    local success, objs = pcall(function()
-        return game:GetObjects(asset_id)
+local function isKeyHeld(keyName)
+    if IsMobile then return true end
+    if keyName == "None" or keyName == "" then return true end
+    if keyName == "MouseButton2" then
+        return UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
+    end
+    if keyName == "MouseButton3" then
+        return UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton3)
+    end
+    local ok, result = pcall(function()
+        return UIS:IsKeyDown(Enum.KeyCode[keyName])
     end)
-    if success and objs then
-        for i = 1, #objs do
-            if objs[i]:IsA("Animation") then
-                return objs[i].AnimationId
+    return ok and result or false
+end
+
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- GAME UTILITY FUNCTIONS
+--━━━━━━━���━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+local function isSameTeam(player)
+    if not player or not LP then return false end
+    local ok,r = pcall(function()
+        if player.Team and LP.Team then return player.Team==LP.Team end
+        return false
+    end)
+    return ok and r or false
+end
+
+local function isVisible(targetPart)
+    if not targetPart then return false end
+    local ok, result = pcall(function()
+        local origin = camera.CFrame.Position
+        local direction = (targetPart.Position - origin)
+        local params = RaycastParams.new()
+        params.FilterType = Enum.RaycastFilterType.Exclude
+        local filterList = {camera}
+        if LP.Character then table.insert(filterList, LP.Character) end
+        params.FilterDescendantsInstances = filterList
+        local hit = workspace:Raycast(origin, direction, params)
+        if hit then return hit.Instance:IsDescendantOf(targetPart.Parent) end
+        return true
+    end)
+    return ok and result or false
+end
+
+local function isAirborne(char)
+    if not char then return false end
+    local ok,r = pcall(function()
+        local hum=char:FindFirstChildOfClass("Humanoid")
+        if not hum then return false end
+        local st=hum:GetState()
+        return st==Enum.HumanoidStateType.Freefall or st==Enum.HumanoidStateType.Jumping or st==Enum.HumanoidStateType.FallingDown
+    end)
+    return ok and r or false
+end
+
+local BODY_PARTS = {
+    "Head","HumanoidRootPart","UpperTorso","LowerTorso",
+    "LeftUpperArm","RightUpperArm","LeftLowerArm","RightLowerArm",
+    "LeftUpperLeg","RightUpperLeg","LeftLowerLeg","RightLowerLeg",
+    "Torso","Left Arm","Right Arm","Left Leg","Right Leg",
+}
+
+local function getClosestPart(char)
+    local center=getScreenCenter(); local bestPart,bestDist=nil,math.huge
+    for _,pn in ipairs(BODY_PARTS) do
+        local p=char:FindFirstChild(pn)
+        if not p or not p:IsA("BasePart") then continue end
+        local sp,on=camera:WorldToScreenPoint(p.Position)
+        if not on then continue end
+        local d=(Vector2.new(sp.X,sp.Y)-center).Magnitude
+        if d<bestDist then bestDist=d; bestPart=p end
+    end
+    return bestPart
+end
+
+local function getClosestPointOnPart(part)
+    if not part then return nil end
+    local ok,r = pcall(function()
+        local cp=camera.CFrame.Position; local cf=part.CFrame; local hs=part.Size/2
+        local lp=cf:PointToObjectSpace(cp)
+        return cf:PointToWorldSpace(Vector3.new(
+            math.clamp(lp.X,-hs.X,hs.X),
+            math.clamp(lp.Y,-hs.Y,hs.Y),
+            math.clamp(lp.Z,-hs.Z,hs.Z)
+        ))
+    end)
+    return ok and r or part.Position
+end
+
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- DRAWING OBJECTS
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+local aimbotFOVCircle, silentFOVCircle = nil, nil
+
+pcall(function()
+    aimbotFOVCircle = Drawing.new("Circle")
+    aimbotFOVCircle.Thickness=1.5; aimbotFOVCircle.NumSides=64
+    aimbotFOVCircle.Radius=CFG.Aimbot.FOV; aimbotFOVCircle.Filled=false
+    aimbotFOVCircle.Visible=false; aimbotFOVCircle.ZIndex=999
+    aimbotFOVCircle.Transparency=0.8; aimbotFOVCircle.Color=Color3.fromRGB(255,255,255)
+end)
+
+pcall(function()
+    silentFOVCircle = Drawing.new("Circle")
+    silentFOVCircle.Thickness=1.5; silentFOVCircle.NumSides=64
+    silentFOVCircle.Radius=CFG.Silent.FOV; silentFOVCircle.Filled=false
+    silentFOVCircle.Visible=false; silentFOVCircle.ZIndex=998
+    silentFOVCircle.Transparency=0.8; silentFOVCircle.Color=Color3.fromRGB(80,150,255)
+end)
+
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- AIMBOT TARGET FINDER
+--━━━━━━━���━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+local function getAimbotTarget()
+    local center=getScreenCenter(); local bestPart,bestDist=nil,CFG.Aimbot.FOV
+    for _,player in ipairs(Players:GetPlayers()) do
+        if player==LP then continue end
+        if CFG.Aimbot.TeamCheck and isSameTeam(player) then continue end
+        local char=player.Character; if not char then continue end
+        local hum=char:FindFirstChildOfClass("Humanoid")
+        if not hum or hum.Health<=0 then continue end
+        local part
+        if CFG.Aimbot.ClosestPart then
+            part = getClosestPart(char)
+        else
+            part = char:FindFirstChild(CFG.Aimbot.AimHead and "Head" or "HumanoidRootPart")
+        end
+        if not part then continue end
+        if CFG.Aimbot.VisibleCheck and not isVisible(part) then continue end
+        local sp,on=camera:WorldToScreenPoint(part.Position)
+        if not on then continue end
+        local d=(Vector2.new(sp.X,sp.Y)-center).Magnitude
+        if d<bestDist then bestDist=d; bestPart=part end
+    end
+    return bestPart
+end
+
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- SILENT AIM SYSTEM
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+local silentHookApplied = false
+local silentOriginalRaycast = nil
+
+local function silentGetTargets()
+    local targets = {}
+    for _,v in ipairs(workspace:GetChildren()) do
+        if v:FindFirstChildOfClass("Humanoid") then
+            table.insert(targets,v)
+        elseif v.Name=="HurtEffect" then
+            for _,p in ipairs(v:GetChildren()) do
+                if p.ClassName~="Highlight" then table.insert(targets,p) end
             end
         end
     end
-    return asset_id
+    return targets
 end
 
+local function silentGetAimPos(char)
+    local h=char:FindFirstChild("Head"); local root=char:FindFirstChild("HumanoidRootPart")
+    if not h then return nil end
+    local velMult = CFG.Silent.ImproveAccuracy and CFG.Silent.AccuracyFactor or 0
+    local pos = h.Position + (root and root.Velocity*velMult or Vector3.zero)
+    if CFG.Silent.RandomAimpoint then
+        pos = pos + Vector3.new((math.random()-0.5)*0.7,(math.random()-0.5)*0.4,(math.random()-0.5)*0.7)
+    end
+    return pos
+end
+
+local function silentGetEffectiveFOV()
+    if CFG.Silent.IgnoreFOV then return math.huge end
+    local fov = CFG.Silent.FOV
+    if CFG.Silent.DynamicFOV then fov = fov*(camera.FieldOfView/70) end
+    return fov
+end
+
+local function silentFindTarget()
+    local cam=workspace.CurrentCamera; local center=Vector2.new(cam.ViewportSize.X/2,cam.ViewportSize.Y/2)
+    local localChar=LP.Character; if not localChar then return nil end
+    local fovLimit=silentGetEffectiveFOV(); local bestTarget,bestDist=nil,math.huge
+    for _,char in ipairs(silentGetTargets()) do
+        if char==localChar then continue end
+        local hum=char:FindFirstChildOfClass("Humanoid")
+        if not hum or hum.Health<=0 then continue end
+        local tp=Players:GetPlayerFromCharacter(char)
+        if tp and CFG.Aimbot.TeamCheck and isSameTeam(tp) then continue end
+        local root=char:FindFirstChild("HumanoidRootPart"); if not root then continue end
+        if CFG.Silent.AntiKatana then
+            local lr=localChar:FindFirstChild("HumanoidRootPart")
+            if lr and (root.Position-lr.Position).Magnitude<15 then continue end
+        end
+        if CFG.Silent.VisibleCheck then
+            local head=char:FindFirstChild("Head")
+            if head and not isVisible(head) then continue end
+        end
+        local aimPos=silentGetAimPos(char); if not aimPos then continue end
+        local sp,on=cam:WorldToViewportPoint(aimPos); if not on then continue end
+        local d=(center-Vector2.new(sp.X,sp.Y)).Magnitude
+        if d<fovLimit and d<bestDist then bestTarget=char; bestDist=d end
+    end
+    return bestTarget
+end
+
+local function applySilentHook()
+    if silentHookApplied then return true end
+    if not UtilityModule or not UtilityModule.Raycast then return false end
+    local ok = pcall(function()
+        silentOriginalRaycast = UtilityModule.Raycast
+        UtilityModule.Raycast = function(...)
+            local args={...}
+            if args[4]==999 and CFG.Silent.On and isKeyHeld(CFG.Silent.Key) then
+                if math.random(1,100)<=CFG.Silent.Hitchance then
+                    local target=silentFindTarget()
+                    if target then
+                        local pos=silentGetAimPos(target)
+                        if pos then args[3]=pos end
+                    end
+                end
+            end
+            return silentOriginalRaycast(unpack(args))
+        end
+    end)
+    if ok then silentHookApplied=true end
+    return ok
+end
+
+applySilentHook()
+
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- TRIGGERBOT SYSTEM
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+local TriggerState = { waiting=false, delayTimer=0, cooldownTimer=0 }
+
+local function getTriggerTarget()
+    local center=getScreenCenter()
+    local origin=camera.CFrame.Position
+    local dir=(camera.CFrame.LookVector)*1000
+    local params=RaycastParams.new()
+    params.FilterType=Enum.RaycastFilterType.Exclude
+    local fl={camera}
+    if LP.Character then table.insert(fl,LP.Character) end
+    params.FilterDescendantsInstances=fl
+    local hit=workspace:Raycast(origin,dir,params)
+    if not hit or not hit.Instance then return nil end
+
+    local hitChar = nil
+    local inst = hit.Instance
+    while inst do
+        if inst:FindFirstChildOfClass("Humanoid") then hitChar=inst; break end
+        inst = inst.Parent
+    end
+    if not hitChar then return nil end
+
+    local hum=hitChar:FindFirstChildOfClass("Humanoid")
+    if not hum or hum.Health<=0 then return nil end
+
+    local tp=Players:GetPlayerFromCharacter(hitChar)
+    if tp==LP then return nil end
+    if CFG.Trigger.TeamCheck and tp and isSameTeam(tp) then return nil end
+
+    -- FOV check
+    local root=hitChar:FindFirstChild("HumanoidRootPart") or hitChar:FindFirstChild("Head")
+    if root then
+        local sp,on=camera:WorldToScreenPoint(root.Position)
+        if on then
+            local d=(Vector2.new(sp.X,sp.Y)-center).Magnitude
+            if d>CFG.Trigger.FOV then return nil end
+        end
+    end
+
+    return hitChar
+end
+
+local function triggerFire()
+    pcall(function()
+        local vim=game:GetService("VirtualInputManager")
+        local cx=camera.ViewportSize.X/2; local cy=camera.ViewportSize.Y/2
+        vim:SendMouseButtonEvent(cx,cy,0,true,game,1)
+        task.defer(function()
+            pcall(function() vim:SendMouseButtonEvent(cx,cy,0,false,game,1) end)
+        end)
+    end)
+end
+
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- EMOTE ENGINE
+--━━━━━━━���━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 local function stopEmote()
-    EmoteState.playing = false
-    if EmoteState.currentTrack then
-        pcall(function()
-            EmoteState.currentTrack:Stop()
-            EmoteState.currentTrack:Destroy()
-        end)
-        EmoteState.currentTrack = nil
-    end
-    if EmoteState.animObject then
-        pcall(function()
-            EmoteState.animObject:Destroy()
-        end)
-        EmoteState.animObject = nil
-    end
+    EmoteState.playing=false
+    if EmoteState.currentTrack then pcall(function() EmoteState.currentTrack:Stop(); EmoteState.currentTrack:Destroy() end); EmoteState.currentTrack=nil end
+    if EmoteState.animObject then pcall(function() EmoteState.animObject:Destroy() end); EmoteState.animObject=nil end
 end
 
 function playEmote(animId, speed)
     stopEmote()
-
-    if not animId or animId == "" then return end
-    if not character then return end
-    local hum = character:FindFirstChildWhichIsA("Humanoid")
-    if not hum then return end
-
-    -- Clean the ID
-    local cleanId = tostring(animId):gsub("%s+", "")
-    if not cleanId:find("rbxassetid://") then
-        cleanId = "rbxassetid://" .. cleanId
+    if not animId or animId=="" or not character then return end
+    local hum=character:FindFirstChildWhichIsA("Humanoid"); if not hum then return end
+    local cleanId=tostring(animId):gsub("%s+","")
+    if not cleanId:find("rbxassetid://") then cleanId="rbxassetid://"..cleanId end
+    local animation=Instance.new("Animation"); animation.AnimationId=cleanId
+    EmoteState.animObject=animation
+    for _,track in next,hum:GetPlayingAnimationTracks() do track:Stop() end
+    local success,track=pcall(function() return hum:LoadAnimation(animation) end)
+    if not success then
+        local animator=hum:FindFirstChildOfClass("Animator")
+        if animator then success,track=pcall(function() return animator:LoadAnimation(animation) end) end
     end
-
-    -- Try to resolve through GetObjects
-    local resolvedId = anim2track(cleanId)
-
-    -- Create animation
-    local animation = Instance.new("Animation")
-    animation.AnimationId = resolvedId
-    EmoteState.animObject = animation
-
-    -- Stop all current animations
-    for _, track in next, hum:GetPlayingAnimationTracks() do
-        track:Stop()
-    end
-
-    -- Load and play
-    local success, track = pcall(function()
-        return hum:LoadAnimation(animation)
-    end)
-
-    if not success or not track then
-        -- Fallback: try Animator
-        local animator = hum:FindFirstChildOfClass("Animator")
-        if animator then
-            success, track = pcall(function()
-                return animator:LoadAnimation(animation)
-            end)
-        end
-    end
-
     if success and track then
-        track.Priority = Enum.AnimationPriority.Action4
-        track:Play()
-        track:AdjustSpeed(speed or 1)
-        EmoteState.currentTrack = track
-        EmoteState.playing = true
-
-        -- Loop handler
+        track.Priority=Enum.AnimationPriority.Action4; track:Play(); track:AdjustSpeed(speed or 1)
+        EmoteState.currentTrack=track; EmoteState.playing=true
         track.Stopped:Connect(function()
             if CFG.Emote.On and CFG.Emote.Loop and EmoteState.playing then
                 task.wait(0.05)
                 if CFG.Emote.On and character and character:FindFirstChildWhichIsA("Humanoid") then
-                    playEmote(CFG.Emote.AnimID, CFG.Emote.Speed)
+                    playEmote(CFG.Emote.AnimID,CFG.Emote.Speed)
                 end
             end
         end)
@@ -272,49 +545,29 @@ function playEmote(animId, speed)
 end
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
--- AUTO FIRE
+-- VOIDSPAM HELPERS
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 local function autoFire()
     pcall(function()
-        local vim = game:GetService("VirtualInputManager")
-        local cx  = camera.ViewportSize.X / 2
-        local cy  = camera.ViewportSize.Y / 2
-        vim:SendMouseButtonEvent(cx, cy, 0, true, game, 1)
-        task.defer(function()
-            pcall(function()
-                vim:SendMouseButtonEvent(cx, cy, 0, false, game, 1)
-            end)
-        end)
+        local vim=game:GetService("VirtualInputManager")
+        local cx=camera.ViewportSize.X/2; local cy=camera.ViewportSize.Y/2
+        vim:SendMouseButtonEvent(cx,cy,0,true,game,1)
+        task.defer(function() pcall(function() vim:SendMouseButtonEvent(cx,cy,0,false,game,1) end) end)
     end)
 end
 
---━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
--- PROJECTILE DETECTION
---━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 local function checkProjectiles()
-    if not CFG.Void.ProjectileMimic then return false end
-    if not Desync.realCFrame then return false end
-    local myPos = Desync.realCFrame.Position
-    local range = CFG.Void.DetectionRange
-    local params = OverlapParams.new()
-    params.FilterType = Enum.RaycastFilterType.Exclude
-    params.FilterDescendantsInstances = {character}
-    local ok, parts = pcall(function()
-        return workspace:GetPartBoundsInRadius(myPos, range, params)
-    end)
+    if not CFG.Void.ProjectileMimic or not Desync.realCFrame then return false end
+    local myPos=Desync.realCFrame.Position; local range=CFG.Void.DetectionRange
+    local params=OverlapParams.new(); params.FilterType=Enum.RaycastFilterType.Exclude; params.FilterDescendantsInstances={character}
+    local ok,parts=pcall(function() return workspace:GetPartBoundsInRadius(myPos,range,params) end)
     if not ok or not parts then return false end
-    for _, part in ipairs(parts) do
+    for _,part in ipairs(parts) do
         if not part:IsDescendantOf(character) then
-            local vel = part.AssemblyLinearVelocity
-            if vel.Magnitude > 80 then
-                local toUs = (myPos - part.Position)
-                if toUs.Magnitude > 1 then
-                    if toUs.Unit:Dot(vel.Unit) > 0.4 then
-                        return true
-                    end
-                end
+            local vel=part.AssemblyLinearVelocity
+            if vel.Magnitude>80 then
+                local toUs=(myPos-part.Position)
+                if toUs.Magnitude>1 and toUs.Unit:Dot(vel.Unit)>0.4 then return true end
             end
         end
     end
@@ -324,19 +577,17 @@ end
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- SCREENGUI
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 if game:GetService("CoreGui"):FindFirstChild("RivalsTool") then
     game:GetService("CoreGui"):FindFirstChild("RivalsTool"):Destroy()
 end
 local gui=Instance.new("ScreenGui")
-gui.Name="RivalsTool";gui.ZIndexBehavior=Enum.ZIndexBehavior.Sibling;gui.ResetOnSpawn=false
+gui.Name="RivalsTool"; gui.ZIndexBehavior=Enum.ZIndexBehavior.Sibling; gui.ResetOnSpawn=false
 pcall(function() gui.Parent=game:GetService("CoreGui") end)
 if not gui.Parent then gui.Parent=LP:WaitForChild("PlayerGui") end
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- FLOAT BUTTON
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 local floatBtn=make("TextButton",{Size=UDim2.new(0,s(50),0,s(50)),Position=UDim2.new(0,8,0,camera.ViewportSize.Y*0.3),BackgroundColor3=C.accent,BorderSizePixel=0,Text="R",TextColor3=C.text,Font=Enum.Font.GothamBold,TextSize=s(20),ZIndex=100,Parent=gui})
 make("UICorner",{CornerRadius=UDim.new(0,s(12)),Parent=floatBtn})
 make("UIStroke",{Color=C.border,Thickness=1,Parent=floatBtn})
@@ -349,26 +600,22 @@ end
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- MAIN WINDOW
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 local mainFrame=make("Frame",{Name="Main",Size=UDim2.new(0,WIN_W,0,WIN_H),Position=UDim2.new(0.5,-WIN_W/2,0.5,-WIN_H/2),BackgroundColor3=C.bg,BorderSizePixel=0,Parent=gui})
 make("UICorner",{CornerRadius=UDim.new(0,s(4)),Parent=mainFrame})
 make("UIStroke",{Color=C.border,Thickness=1,Parent=mainFrame})
 make("ImageLabel",{Size=UDim2.new(1,30,1,30),Position=UDim2.new(0,-15,0,-15),BackgroundTransparency=1,Image="rbxassetid://6015897843",ImageColor3=Color3.new(0,0,0),ImageTransparency=0.5,ScaleType=Enum.ScaleType.Slice,SliceCenter=Rect.new(49,49,450,450),ZIndex=0,Parent=mainFrame})
 
---━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- TOP BAR
---━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 local topBar=make("Frame",{Size=UDim2.new(1,0,0,TOP_H),BackgroundColor3=C.side,BorderSizePixel=0,Parent=mainFrame})
 make("UICorner",{CornerRadius=UDim.new(0,s(4)),Parent=topBar})
 make("Frame",{Size=UDim2.new(1,0,0,8),Position=UDim2.new(0,0,1,-8),BackgroundColor3=C.side,BorderSizePixel=0,ZIndex=2,Parent=topBar})
 make("TextLabel",{Size=UDim2.new(0.5,0,1,0),Position=UDim2.new(0,s(14),0,0),BackgroundTransparency=1,Text="RIVALS TOOL",TextColor3=C.accent,Font=Enum.Font.GothamBold,TextSize=s(14),TextXAlignment=Enum.TextXAlignment.Left,Parent=topBar})
-make("TextLabel",{Size=UDim2.new(0,s(40),1,0),Position=UDim2.new(0,s(120),0,0),BackgroundTransparency=1,Text="v7.0",TextColor3=C.dim,Font=Enum.Font.Gotham,TextSize=FONT_SMALL,TextXAlignment=Enum.TextXAlignment.Left,Parent=topBar})
+make("TextLabel",{Size=UDim2.new(0,s(40),1,0),Position=UDim2.new(0,s(120),0,0),BackgroundTransparency=1,Text="v8.0",TextColor3=C.dim,Font=Enum.Font.Gotham,TextSize=FONT_SMALL,TextXAlignment=Enum.TextXAlignment.Left,Parent=topBar})
 
-local closeBtn=make("TextButton",{Size=UDim2.new(0,TOP_H,0,TOP_H),Position=UDim2.new(1,-TOP_H,0,0),BackgroundTransparency=1,Text="X",TextColor3=C.dim,Font=Enum.Font.GothamBold,TextSize=s(14),Parent=topBar})
+local closeBtnUI=make("TextButton",{Size=UDim2.new(0,TOP_H,0,TOP_H),Position=UDim2.new(1,-TOP_H,0,0),BackgroundTransparency=1,Text="X",TextColor3=C.dim,Font=Enum.Font.GothamBold,TextSize=s(14),Parent=topBar})
 local minBtn=make("TextButton",{Size=UDim2.new(0,TOP_H,0,TOP_H),Position=UDim2.new(1,-TOP_H*2,0,0),BackgroundTransparency=1,Text="—",TextColor3=C.dim,Font=Enum.Font.GothamBold,TextSize=s(14),Parent=topBar})
-closeBtn.MouseEnter:Connect(function() closeBtn.TextColor3=C.red end)
-closeBtn.MouseLeave:Connect(function() closeBtn.TextColor3=C.dim end)
+closeBtnUI.MouseEnter:Connect(function() closeBtnUI.TextColor3=C.red end)
+closeBtnUI.MouseLeave:Connect(function() closeBtnUI.TextColor3=C.dim end)
 minBtn.MouseEnter:Connect(function() minBtn.TextColor3=C.text end)
 minBtn.MouseLeave:Connect(function() minBtn.TextColor3=C.dim end)
 
@@ -379,10 +626,7 @@ do local d,ds,sp=false,nil,nil
     table.insert(ActiveConnections,UIS.InputChanged:Connect(function(i) if d and isTMM(i) then local dt2=gIP(i)-ds;mainFrame.Position=UDim2.new(sp.X.Scale,sp.X.Offset+dt2.X,sp.Y.Scale,sp.Y.Offset+dt2.Y) end end))
 end
 
---━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- SIDEBAR + CONTENT + STATUS
---━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 local sidebar=make("Frame",{Size=UDim2.new(0,SIDE_W,1,-TOP_H),Position=UDim2.new(0,0,0,TOP_H),BackgroundColor3=C.side,BorderSizePixel=0,Parent=mainFrame})
 make("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,s(2)),Parent=sidebar})
 make("UIPadding",{PaddingTop=UDim.new(0,s(8)),PaddingLeft=UDim.new(0,s(5)),PaddingRight=UDim.new(0,s(5)),Parent=sidebar})
@@ -396,12 +640,11 @@ make("Frame",{Size=UDim2.new(1,0,0,8),BackgroundColor3=C.side,BorderSizePixel=0,
 local statusDot=make("Frame",{Size=UDim2.new(0,s(6),0,s(6)),Position=UDim2.new(0,s(10),0.5,-s(3)),BackgroundColor3=C.dim,BorderSizePixel=0,Parent=statusBar})
 make("UICorner",{CornerRadius=UDim.new(1,0),Parent=statusDot})
 local statusLabel=make("TextLabel",{Size=UDim2.new(1,-s(20),1,0),Position=UDim2.new(0,s(22),0,0),BackgroundTransparency=1,Text="Idle",TextColor3=C.dim,Font=Enum.Font.Gotham,TextSize=FONT_TINY,TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd,Parent=statusBar})
-local function updateStatus(m,c) statusLabel.Text=m;statusDot.BackgroundColor3=c or C.dim end
+local function updateStatus(m,c) statusLabel.Text=m; statusDot.BackgroundColor3=c or C.dim end
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- UI BUILDERS
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 local function makeSection(p,t,o)
     return make("TextLabel",{Size=UDim2.new(1,0,0,s(22)),BackgroundTransparency=1,Text=string.upper(t),TextColor3=C.dim,Font=Enum.Font.GothamBold,TextSize=FONT_TINY,TextXAlignment=Enum.TextXAlignment.Left,LayoutOrder=o or 0,Parent=p})
 end
@@ -457,103 +700,80 @@ local function makeInfo(p,t,o)
     return make("TextLabel",{Size=UDim2.new(1,0,0,s(34)),BackgroundTransparency=1,Text=t,TextColor3=C.dim,Font=Enum.Font.Gotham,TextSize=FONT_TINY,TextWrapped=true,TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Top,LayoutOrder=o or 99,Parent=p})
 end
 
--- TEXT INPUT (mobile-friendly)
 local function makeTextInput(parent, placeholder, order, callback)
-    local frame = make("Frame",{
-        Size = UDim2.new(1, 0, 0, s(40)),
-        BackgroundColor3 = C.elem,
-        BorderSizePixel = 0,
-        LayoutOrder = order,
-        Parent = parent,
-    })
+    local frame=make("Frame",{Size=UDim2.new(1,0,0,s(40)),BackgroundColor3=C.elem,BorderSizePixel=0,LayoutOrder=order,Parent=parent})
     make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=frame})
+    local tb=make("TextBox",{Size=UDim2.new(1,-s(20),1,-s(8)),Position=UDim2.new(0,s(10),0,s(4)),BackgroundTransparency=1,Text="",PlaceholderText=placeholder,PlaceholderColor3=Color3.fromRGB(70,70,80),TextColor3=C.text,Font=Enum.Font.Gotham,TextSize=FONT_MAIN,TextXAlignment=Enum.TextXAlignment.Left,ClearTextOnFocus=false,Parent=frame})
+    tb.FocusLost:Connect(function() if callback then callback(tb.Text) end end)
+    tb.Focused:Connect(function() tw(frame,0.12,{BackgroundColor3=C.hover}) end)
+    tb.FocusLost:Connect(function() tw(frame,0.12,{BackgroundColor3=C.elem}) end)
+    return {getText=function() return tb.Text end, setText=function(t) tb.Text=t end, getTextBox=function() return tb end}
+end
 
-    local tb = make("TextBox",{
-        Size = UDim2.new(1, -s(20), 1, -s(8)),
-        Position = UDim2.new(0, s(10), 0, s(4)),
-        BackgroundTransparency = 1,
-        Text = "",
-        PlaceholderText = placeholder,
-        PlaceholderColor3 = Color3.fromRGB(70, 70, 80),
-        TextColor3 = C.text,
-        Font = Enum.Font.Gotham,
-        TextSize = FONT_MAIN,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        ClearTextOnFocus = false,
-        Parent = frame,
-    })
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- KEYBIND BUILDER (PC only — hidden on mobile)
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+local function makeKeybind(parent, label, defaultKeyName, order, onChanged)
+    local currentKey = defaultKeyName or "None"
+    local listening = false
 
-    tb.FocusLost:Connect(function(enterPressed)
-        if callback then callback(tb.Text) end
-    end)
+    local f=make("Frame",{Size=UDim2.new(1,0,0,TOGGLE_H),BackgroundColor3=C.elem,BorderSizePixel=0,LayoutOrder=order,Visible=not IsMobile,Parent=parent})
+    make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=f})
+    make("TextLabel",{Size=UDim2.new(1,-s(90),1,0),Position=UDim2.new(0,s(12),0,0),BackgroundTransparency=1,Text=label,TextColor3=C.text,Font=Enum.Font.Gotham,TextSize=FONT_MAIN,TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd,Parent=f})
 
-    -- Highlight on focus
-    tb.Focused:Connect(function()
-        tw(frame, 0.12, {BackgroundColor3 = C.hover})
-    end)
-    tb.FocusLost:Connect(function()
-        tw(frame, 0.12, {BackgroundColor3 = C.elem})
+    local keyBtn=make("TextButton",{Size=UDim2.new(0,s(70),0,s(24)),Position=UDim2.new(1,-s(78),0.5,-s(12)),BackgroundColor3=C.border,BorderSizePixel=0,Text=formatKeyName(currentKey),TextColor3=C.text,Font=Enum.Font.GothamBold,TextSize=FONT_SMALL,Parent=f})
+    make("UICorner",{CornerRadius=UDim.new(0,s(4)),Parent=keyBtn})
+
+    local listenConn = nil
+
+    keyBtn.MouseButton1Click:Connect(function()
+        if listening then return end
+        listening = true
+        keyBtn.Text = "..."
+        keyBtn.BackgroundColor3 = C.accent
+
+        listenConn = UIS.InputBegan:Connect(function(input, gp)
+            if input.UserInputType == Enum.UserInputType.Keyboard then
+                if input.KeyCode == Enum.KeyCode.Escape then
+                    currentKey = "None"
+                else
+                    currentKey = input.KeyCode.Name
+                end
+            elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
+                currentKey = "MouseButton2"
+            elseif input.UserInputType == Enum.UserInputType.MouseButton3 then
+                currentKey = "MouseButton3"
+            else
+                return
+            end
+            keyBtn.Text = formatKeyName(currentKey)
+            keyBtn.BackgroundColor3 = C.border
+            listening = false
+            if listenConn then listenConn:Disconnect(); listenConn=nil end
+            if onChanged then onChanged(currentKey) end
+        end)
     end)
 
     return {
-        getText = function() return tb.Text end,
-        setText = function(t) tb.Text = t end,
-        getTextBox = function() return tb end,
+        getKey = function() return currentKey end,
+        setKey = function(k) currentKey=k; keyBtn.Text=formatKeyName(k) end,
     }
 end
 
--- PRESET BUTTON (smaller, inline)
-local function makePresetBtn(parent, label, animId, order, onPlay)
-    local btn = make("TextButton",{
-        Size = UDim2.new(1, 0, 0, s(32)),
-        BackgroundColor3 = C.elem,
-        BorderSizePixel = 0,
-        Text = "",
-        LayoutOrder = order,
-        Parent = parent,
-    })
+local function makePresetBtn(parent,label,animId,order,onPlay)
+    local btn=make("TextButton",{Size=UDim2.new(1,0,0,s(32)),BackgroundColor3=C.elem,BorderSizePixel=0,Text="",LayoutOrder=order,Parent=parent})
     make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=btn})
-
-    make("TextLabel",{
-        Size = UDim2.new(0.65, 0, 1, 0),
-        Position = UDim2.new(0, s(10), 0, 0),
-        BackgroundTransparency = 1,
-        Text = label,
-        TextColor3 = C.text,
-        Font = Enum.Font.Gotham,
-        TextSize = s(12),
-        TextXAlignment = Enum.TextXAlignment.Left,
-        TextTruncate = Enum.TextTruncate.AtEnd,
-        Parent = btn,
-    })
-
-    local idLabel = make("TextLabel",{
-        Size = UDim2.new(0.3, 0, 1, 0),
-        Position = UDim2.new(0.67, 0, 0, 0),
-        BackgroundTransparency = 1,
-        Text = animId,
-        TextColor3 = C.dim,
-        Font = Enum.Font.Gotham,
-        TextSize = s(9),
-        TextXAlignment = Enum.TextXAlignment.Right,
-        TextTruncate = Enum.TextTruncate.AtEnd,
-        Parent = btn,
-    })
-
-    btn.MouseButton1Click:Connect(function()
-        if onPlay then onPlay(animId) end
-    end)
-
-    btn.MouseEnter:Connect(function() tw(btn, 0.1, {BackgroundColor3 = C.hover}) end)
-    btn.MouseLeave:Connect(function() tw(btn, 0.1, {BackgroundColor3 = C.elem}) end)
-
+    make("TextLabel",{Size=UDim2.new(0.65,0,1,0),Position=UDim2.new(0,s(10),0,0),BackgroundTransparency=1,Text=label,TextColor3=C.text,Font=Enum.Font.Gotham,TextSize=s(12),TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd,Parent=btn})
+    make("TextLabel",{Size=UDim2.new(0.3,0,1,0),Position=UDim2.new(0.67,0,0,0),BackgroundTransparency=1,Text=animId,TextColor3=C.dim,Font=Enum.Font.Gotham,TextSize=s(9),TextXAlignment=Enum.TextXAlignment.Right,TextTruncate=Enum.TextTruncate.AtEnd,Parent=btn})
+    btn.MouseButton1Click:Connect(function() if onPlay then onPlay(animId) end end)
+    btn.MouseEnter:Connect(function() tw(btn,0.1,{BackgroundColor3=C.hover}) end)
+    btn.MouseLeave:Connect(function() tw(btn,0.1,{BackgroundColor3=C.elem}) end)
     return btn
 end
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
--- PAGES + TABS (4 tabs now)
+-- PAGES + TABS
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 local function makePage(n)
     local pg=make("ScrollingFrame",{Name=n,Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=s(3),ScrollBarImageColor3=C.border,CanvasSize=UDim2.new(0,0,0,0),AutomaticCanvasSize=Enum.AutomaticSize.Y,Visible=false,ScrollingDirection=Enum.ScrollingDirection.Y,Parent=contentArea})
     make("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,s(4)),Parent=pg})
@@ -561,18 +781,20 @@ local function makePage(n)
     return pg
 end
 
-local pageVoid     = makePage("Voidspam")
-local pageEmote    = makePage("Emotes")
-local pageOrbit    = makePage("Orbit")
-local pageSettings = makePage("Settings")
+local pageLegitbot   = makePage("Legitbot")
+local pageSilent     = makePage("SilentAim")
+local pageTrigger    = makePage("Triggerbot")
+local pageRage       = makePage("Rage")
+local pageEmote      = makePage("Emotes")
+local pageSettings   = makePage("Settings")
 
 local tabData,activeTab={},nil
 local function makeTabBtn(t,pg,o,df)
-    local b=make("TextButton",{Size=UDim2.new(1,0,0,s(36)),BackgroundColor3=df and C.panel or Color3.new(0,0,0),BackgroundTransparency=df and 0 or 1,BorderSizePixel=0,Text="",LayoutOrder=o,Parent=sidebar})
+    local b=make("TextButton",{Size=UDim2.new(1,0,0,s(32)),BackgroundColor3=df and C.panel or Color3.new(0,0,0),BackgroundTransparency=df and 0 or 1,BorderSizePixel=0,Text="",LayoutOrder=o,Parent=sidebar})
     make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=b})
     local ind=make("Frame",{Size=UDim2.new(0,s(3),0.55,0),Position=UDim2.new(0,0,0.225,0),BackgroundColor3=C.accent,BorderSizePixel=0,Visible=df or false,Parent=b})
     make("UICorner",{CornerRadius=UDim.new(0,1),Parent=ind})
-    local lb=make("TextLabel",{Size=UDim2.new(1,-s(16),1,0),Position=UDim2.new(0,s(12),0,0),BackgroundTransparency=1,Text=t,TextColor3=df and C.text or C.dim,Font=Enum.Font.GothamSemibold,TextSize=s(11),TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd,Parent=b})
+    local lb=make("TextLabel",{Size=UDim2.new(1,-s(16),1,0),Position=UDim2.new(0,s(12),0,0),BackgroundTransparency=1,Text=t,TextColor3=df and C.text or C.dim,Font=Enum.Font.GothamSemibold,TextSize=s(10),TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd,Parent=b})
     local tab={btn=b,indicator=ind,lbl=lb,page=pg}
     table.insert(tabData,tab)
     b.MouseButton1Click:Connect(function()
@@ -582,47 +804,134 @@ local function makeTabBtn(t,pg,o,df)
     if df then activeTab=tab;pg.Visible=true end
 end
 
-makeTabBtn("VOIDSPAM", pageVoid,     1, true)
-makeTabBtn("EMOTES",   pageEmote,    2, false)
-makeTabBtn("ORBIT",    pageOrbit,    3, false)
-makeTabBtn("SETTINGS", pageSettings, 4, false)
+makeTabBtn("LEGITBOT",    pageLegitbot,  1, true)
+makeTabBtn("SILENT AIM",  pageSilent,    2, false)
+makeTabBtn("TRIGGERBOT",   pageTrigger,   3, false)
+makeTabBtn("RAGE",         pageRage,      4, false)
+makeTabBtn("EMOTES",       pageEmote,     5, false)
+makeTabBtn("SETTINGS",     pageSettings,  6, false)
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
--- ORBIT TAB
+-- TAB 1: LEGITBOT (Aimbot)
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+makeSection(pageLegitbot,"Status",1)
+
+local aimbotStatusColor = CameraController and C.green or C.red
+local aimbotStatusText = CameraController and "CameraController: Connected" or "CameraController: Not Found"
+make("TextLabel",{Size=UDim2.new(1,0,0,s(24)),BackgroundColor3=Color3.fromRGB(12,16,12),BorderSizePixel=0,Text="  "..aimbotStatusText,TextColor3=aimbotStatusColor,Font=Enum.Font.GothamBold,TextSize=s(9),TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Center,LayoutOrder=2,Parent=pageLegitbot})
+
+if IsMobile then
+    make("TextLabel",{Size=UDim2.new(1,0,0,s(24)),BackgroundColor3=Color3.fromRGB(14,14,22),BorderSizePixel=0,Text="  Mobile: Aimbot always active when enabled",TextColor3=C.cyan,Font=Enum.Font.GothamBold,TextSize=s(9),TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Center,LayoutOrder=3,Parent=pageLegitbot})
+end
+
+makeSection(pageLegitbot,"Aimbot Controls",4)
+
+local aimbotToggle = makeToggle(pageLegitbot,"Enable Aimbot",false,5,function(v) CFG.Aimbot.On=v; updateStatus(v and "Aimbot ON" or "Idle", v and C.green or C.dim) end)
+
+makeKeybind(pageLegitbot,"Activation Key",CFG.Aimbot.Key,6,function(k) CFG.Aimbot.Key=k end)
+
+makeToggle(pageLegitbot,"Aim At Head",true,7,function(v) CFG.Aimbot.AimHead=v end)
+makeToggle(pageLegitbot,"Show FOV Circle",false,8,function(v) CFG.Aimbot.ShowFOV=v end)
+
+makeSection(pageLegitbot,"Parameters",9)
+makeSlider(pageLegitbot,"FOV Radius",10,500,150,1,10,function(v) CFG.Aimbot.FOV=v end)
+makeSlider(pageLegitbot,"Smoothness",1,100,15,1,11,function(v) CFG.Aimbot.Smoothness=v end)
+
+makeSection(pageLegitbot,"Checks",12)
+makeToggle(pageLegitbot,"Team Check",false,13,function(v) CFG.Aimbot.TeamCheck=v end)
+makeToggle(pageLegitbot,"Visible Check",false,14,function(v) CFG.Aimbot.VisibleCheck=v end)
+
+makeSection(pageLegitbot,"Delay Position",15)
+makeSlider(pageLegitbot,"X Smooth",1,100,100,1,16,function(v) CFG.Aimbot.XSmooth=v end)
+makeSlider(pageLegitbot,"Y Smooth",1,100,100,1,17,function(v) CFG.Aimbot.YSmooth=v end)
+makeSlider(pageLegitbot,"Jump Smoothing",1,100,50,1,18,function(v) CFG.Aimbot.JumpSmooth=v end)
+
+makeSection(pageLegitbot,"Advanced Targeting",19)
+makeToggle(pageLegitbot,"Closest Part",false,20,function(v) CFG.Aimbot.ClosestPart=v end)
+makeToggle(pageLegitbot,"Closest Position",false,21,function(v) CFG.Aimbot.ClosestPos=v end)
+
+makeInfo(pageLegitbot,"Closest Part: aims at nearest visible body part. Closest Position: aims at nearest point on the part surface.",22)
+
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- TAB 2: SILENT AIM
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+makeSection(pageSilent,"Status",1)
+
+local silentStatusColor = (UtilityModule and silentHookApplied) and C.green or C.red
+local silentStatusText = silentHookApplied and "Utility.Raycast: Hooked" or (UtilityModule and "Utility: Found, hook pending" or "Utility: Not Found")
+make("TextLabel",{Size=UDim2.new(1,0,0,s(24)),BackgroundColor3=Color3.fromRGB(10,12,20),BorderSizePixel=0,Text="  "..silentStatusText,TextColor3=silentStatusColor,Font=Enum.Font.GothamBold,TextSize=s(9),TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Center,LayoutOrder=2,Parent=pageSilent})
+
+make("TextLabel",{Size=UDim2.new(1,0,0,s(36)),BackgroundColor3=Color3.fromRGB(10,12,20),BorderSizePixel=0,Text="  Hooks bullet raycasts to redirect shots\n  to enemy heads — your camera stays still",TextColor3=C.blue,Font=Enum.Font.GothamBold,TextSize=s(9),TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Center,TextWrapped=true,LayoutOrder=3,Parent=pageSilent})
+
+makeSection(pageSilent,"Silent Aim Controls",4)
+makeToggle(pageSilent,"Enable Silent Aim",false,5,function(v) CFG.Silent.On=v end)
+makeKeybind(pageSilent,"Activation Key",CFG.Silent.Key,6,function(k) CFG.Silent.Key=k end)
+
+makeSection(pageSilent,"FOV",7)
+makeToggle(pageSilent,"Show FOV Circle",false,8,function(v) CFG.Silent.ShowFOV=v end)
+makeSlider(pageSilent,"FOV Radius",10,600,200,1,9,function(v) CFG.Silent.FOV=v end)
+makeToggle(pageSilent,"Dynamic FOV (ADS)",false,10,function(v) CFG.Silent.DynamicFOV=v end)
+makeToggle(pageSilent,"Ignore FOV (Infinite)",false,11,function(v) CFG.Silent.IgnoreFOV=v end)
+
+makeSection(pageSilent,"Accuracy",12)
+makeSlider(pageSilent,"Hitchance %",0,100,100,1,13,function(v) CFG.Silent.Hitchance=v end)
+makeToggle(pageSilent,"Improve Accuracy (Predict)",false,14,function(v) CFG.Silent.ImproveAccuracy=v end)
+makeSlider(pageSilent,"Accuracy Factor",0,0.5,0.15,0.005,15,function(v) CFG.Silent.AccuracyFactor=v end)
+makeToggle(pageSilent,"Randomize Aimpoint",false,16,function(v) CFG.Silent.RandomAimpoint=v end)
+
+makeSection(pageSilent,"Extras",17)
+makeToggle(pageSilent,"Anti Katana (Skip Melee)",false,18,function(v) CFG.Silent.AntiKatana=v end)
+makeToggle(pageSilent,"Visible Check",false,19,function(v) CFG.Silent.VisibleCheck=v end)
+makeToggle(pageSilent,"Auto Shoot",false,20,function(v) CFG.Silent.AutoShoot=v end)
+
+makeInfo(pageSilent,"Silent aim replaces bullet raycasts server-side. Your camera never moves. Hitchance controls % of shots redirected.",21)
+
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- TAB 3: TRIGGERBOT
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+makeSection(pageTrigger,"How It Works",1)
+
+make("TextLabel",{Size=UDim2.new(1,0,0,s(44)),BackgroundColor3=Color3.fromRGB(20,16,10),BorderSizePixel=0,Text="  Auto-fires when crosshair is on an enemy\n  Delay = reaction time before first shot\n  Burst Ms = interval between rapid shots",TextColor3=C.orange,Font=Enum.Font.GothamBold,TextSize=s(9),TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Center,TextWrapped=true,LayoutOrder=2,Parent=pageTrigger})
+
+makeSection(pageTrigger,"Triggerbot Controls",3)
+local triggerToggle = makeToggle(pageTrigger,"Enable Triggerbot",false,4,function(v)
+    CFG.Trigger.On=v
+    TriggerState.waiting=false; TriggerState.delayTimer=0; TriggerState.cooldownTimer=0
+end)
+makeKeybind(pageTrigger,"Activation Key",CFG.Trigger.Key,5,function(k) CFG.Trigger.Key=k end)
+
+makeSection(pageTrigger,"Timing",6)
+makeSlider(pageTrigger,"Delay (ms)",0,500,50,5,7,function(v) CFG.Trigger.Delay=v end)
+makeSlider(pageTrigger,"Burst Ms",20,500,100,5,8,function(v) CFG.Trigger.BurstMs=v end)
+
+makeSection(pageTrigger,"Filter",9)
+makeSlider(pageTrigger,"Trigger FOV",5,200,25,1,10,function(v) CFG.Trigger.FOV=v end)
+makeToggle(pageTrigger,"Team Check",true,11,function(v) CFG.Trigger.TeamCheck=v end)
+
+-- Live monitor
+makeSection(pageTrigger,"Live Status",12)
+local trigMonFrame=make("Frame",{Size=UDim2.new(1,0,0,s(48)),BackgroundColor3=Color3.fromRGB(12,12,18),BorderSizePixel=0,LayoutOrder=13,Parent=pageTrigger})
+make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=trigMonFrame})
+make("UIStroke",{Color=C.border,Thickness=1,Parent=trigMonFrame})
+local trigStatusV=make("TextLabel",{Size=UDim2.new(1,-s(16),0,s(16)),Position=UDim2.new(0,s(10),0,s(6)),BackgroundTransparency=1,Text="STATUS: IDLE",TextColor3=C.dim,Font=Enum.Font.GothamBold,TextSize=FONT_SMALL,TextXAlignment=Enum.TextXAlignment.Left,Parent=trigMonFrame})
+local trigDelayV=make("TextLabel",{Size=UDim2.new(1,-s(16),0,s(16)),Position=UDim2.new(0,s(10),0,s(24)),BackgroundTransparency=1,Text="DELAY: 0ms",TextColor3=C.dim,Font=Enum.Font.GothamBold,TextSize=FONT_TINY,TextXAlignment=Enum.TextXAlignment.Left,Parent=trigMonFrame})
+
+makeInfo(pageTrigger,"Delay 0ms = instant fire. Higher delay = more human-like. Burst Ms controls fire rate during sustained aim.",14)
+
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- TAB 4: RAGE (Voidspam + Orbit)
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-makeSection(pageOrbit,"Orbit Target",1)
-local oSD=make("Frame",{Size=UDim2.new(1,0,0,s(34)),BackgroundColor3=C.elem,BorderSizePixel=0,LayoutOrder=2,Parent=pageOrbit})
-make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=oSD})
-local oST=make("TextLabel",{Size=UDim2.new(1,-s(16),1,0),Position=UDim2.new(0,s(10),0,0),BackgroundTransparency=1,Text="Orbit: None",TextColor3=C.dim,Font=Enum.Font.GothamSemibold,TextSize=FONT_MAIN,TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd,Parent=oSD})
-local oPL=make("Frame",{Name="OPL",Size=UDim2.new(1,0,0,0),BackgroundTransparency=1,AutomaticSize=Enum.AutomaticSize.Y,LayoutOrder=3,Parent=pageOrbit})
-make("UIListLayout",{SortOrder=Enum.SortOrder.Name,Padding=UDim.new(0,s(3)),Parent=oPL})
-local function selOT(p) CFG.OrbitTarget=p;oST.Text=p and("Orbit: "..p.Name) or "Orbit: None";oST.TextColor3=p and C.accentL or C.dim end
-local function addOPE(p) if p==LP or oPL:FindFirstChild("OE_"..p.Name) then return end local e=make("Frame",{Name="OE_"..p.Name,Size=UDim2.new(1,0,0,s(32)),BackgroundColor3=C.elem,BorderSizePixel=0,Parent=oPL});make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=e});make("TextLabel",{Size=UDim2.new(1,-s(70),1,0),Position=UDim2.new(0,s(10),0,0),BackgroundTransparency=1,Text=p.DisplayName,TextColor3=C.text,Font=Enum.Font.Gotham,TextSize=s(11),TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd,Parent=e});local sb=make("TextButton",{Size=UDim2.new(0,s(50),0,s(22)),Position=UDim2.new(1,-s(58),0.5,-s(11)),BackgroundColor3=C.accent,BorderSizePixel=0,Text="SET",TextColor3=C.text,Font=Enum.Font.GothamBold,TextSize=FONT_TINY,Parent=e});make("UICorner",{CornerRadius=UDim.new(0,s(2)),Parent=sb});sb.MouseButton1Click:Connect(function() selOT(p) end) end
-local function remOPE(p) local e=oPL:FindFirstChild("OE_"..p.Name);if e then e:Destroy() end;if CFG.OrbitTarget==p then selOT(nil) end end
-for _,p in pairs(Players:GetPlayers()) do addOPE(p) end
-Players.PlayerAdded:Connect(addOPE);Players.PlayerRemoving:Connect(remOPE)
-makeButton(pageOrbit,"DESELECT",C.off,4,function() selOT(nil) end)
-makeSection(pageOrbit,"Orbit Controls",5)
-local orbitToggle=makeToggle(pageOrbit,"Enable Orbit",false,6,function(v) CFG.Orbit.On=v;if v and not CFG.OrbitTarget then updateStatus("Orbit — no target!",C.red) elseif v then updateStatus("Orbiting "..CFG.OrbitTarget.Name,C.green) else updateStatus("Idle",C.dim) end end)
-makeSection(pageOrbit,"Parameters",7)
-makeSlider(pageOrbit,"Radius",3,35,12,1,8,function(v) CFG.Orbit.Radius=v end)
-makeSlider(pageOrbit,"Speed",0.5,10,2,0.5,9,function(v) CFG.Orbit.Speed=v end)
-makeSlider(pageOrbit,"Height",-20,20,0,1,10,function(v) CFG.Orbit.Height=v end)
+-- === VOIDSPAM SECTION ===
+makeSection(pageRage,"POV Split Desync",1)
+make("TextLabel",{Size=UDim2.new(1,0,0,s(52)),BackgroundColor3=Color3.fromRGB(12,20,12),BorderSizePixel=0,Text="  YOUR SCREEN: Normal gameplay, stable camera\n  ENEMY SCREEN: Your character is UNDERGROUND\n  ATTACK: Hitbox peeks up to fire, then hides",TextColor3=C.green,Font=Enum.Font.GothamBold,TextSize=s(9),TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Center,TextWrapped=true,LayoutOrder=2,Parent=pageRage})
 
---━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
--- ★★★ VOIDSPAM TAB — POV SPLIT DESYNC (unchanged from v6) ★★★
---━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-makeSection(pageVoid,"POV Split Desync",1)
-make("TextLabel",{Size=UDim2.new(1,0,0,s(52)),BackgroundColor3=Color3.fromRGB(12,20,12),BorderSizePixel=0,Text="  YOUR SCREEN: Normal gameplay, stable camera\n  ENEMY SCREEN: Your character is UNDERGROUND\n  ATTACK: Hitbox peeks up to fire, then hides",TextColor3=C.green,Font=Enum.Font.GothamBold,TextSize=s(9),TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Center,TextWrapped=true,LayoutOrder=2,Parent=pageVoid})
-
-local voidToggle=makeToggle(pageVoid,"Enable Voidspam",false,3,function(state)
+local voidToggle=makeToggle(pageRage,"Enable Voidspam",false,3,function(state)
     CFG.Void.On=state
     if state then
         if humanoidRootPart and humanoidRootPart.Parent then
             Desync.realCFrame=humanoidRootPart.CFrame;Desync.currentDepth=0;Desync.phase="hide";Desync.phaseTimer=0;Desync.shotsFired=0;Desync.shotCooldown=0;Desync.totalCycles=0;Desync.projDetected=false;Desync.active=true
-            updateStatus("DESYNC ACTIVE — underground",C.red)
+            updateStatus("DESYNC ACTIVE",C.red)
         else Desync.active=false;updateStatus("No character!",C.red) end
     else
         Desync.active=false;Desync.phase="idle"
@@ -631,25 +940,23 @@ local voidToggle=makeToggle(pageVoid,"Enable Voidspam",false,3,function(state)
     end
 end)
 
-makeSection(pageVoid,"Ragebot Cycle",4)
-make("TextLabel",{Size=UDim2.new(1,0,0,s(24)),BackgroundColor3=Color3.fromRGB(14,14,22),BorderSizePixel=0,Text="  HIDE = underground | ATTACK = peek & shoot",TextColor3=C.dim,Font=Enum.Font.Gotham,TextSize=s(9),TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Center,LayoutOrder=5,Parent=pageVoid})
-makeSlider(pageVoid,"Hide Timer",0.01,1,0.3,0.01,6,function(v) CFG.Void.HideTime=v end)
-makeSlider(pageVoid,"Attack Timer",0.01,1,0.15,0.01,7,function(v) CFG.Void.AttackTime=v end)
-makeSlider(pageVoid,"Shoot Attempt",1,2,1,1,8,function(v) CFG.Void.ShootAttempt=v end)
-makeToggle(pageVoid,"Auto Fire",false,9,function(v) CFG.Void.AutoFire=v end)
+makeSection(pageRage,"Ragebot Cycle",4)
+makeSlider(pageRage,"Hide Timer",0.01,1,0.3,0.01,5,function(v) CFG.Void.HideTime=v end)
+makeSlider(pageRage,"Attack Timer",0.01,1,0.15,0.01,6,function(v) CFG.Void.AttackTime=v end)
+makeSlider(pageRage,"Shoot Attempt",1,2,1,1,7,function(v) CFG.Void.ShootAttempt=v end)
+makeToggle(pageRage,"Auto Fire",false,8,function(v) CFG.Void.AutoFire=v end)
 
-makeSection(pageVoid,"Underground",10)
-make("TextLabel",{Size=UDim2.new(1,0,0,s(20)),BackgroundColor3=Color3.fromRGB(14,14,22),BorderSizePixel=0,Text="  Incremental stepping (anti-cheat safe)",TextColor3=C.dim,Font=Enum.Font.Gotham,TextSize=s(9),TextXAlignment=Enum.TextXAlignment.Left,LayoutOrder=11,Parent=pageVoid})
-makeSlider(pageVoid,"Void Depth",50,500,200,10,12,function(v) CFG.Void.VoidDepth=v end)
-makeSlider(pageVoid,"Step Speed",5,100,30,5,13,function(v) CFG.Void.StepSpeed=v end)
+makeSection(pageRage,"Underground",9)
+makeSlider(pageRage,"Void Depth",50,500,200,10,10,function(v) CFG.Void.VoidDepth=v end)
+makeSlider(pageRage,"Step Speed",5,100,30,5,11,function(v) CFG.Void.StepSpeed=v end)
 
-makeSection(pageVoid,"Projectile Mimic",14)
-makeToggle(pageVoid,"Projectile Mimic",false,15,function(v) CFG.Void.ProjectileMimic=v end)
-makeSlider(pageVoid,"Detection Range",20,150,80,5,16,function(v) CFG.Void.DetectionRange=v end)
+makeSection(pageRage,"Projectile Mimic",12)
+makeToggle(pageRage,"Projectile Mimic",false,13,function(v) CFG.Void.ProjectileMimic=v end)
+makeSlider(pageRage,"Detection Range",20,150,80,5,14,function(v) CFG.Void.DetectionRange=v end)
 
--- Monitor
-makeSection(pageVoid,"Live Monitor",17)
-local monFrame=make("Frame",{Size=UDim2.new(1,0,0,s(82)),BackgroundColor3=Color3.fromRGB(12,12,18),BorderSizePixel=0,LayoutOrder=18,Parent=pageVoid})
+-- Void Monitor
+makeSection(pageRage,"Void Monitor",15)
+local monFrame=make("Frame",{Size=UDim2.new(1,0,0,s(82)),BackgroundColor3=Color3.fromRGB(12,12,18),BorderSizePixel=0,LayoutOrder=16,Parent=pageRage})
 make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=monFrame})
 make("UIStroke",{Color=C.border,Thickness=1,Parent=monFrame})
 local monPhaseV=make("TextLabel",{Size=UDim2.new(1,-s(16),0,s(16)),Position=UDim2.new(0,s(10),0,s(6)),BackgroundTransparency=1,Text="PHASE: IDLE",TextColor3=C.dim,Font=Enum.Font.GothamBold,TextSize=FONT_SMALL,TextXAlignment=Enum.TextXAlignment.Left,Parent=monFrame})
@@ -657,280 +964,143 @@ local monDepthV=make("TextLabel",{Size=UDim2.new(1,-s(16),0,s(16)),Position=UDim
 local monShotsV=make("TextLabel",{Size=UDim2.new(1,-s(16),0,s(16)),Position=UDim2.new(0,s(10),0,s(38)),BackgroundTransparency=1,Text="SHOTS: 0 / 1",TextColor3=C.dim,Font=Enum.Font.GothamBold,TextSize=FONT_TINY,TextXAlignment=Enum.TextXAlignment.Left,Parent=monFrame})
 local monCycleV=make("TextLabel",{Size=UDim2.new(1,-s(16),0,s(16)),Position=UDim2.new(0,s(10),0,s(54)),BackgroundTransparency=1,Text="CYCLES: 0",TextColor3=C.dim,Font=Enum.Font.GothamBold,TextSize=FONT_TINY,TextXAlignment=Enum.TextXAlignment.Left,Parent=monFrame})
 
---━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
--- ★★★ EMOTES TAB ★★★
---━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- === ORBIT SECTION ===
+makeSection(pageRage,"Orbit Target",20)
+local oSD=make("Frame",{Size=UDim2.new(1,0,0,s(34)),BackgroundColor3=C.elem,BorderSizePixel=0,LayoutOrder=21,Parent=pageRage})
+make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=oSD})
+local oST=make("TextLabel",{Size=UDim2.new(1,-s(16),1,0),Position=UDim2.new(0,s(10),0,0),BackgroundTransparency=1,Text="Orbit: None",TextColor3=C.dim,Font=Enum.Font.GothamSemibold,TextSize=FONT_MAIN,TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd,Parent=oSD})
+local oPL=make("Frame",{Name="OPL",Size=UDim2.new(1,0,0,0),BackgroundTransparency=1,AutomaticSize=Enum.AutomaticSize.Y,LayoutOrder=22,Parent=pageRage})
+make("UIListLayout",{SortOrder=Enum.SortOrder.Name,Padding=UDim.new(0,s(3)),Parent=oPL})
 
-makeSection(pageEmote, "Custom Animation", 1)
-
-make("TextLabel",{
-    Size=UDim2.new(1,0,0,s(28)),
-    BackgroundColor3=Color3.fromRGB(20,14,28), BorderSizePixel=0,
-    Text="  Play any animation ID — works like UE emotes",
-    TextColor3=C.purple, Font=Enum.Font.GothamBold, TextSize=s(9),
-    TextXAlignment=Enum.TextXAlignment.Left, TextYAlignment=Enum.TextYAlignment.Center,
-    LayoutOrder=2, Parent=pageEmote,
-})
-
--- ── ANIMATION ID INPUT ──
-makeSection(pageEmote, "Animation ID", 3)
-
-local animInput = makeTextInput(pageEmote, "Enter animation ID (numbers only)...", 4, function(text)
-    -- Clean: remove spaces, extract numbers
-    local cleaned = text:gsub("%s+", "")
-    CFG.Emote.AnimID = cleaned
-end)
-
--- ── PLAY / STOP BUTTONS ──
-local playBtnFrame = make("Frame",{
-    Size = UDim2.new(1, 0, 0, BTN_H),
-    BackgroundTransparency = 1,
-    LayoutOrder = 5,
-    Parent = pageEmote,
-})
-
-local playBtn = make("TextButton",{
-    Size = UDim2.new(0.48, 0, 1, 0),
-    Position = UDim2.new(0, 0, 0, 0),
-    BackgroundColor3 = C.green,
-    BorderSizePixel = 0,
-    Text = "PLAY",
-    TextColor3 = C.text,
-    Font = Enum.Font.GothamBold,
-    TextSize = FONT_MAIN,
-    Parent = playBtnFrame,
-})
-make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=playBtn})
-
-local stopBtn = make("TextButton",{
-    Size = UDim2.new(0.48, 0, 1, 0),
-    Position = UDim2.new(0.52, 0, 0, 0),
-    BackgroundColor3 = C.red,
-    BorderSizePixel = 0,
-    Text = "STOP",
-    TextColor3 = C.text,
-    Font = Enum.Font.GothamBold,
-    TextSize = FONT_MAIN,
-    Parent = playBtnFrame,
-})
-make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=stopBtn})
-
--- ── EMOTE STATUS ──
-local emoteStatusFrame = make("Frame",{
-    Size = UDim2.new(1, 0, 0, s(36)),
-    BackgroundColor3 = Color3.fromRGB(14, 14, 20),
-    BorderSizePixel = 0,
-    LayoutOrder = 6,
-    Parent = pageEmote,
-})
-make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=emoteStatusFrame})
-
-local emoteStatusDot = make("Frame",{
-    Size = UDim2.new(0, s(8), 0, s(8)),
-    Position = UDim2.new(0, s(10), 0.5, -s(4)),
-    BackgroundColor3 = C.off,
-    BorderSizePixel = 0,
-    Parent = emoteStatusFrame,
-})
-make("UICorner",{CornerRadius=UDim.new(1,0),Parent=emoteStatusDot})
-
-local emoteStatusLabel = make("TextLabel",{
-    Size = UDim2.new(1, -s(30), 1, 0),
-    Position = UDim2.new(0, s(24), 0, 0),
-    BackgroundTransparency = 1,
-    Text = "No animation playing",
-    TextColor3 = C.dim,
-    Font = Enum.Font.GothamSemibold,
-    TextSize = s(12),
-    TextXAlignment = Enum.TextXAlignment.Left,
-    TextTruncate = Enum.TextTruncate.AtEnd,
-    Parent = emoteStatusFrame,
-})
-
-local function updateEmoteStatus(msg, color)
-    emoteStatusLabel.Text = msg
-    emoteStatusDot.BackgroundColor3 = color or C.off
+local function selOT(p) CFG.OrbitTarget=p;oST.Text=p and("Orbit: "..p.Name) or "Orbit: None";oST.TextColor3=p and C.accentL or C.dim end
+local function addOPE(p)
+    if p==LP or oPL:FindFirstChild("OE_"..p.Name) then return end
+    local e=make("Frame",{Name="OE_"..p.Name,Size=UDim2.new(1,0,0,s(32)),BackgroundColor3=C.elem,BorderSizePixel=0,Parent=oPL})
+    make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=e})
+    make("TextLabel",{Size=UDim2.new(1,-s(70),1,0),Position=UDim2.new(0,s(10),0,0),BackgroundTransparency=1,Text=p.DisplayName,TextColor3=C.text,Font=Enum.Font.Gotham,TextSize=s(11),TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd,Parent=e})
+    local sb=make("TextButton",{Size=UDim2.new(0,s(50),0,s(22)),Position=UDim2.new(1,-s(58),0.5,-s(11)),BackgroundColor3=C.accent,BorderSizePixel=0,Text="SET",TextColor3=C.text,Font=Enum.Font.GothamBold,TextSize=FONT_TINY,Parent=e})
+    make("UICorner",{CornerRadius=UDim.new(0,s(2)),Parent=sb})
+    sb.MouseButton1Click:Connect(function() selOT(p) end)
 end
+local function remOPE(p) local e=oPL:FindFirstChild("OE_"..p.Name);if e then e:Destroy() end;if CFG.OrbitTarget==p then selOT(nil) end end
+for _,p in pairs(Players:GetPlayers()) do addOPE(p) end
+Players.PlayerAdded:Connect(addOPE);Players.PlayerRemoving:Connect(remOPE)
+makeButton(pageRage,"DESELECT TARGET",C.off,23,function() selOT(nil) end)
 
--- ── SETTINGS ──
-makeSection(pageEmote, "Settings", 7)
+makeSection(pageRage,"Orbit Controls",24)
+local orbitToggle=makeToggle(pageRage,"Enable Orbit",false,25,function(v) CFG.Orbit.On=v end)
+makeSlider(pageRage,"Radius",3,35,12,1,26,function(v) CFG.Orbit.Radius=v end)
+makeSlider(pageRage,"Speed",0.5,10,2,0.5,27,function(v) CFG.Orbit.Speed=v end)
+makeSlider(pageRage,"Height",-20,20,0,1,28,function(v) CFG.Orbit.Height=v end)
 
-makeSlider(pageEmote, "Speed", 0.1, 5, 1, 0.1, 8, function(v)
-    CFG.Emote.Speed = v
-    -- Update speed live if playing
-    if EmoteState.currentTrack then
-        pcall(function()
-            EmoteState.currentTrack:AdjustSpeed(v)
-        end)
-    end
-end)
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- TAB 5: EMOTES
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+makeSection(pageEmote,"Custom Animation",1)
+local animInput=makeTextInput(pageEmote,"Enter animation ID...",2,function(text) CFG.Emote.AnimID=text:gsub("%s+","") end)
 
-makeToggle(pageEmote, "Loop Animation", true, 9, function(v)
-    CFG.Emote.Loop = v
-end)
+local playBtnFrame=make("Frame",{Size=UDim2.new(1,0,0,BTN_H),BackgroundTransparency=1,LayoutOrder=3,Parent=pageEmote})
+local playBtn=make("TextButton",{Size=UDim2.new(0.48,0,1,0),BackgroundColor3=C.green,BorderSizePixel=0,Text="PLAY",TextColor3=C.text,Font=Enum.Font.GothamBold,TextSize=FONT_MAIN,Parent=playBtnFrame})
+make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=playBtn})
+local stopBtnE=make("TextButton",{Size=UDim2.new(0.48,0,1,0),Position=UDim2.new(0.52,0,0,0),BackgroundColor3=C.red,BorderSizePixel=0,Text="STOP",TextColor3=C.text,Font=Enum.Font.GothamBold,TextSize=FONT_MAIN,Parent=playBtnFrame})
+make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=stopBtnE})
 
--- ── PLAY / STOP LOGIC ──
+local emoteStatusFrame=make("Frame",{Size=UDim2.new(1,0,0,s(36)),BackgroundColor3=Color3.fromRGB(14,14,20),BorderSizePixel=0,LayoutOrder=4,Parent=pageEmote})
+make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=emoteStatusFrame})
+local emoteStatusDot=make("Frame",{Size=UDim2.new(0,s(8),0,s(8)),Position=UDim2.new(0,s(10),0.5,-s(4)),BackgroundColor3=C.off,BorderSizePixel=0,Parent=emoteStatusFrame})
+make("UICorner",{CornerRadius=UDim.new(1,0),Parent=emoteStatusDot})
+local emoteStatusLabel=make("TextLabel",{Size=UDim2.new(1,-s(30),1,0),Position=UDim2.new(0,s(24),0,0),BackgroundTransparency=1,Text="No animation playing",TextColor3=C.dim,Font=Enum.Font.GothamSemibold,TextSize=s(12),TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd,Parent=emoteStatusFrame})
+local function updateEmoteStatus(msg,color) emoteStatusLabel.Text=msg; emoteStatusDot.BackgroundColor3=color or C.off end
+
+makeSection(pageEmote,"Settings",5)
+makeSlider(pageEmote,"Speed",0.1,5,1,0.1,6,function(v) CFG.Emote.Speed=v; if EmoteState.currentTrack then pcall(function() EmoteState.currentTrack:AdjustSpeed(v) end) end end)
+makeToggle(pageEmote,"Loop Animation",true,7,function(v) CFG.Emote.Loop=v end)
 
 playBtn.MouseButton1Click:Connect(function()
-    local id = animInput.getText()
-    if id == "" then
-        updateEmoteStatus("Enter an animation ID first!", C.red)
-        return
-    end
-
-    CFG.Emote.AnimID = id:gsub("%s+", "")
-    CFG.Emote.On = true
-
-    updateEmoteStatus("Loading: " .. CFG.Emote.AnimID .. "...", C.orange)
-
+    local id=animInput.getText(); if id=="" then updateEmoteStatus("Enter an ID first!",C.red); return end
+    CFG.Emote.AnimID=id:gsub("%s+",""); CFG.Emote.On=true
+    updateEmoteStatus("Loading: "..CFG.Emote.AnimID.."...",C.orange)
     task.defer(function()
-        playEmote(CFG.Emote.AnimID, CFG.Emote.Speed)
-
-        if EmoteState.playing then
-            updateEmoteStatus("Playing: " .. CFG.Emote.AnimID, C.green)
-        else
-            updateEmoteStatus("Failed to load animation", C.red)
-            CFG.Emote.On = false
-        end
+        playEmote(CFG.Emote.AnimID,CFG.Emote.Speed)
+        if EmoteState.playing then updateEmoteStatus("Playing: "..CFG.Emote.AnimID,C.green)
+        else updateEmoteStatus("Failed to load",C.red); CFG.Emote.On=false end
     end)
 end)
+stopBtnE.MouseButton1Click:Connect(function() CFG.Emote.On=false; stopEmote(); updateEmoteStatus("Stopped",C.dim) end)
 
-stopBtn.MouseButton1Click:Connect(function()
-    CFG.Emote.On = false
-    stopEmote()
-    updateEmoteStatus("Stopped", C.dim)
-end)
-
--- ── PRESETS ──
-makeSection(pageEmote, "Preset Emotes", 10)
-
-make("TextLabel",{
-    Size=UDim2.new(1,0,0,s(20)),
-    BackgroundColor3=Color3.fromRGB(14,14,22), BorderSizePixel=0,
-    Text="  Tap a preset to play it instantly",
-    TextColor3=C.dim, Font=Enum.Font.Gotham, TextSize=s(9),
-    TextXAlignment=Enum.TextXAlignment.Left, TextYAlignment=Enum.TextYAlignment.Center,
-    LayoutOrder=11, Parent=pageEmote,
-})
-
--- Preset emote list
--- [P2] Replace these IDs with actual working animation IDs for Rivals
-local presets = {
-    {"Griddy",          "4212455893"},
-    {"Sturdy",          "12534727886"},
-    {"Hawk Tuah",       "92281817840531"},
-    {"Orange Justice",  "2374020973"},
-    {"Hype",            "2066774042"},
-    {"Headless Walk",   "5833928936"},
-    {"Floss",           "3337994105"},
-    {"Default Dance",   "5104377791"},
-    {"T-Pose",          "5104340929"},
-    {"Spin",            "5104336439"},
-    {"Lay Down",        "4689362868"},
-    {"Push Ups",        "4840397106"},
+makeSection(pageEmote,"Presets",8)
+local presets={
+    {"Griddy","4212455893"},{"Sturdy","12534727886"},{"Hawk Tuah","92281817840531"},
+    {"Orange Justice","2374020973"},{"Hype","2066774042"},{"Headless Walk","5833928936"},
+    {"Floss","3337994105"},{"Default Dance","5104377791"},{"T-Pose","5104340929"},
+    {"Spin","5104336439"},{"Lay Down","4689362868"},{"Push Ups","4840397106"},
 }
-
 local function onPresetPlay(animId)
-    CFG.Emote.AnimID = animId
-    CFG.Emote.On = true
-    animInput.setText(animId)
-    updateEmoteStatus("Loading: " .. animId .. "...", C.orange)
-
+    CFG.Emote.AnimID=animId; CFG.Emote.On=true; animInput.setText(animId)
+    updateEmoteStatus("Loading: "..animId.."...",C.orange)
     task.defer(function()
-        playEmote(animId, CFG.Emote.Speed)
-        if EmoteState.playing then
-            updateEmoteStatus("Playing: " .. animId, C.green)
-        else
-            updateEmoteStatus("Failed — ID may be invalid", C.red)
-            CFG.Emote.On = false
-        end
+        playEmote(animId,CFG.Emote.Speed)
+        if EmoteState.playing then updateEmoteStatus("Playing: "..animId,C.green)
+        else updateEmoteStatus("Failed",C.red); CFG.Emote.On=false end
     end)
 end
+for i,preset in ipairs(presets) do makePresetBtn(pageEmote,preset[1],preset[2],8+i,onPresetPlay) end
 
-for i, preset in ipairs(presets) do
-    makePresetBtn(pageEmote, preset[1], preset[2], 11 + i, onPresetPlay)
-end
-
--- ── EXTRA TOOLS ──
-makeSection(pageEmote, "Tools", 30)
-
-makeButton(pageEmote, "STOP ALL ANIMATIONS", C.off, 31, function()
-    CFG.Emote.On = false
-    stopEmote()
-
-    -- Also stop ALL playing animation tracks
-    if character then
-        local hum = character:FindFirstChildWhichIsA("Humanoid")
-        if hum then
-            for _, track in next, hum:GetPlayingAnimationTracks() do
-                pcall(function() track:Stop() end)
-            end
-        end
-    end
-
-    updateEmoteStatus("All animations stopped", C.dim)
+makeButton(pageEmote,"STOP ALL ANIMATIONS",C.off,30,function()
+    CFG.Emote.On=false; stopEmote()
+    if character then local hum=character:FindFirstChildWhichIsA("Humanoid"); if hum then for _,t in next,hum:GetPlayingAnimationTracks() do pcall(function() t:Stop() end) end end end
+    updateEmoteStatus("All stopped",C.dim)
 end)
 
-makeInfo(pageEmote, "Paste any Roblox animation ID. Works with asset IDs and rbxassetid:// links. Speed 1 = normal. Loops auto-replay when animation ends.", 32)
-
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
--- SETTINGS TAB
+-- TAB 6: SETTINGS
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 makeSection(pageSettings,"General",1)
 make("TextLabel",{Size=UDim2.new(1,0,0,s(34)),BackgroundColor3=C.elem,BorderSizePixel=0,Text=IsMobile and "  Toggle UI: Floating [R] button" or "  Toggle UI: RCtrl / [R] button",TextColor3=C.text,Font=Enum.Font.Gotham,TextSize=s(12),TextXAlignment=Enum.TextXAlignment.Left,LayoutOrder=2,Parent=pageSettings})
-make("TextLabel",{Size=UDim2.new(1,0,0,s(28)),BackgroundColor3=C.elem,BorderSizePixel=0,Text="  Device: "..(IsMobile and "MOBILE" or "PC"),TextColor3=IsMobile and C.green or C.accent,Font=Enum.Font.GothamSemibold,TextSize=s(12),TextXAlignment=Enum.TextXAlignment.Left,LayoutOrder=3,Parent=pageSettings})
+make("TextLabel",{Size=UDim2.new(1,0,0,s(28)),BackgroundColor3=C.elem,BorderSizePixel=0,Text="  Device: "..(IsMobile and "MOBILE (aim always on)" or "PC (keybinds active)"),TextColor3=IsMobile and C.green or C.accent,Font=Enum.Font.GothamSemibold,TextSize=s(12),TextXAlignment=Enum.TextXAlignment.Left,LayoutOrder=3,Parent=pageSettings})
 
-makeButton(pageSettings,"STOP ALL",C.red,4,function()
-    CFG.Orbit.On=false;CFG.Void.On=false;CFG.Emote.On=false
-    orbitToggle.setState(false);voidToggle.setState(false)
-    stopEmote()
-    Desync.active=false;Desync.phase="idle"
-    if Desync.realCFrame and humanoidRootPart and humanoidRootPart.Parent then
-        humanoidRootPart.CFrame=Desync.realCFrame
-    end
-    Desync.currentDepth=0
-    updateStatus("All stopped",C.dim)
-    updateEmoteStatus("Stopped",C.dim)
+makeSection(pageSettings,"Quick Actions",4)
+makeButton(pageSettings,"STOP ALL FEATURES",C.red,5,function()
+    CFG.Aimbot.On=false; CFG.Silent.On=false; CFG.Trigger.On=false
+    CFG.Orbit.On=false; CFG.Void.On=false; CFG.Emote.On=false
+    aimbotToggle.setState(false); triggerToggle.setState(false)
+    voidToggle.setState(false); orbitToggle.setState(false)
+    stopEmote(); Desync.active=false; Desync.phase="idle"
+    if Desync.realCFrame and humanoidRootPart and humanoidRootPart.Parent then humanoidRootPart.CFrame=Desync.realCFrame end
+    Desync.currentDepth=0; TriggerState.waiting=false
+    updateStatus("All stopped",C.dim); updateEmoteStatus("Stopped",C.dim)
 end)
 
-makeSection(pageSettings,"Script",5)
-makeButton(pageSettings,"DESTROY SCRIPT",C.red,6,function()
-    CFG.Orbit.On=false;CFG.Void.On=false;CFG.Emote.On=false
-    Desync.active=false;stopEmote()
-    if Desync.realCFrame and humanoidRootPart and humanoidRootPart.Parent then
-        humanoidRootPart.CFrame=Desync.realCFrame
-    end
+makeSection(pageSettings,"Keybind Summary",6)
+if not IsMobile then
+    make("TextLabel",{Size=UDim2.new(1,0,0,s(60)),BackgroundColor3=C.elem,BorderSizePixel=0,Text="  Aimbot: Change in LEGITBOT tab\n  Silent Aim: Change in SILENT AIM tab\n  Triggerbot: Change in TRIGGERBOT tab\n  Press ESC in keybind listener = set to NONE",TextColor3=C.dim,Font=Enum.Font.Gotham,TextSize=FONT_TINY,TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Top,LayoutOrder=7,Parent=pageSettings})
+else
+    make("TextLabel",{Size=UDim2.new(1,0,0,s(34)),BackgroundColor3=C.elem,BorderSizePixel=0,Text="  Mobile: All features activate when toggled ON\n  No keybind hold required",TextColor3=C.cyan,Font=Enum.Font.Gotham,TextSize=FONT_TINY,TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Top,LayoutOrder=7,Parent=pageSettings})
+end
+
+makeSection(pageSettings,"Destroy",8)
+makeButton(pageSettings,"DESTROY SCRIPT",C.red,9,function()
+    CFG.Aimbot.On=false; CFG.Silent.On=false; CFG.Trigger.On=false
+    CFG.Orbit.On=false; CFG.Void.On=false; CFG.Emote.On=false
+    Desync.active=false; stopEmote()
+    if Desync.realCFrame and humanoidRootPart and humanoidRootPart.Parent then humanoidRootPart.CFrame=Desync.realCFrame end
     pcall(function() RunService:UnbindFromRenderStep("RivalsDesync") end)
+    pcall(function() if aimbotFOVCircle then aimbotFOVCircle:Remove() end end)
+    pcall(function() if silentFOVCircle then silentFOVCircle:Remove() end end)
+    pcall(function()
+        if silentHookApplied and silentOriginalRaycast and UtilityModule then
+            UtilityModule.Raycast=silentOriginalRaycast; silentHookApplied=false
+        end
+    end)
     for _,c in pairs(ActiveConnections) do pcall(function() c:Disconnect() end) end
     gui:Destroy()
 end)
 
-makeSection(pageSettings,"Team",7)
-make("TextLabel",{Size=UDim2.new(1,0,0,s(55)),BackgroundColor3=C.elem,BorderSizePixel=0,Text="  [P1] Builder\n  [P2] Tester & Tweaker\n  [P3] Polish & Deploy",TextColor3=C.dim,Font=Enum.Font.Gotham,TextSize=FONT_TINY,TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Top,LayoutOrder=8,Parent=pageSettings})
-
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
--- CORE: ORBIT
+-- CORE LOOP: AIMBOT + FOV + TRIGGERBOT + SILENT AUTO-SHOOT
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-local orbitAngle=0
-table.insert(ActiveConnections,RunService.Heartbeat:Connect(function(dt)
-    if not CFG.Orbit.On or Desync.active or not CFG.OrbitTarget then return end
-    local mc=LP.Character;if not mc then return end
-    local mr=mc:FindFirstChild("HumanoidRootPart");if not mr then return end
-    local tc=CFG.OrbitTarget.Character;if not tc then return end
-    local tr=tc:FindFirstChild("HumanoidRootPart");if not tr then return end
-    local mh=mc:FindFirstChildOfClass("Humanoid")
-    if mh and mh.Health<=0 then return end
-    orbitAngle=orbitAngle+(CFG.Orbit.Speed*dt)
-    if orbitAngle>math.pi*2 then orbitAngle=orbitAngle-math.pi*2 end
-    local tp=tr.Position
-    mr.CFrame=CFrame.new(tp+Vector3.new(math.cos(orbitAngle)*CFG.Orbit.Radius,CFG.Orbit.Height,math.sin(orbitAngle)*CFG.Orbit.Radius),tp)
-end))
-
---━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
--- CORE: POV SPLIT DESYNC ENGINE (unchanged from v6)
---━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+local lastAutoShootTime = 0
+local trigMonClock = 0
 
 RunService:BindToRenderStep("RivalsDesync", Enum.RenderPriority.Camera.Value - 1, function()
     if not Desync.active then return end
@@ -939,87 +1109,213 @@ RunService:BindToRenderStep("RivalsDesync", Enum.RenderPriority.Camera.Value - 1
     humanoidRootPart.CFrame = Desync.realCFrame
 end)
 
+table.insert(ActiveConnections, RunService.RenderStepped:Connect(function(dt)
+    camera = workspace.CurrentCamera
+    local center = getScreenCenter()
+
+    -- Aimbot FOV circle
+    if aimbotFOVCircle then
+        pcall(function()
+            aimbotFOVCircle.Position=center; aimbotFOVCircle.Radius=CFG.Aimbot.FOV
+            aimbotFOVCircle.Visible=CFG.Aimbot.ShowFOV and CFG.Aimbot.On
+        end)
+    end
+
+    -- Silent FOV circle
+    if silentFOVCircle then
+        pcall(function()
+            silentFOVCircle.Position=center; silentFOVCircle.Radius=silentGetEffectiveFOV()
+            silentFOVCircle.Visible=CFG.Silent.ShowFOV and CFG.Silent.On
+        end)
+    end
+
+    -- === AIMBOT ===
+    if CFG.Aimbot.On and CameraController and isKeyHeld(CFG.Aimbot.Key) then
+        local targetPart = getAimbotTarget()
+        if targetPart then
+            pcall(function()
+                local camPos = camera.CFrame.Position
+                local aimPos
+                if CFG.Aimbot.ClosestPos then
+                    aimPos = getClosestPointOnPart(targetPart)
+                else
+                    aimPos = targetPart.Position
+                end
+                local dirUnit = (aimPos - camPos).Unit
+                local targetPitch = math.asin(dirUnit.Y)
+                local targetYaw   = math.atan2(-dirUnit.X, -dirUnit.Z)
+                local baseAlpha = CFG.Aimbot.Smoothness / 100
+                local xFactor = CFG.Aimbot.XSmooth / 100
+                local yFactor = CFG.Aimbot.YSmooth / 100
+                local yawAlpha   = baseAlpha * xFactor
+                local pitchAlpha = baseAlpha * yFactor
+                if isAirborne(targetPart.Parent) then
+                    local jf = CFG.Aimbot.JumpSmooth / 100
+                    yawAlpha = yawAlpha * jf; pitchAlpha = pitchAlpha * jf
+                end
+                yawAlpha   = math.clamp(yawAlpha, 0, 1)
+                pitchAlpha = math.clamp(pitchAlpha, 0, 1)
+                local current = CameraController.Rotation
+                local newPitch = current.X + (targetPitch - current.X) * pitchAlpha
+                local newYaw   = current.Y + angleDiff(current.Y, targetYaw) * yawAlpha
+                CameraController:SetRotation(Vector2.new(newPitch, newYaw))
+            end)
+        end
+    end
+
+    -- === SILENT AIM AUTO-SHOOT ===
+    if CFG.Silent.On and CFG.Silent.AutoShoot and isKeyHeld(CFG.Silent.Key) then
+        local now = tick()
+        if now - lastAutoShootTime >= 0.1 then
+            local target = silentFindTarget()
+            if target then
+                lastAutoShootTime = now
+                pcall(function() mouse1click() end)
+            end
+        end
+    end
+
+    -- === TRIGGERBOT ===
+    trigMonClock = trigMonClock + dt
+    if CFG.Trigger.On and isKeyHeld(CFG.Trigger.Key) then
+        local target = getTriggerTarget()
+        if target then
+            if not TriggerState.waiting then
+                TriggerState.waiting = true
+                TriggerState.delayTimer = CFG.Trigger.Delay / 1000
+            end
+            if TriggerState.waiting then
+                TriggerState.delayTimer = TriggerState.delayTimer - dt
+                if TriggerState.delayTimer <= 0 then
+                    TriggerState.cooldownTimer = TriggerState.cooldownTimer - dt
+                    if TriggerState.cooldownTimer <= 0 then
+                        triggerFire()
+                        TriggerState.cooldownTimer = CFG.Trigger.BurstMs / 1000
+                    end
+                end
+            end
+            -- Monitor
+            if trigMonClock >= 0.1 then
+                trigStatusV.Text = TriggerState.delayTimer > 0 and "STATUS: WAITING..." or "STATUS: FIRING"
+                trigStatusV.TextColor3 = TriggerState.delayTimer > 0 and C.orange or C.green
+                trigDelayV.Text = string.format("DELAY: %.0fms", math.max(0, TriggerState.delayTimer * 1000))
+            end
+        else
+            TriggerState.waiting = false
+            TriggerState.delayTimer = 0
+            TriggerState.cooldownTimer = 0
+            if trigMonClock >= 0.1 then
+                trigStatusV.Text = "STATUS: SCANNING"
+                trigStatusV.TextColor3 = C.dim
+                trigDelayV.Text = "DELAY: --"
+            end
+        end
+    else
+        TriggerState.waiting = false
+        TriggerState.delayTimer = 0
+        TriggerState.cooldownTimer = 0
+        if trigMonClock >= 0.1 and CFG.Trigger.On then
+            trigStatusV.Text = "STATUS: KEY NOT HELD"
+            trigStatusV.TextColor3 = C.dim
+        elseif trigMonClock >= 0.1 then
+            trigStatusV.Text = "STATUS: IDLE"
+            trigStatusV.TextColor3 = C.dim
+            trigDelayV.Text = "DELAY: --"
+        end
+    end
+    if trigMonClock >= 0.1 then trigMonClock = 0 end
+end))
+
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- CORE LOOP: ORBIT + VOIDSPAM DESYNC
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+local orbitAngle = 0
 local monitorClock = 0
 
 table.insert(ActiveConnections, RunService.Heartbeat:Connect(function(dt)
-    if not Desync.active then return end
-    if not humanoidRootPart or not humanoidRootPart.Parent then
-        Desync.active = false; return
-    end
-
-    local hum = character:FindFirstChildOfClass("Humanoid")
-    if not hum or hum.Health <= 0 then
-        if Desync.realCFrame then humanoidRootPart.CFrame = Desync.realCFrame end
-        Desync.active = false; Desync.phase = "idle"; Desync.currentDepth = 0
-        return
-    end
-
-    Desync.realCFrame = humanoidRootPart.CFrame
-    Desync.phaseTimer = Desync.phaseTimer + dt
-
-    if Desync.phase == "hide" then
-        Desync.currentDepth = math.min(Desync.currentDepth + CFG.Void.StepSpeed, CFG.Void.VoidDepth)
-        if Desync.phaseTimer >= CFG.Void.HideTime then
-            Desync.phase = "attack"; Desync.phaseTimer = 0; Desync.shotsFired = 0; Desync.shotCooldown = 0
-        end
-
-    elseif Desync.phase == "attack" then
-        Desync.currentDepth = math.max(Desync.currentDepth - CFG.Void.StepSpeed * 3, 0)
-
-        Desync.projCheckCD = Desync.projCheckCD + 1
-        if Desync.projCheckCD >= 3 then
-            Desync.projCheckCD = 0
-            Desync.projDetected = checkProjectiles()
-            if Desync.projDetected then
-                Desync.phase = "hide"; Desync.phaseTimer = 0; Desync.totalCycles = Desync.totalCycles + 1
-            end
-        end
-
-        if Desync.phase == "attack" and Desync.currentDepth <= 2 then
-            if CFG.Void.AutoFire then
-                Desync.shotCooldown = Desync.shotCooldown - dt
-                if Desync.shotsFired < CFG.Void.ShootAttempt and Desync.shotCooldown <= 0 then
-                    autoFire()
-                    Desync.shotsFired = Desync.shotsFired + 1
-                    Desync.shotCooldown = 0.05
+    -- ORBIT
+    if CFG.Orbit.On and not Desync.active and CFG.OrbitTarget then
+        local mc=LP.Character; if mc then
+            local mr=mc:FindFirstChild("HumanoidRootPart")
+            local tc=CFG.OrbitTarget.Character
+            if mr and tc then
+                local tr=tc:FindFirstChild("HumanoidRootPart")
+                local mh=mc:FindFirstChildOfClass("Humanoid")
+                if tr and mh and mh.Health>0 then
+                    orbitAngle=orbitAngle+(CFG.Orbit.Speed*dt)
+                    if orbitAngle>math.pi*2 then orbitAngle=orbitAngle-math.pi*2 end
+                    local tp=tr.Position
+                    mr.CFrame=CFrame.new(tp+Vector3.new(math.cos(orbitAngle)*CFG.Orbit.Radius,CFG.Orbit.Height,math.sin(orbitAngle)*CFG.Orbit.Radius),tp)
                 end
             end
         end
+    end
 
-        if Desync.phase == "attack" and Desync.phaseTimer >= CFG.Void.AttackTime then
-            Desync.phase = "hide"; Desync.phaseTimer = 0; Desync.totalCycles = Desync.totalCycles + 1
+    -- VOIDSPAM DESYNC
+    if not Desync.active then return end
+    if not humanoidRootPart or not humanoidRootPart.Parent then Desync.active=false; return end
+    local hum=character:FindFirstChildOfClass("Humanoid")
+    if not hum or hum.Health<=0 then
+        if Desync.realCFrame then humanoidRootPart.CFrame=Desync.realCFrame end
+        Desync.active=false; Desync.phase="idle"; Desync.currentDepth=0; return
+    end
+    Desync.realCFrame=humanoidRootPart.CFrame; Desync.phaseTimer=Desync.phaseTimer+dt
+
+    if Desync.phase=="hide" then
+        Desync.currentDepth=math.min(Desync.currentDepth+CFG.Void.StepSpeed,CFG.Void.VoidDepth)
+        if Desync.phaseTimer>=CFG.Void.HideTime then Desync.phase="attack";Desync.phaseTimer=0;Desync.shotsFired=0;Desync.shotCooldown=0 end
+    elseif Desync.phase=="attack" then
+        Desync.currentDepth=math.max(Desync.currentDepth-CFG.Void.StepSpeed*3,0)
+        Desync.projCheckCD=Desync.projCheckCD+1
+        if Desync.projCheckCD>=3 then
+            Desync.projCheckCD=0; Desync.projDetected=checkProjectiles()
+            if Desync.projDetected then Desync.phase="hide";Desync.phaseTimer=0;Desync.totalCycles=Desync.totalCycles+1 end
+        end
+        if Desync.phase=="attack" and Desync.currentDepth<=2 and CFG.Void.AutoFire then
+            Desync.shotCooldown=Desync.shotCooldown-dt
+            if Desync.shotsFired<CFG.Void.ShootAttempt and Desync.shotCooldown<=0 then
+                autoFire(); Desync.shotsFired=Desync.shotsFired+1; Desync.shotCooldown=0.05
+            end
+        end
+        if Desync.phase=="attack" and Desync.phaseTimer>=CFG.Void.AttackTime then
+            Desync.phase="hide";Desync.phaseTimer=0;Desync.totalCycles=Desync.totalCycles+1
         end
     end
 
-    if Desync.currentDepth > 0 then
-        local realPos = Desync.realCFrame.Position
-        local rotation = Desync.realCFrame - realPos
-        humanoidRootPart.CFrame = CFrame.new(Vector3.new(realPos.X, realPos.Y - Desync.currentDepth, realPos.Z)) * rotation
+    if Desync.currentDepth>0 then
+        local realPos=Desync.realCFrame.Position; local rotation=Desync.realCFrame-realPos
+        humanoidRootPart.CFrame=CFrame.new(Vector3.new(realPos.X,realPos.Y-Desync.currentDepth,realPos.Z))*rotation
     end
 
-    -- Monitor update
-    monitorClock = monitorClock + dt
-    if monitorClock >= 0.15 then
-        monitorClock = 0
-        local pTxt = Desync.phase == "hide" and "HIDING" or Desync.phase == "attack" and "ATTACKING" or "IDLE"
-        local pCol = Desync.phase == "hide" and C.cyan or Desync.phase == "attack" and C.orange or C.dim
-        monPhaseV.Text = "PHASE: " .. pTxt; monPhaseV.TextColor3 = pCol
-        monDepthV.Text = string.format("DEPTH: %.0f / %d", Desync.currentDepth, CFG.Void.VoidDepth)
-        monDepthV.TextColor3 = Desync.currentDepth > 0 and C.green or C.orange
-        monShotsV.Text = string.format("SHOTS: %d / %d%s", Desync.shotsFired, CFG.Void.ShootAttempt, CFG.Void.AutoFire and " (auto)" or " (manual)")
-        monCycleV.Text = "CYCLES: " .. Desync.totalCycles
+    monitorClock=monitorClock+dt
+    if monitorClock>=0.15 then
+        monitorClock=0
+        local pTxt=Desync.phase=="hide" and "HIDING" or Desync.phase=="attack" and "ATTACKING" or "IDLE"
+        local pCol=Desync.phase=="hide" and C.cyan or Desync.phase=="attack" and C.orange or C.dim
+        monPhaseV.Text="PHASE: "..pTxt; monPhaseV.TextColor3=pCol
+        monDepthV.Text=string.format("DEPTH: %.0f / %d",Desync.currentDepth,CFG.Void.VoidDepth)
+        monDepthV.TextColor3=Desync.currentDepth>0 and C.green or C.orange
+        monShotsV.Text=string.format("SHOTS: %d / %d%s",Desync.shotsFired,CFG.Void.ShootAttempt,CFG.Void.AutoFire and " (auto)" or " (manual)")
+        monCycleV.Text="CYCLES: "..Desync.totalCycles
     end
 end))
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- CLOSE / MINIMIZE / TOGGLE
---━━━━━━━���━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-closeBtn.MouseButton1Click:Connect(function()
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+closeBtnUI.MouseButton1Click:Connect(function()
+    CFG.Aimbot.On=false;CFG.Silent.On=false;CFG.Trigger.On=false
     CFG.Orbit.On=false;CFG.Void.On=false;CFG.Emote.On=false
     Desync.active=false;stopEmote()
     if Desync.realCFrame and humanoidRootPart and humanoidRootPart.Parent then humanoidRootPart.CFrame=Desync.realCFrame end
     pcall(function() RunService:UnbindFromRenderStep("RivalsDesync") end)
+    pcall(function() if aimbotFOVCircle then aimbotFOVCircle:Remove() end end)
+    pcall(function() if silentFOVCircle then silentFOVCircle:Remove() end end)
+    pcall(function()
+        if silentHookApplied and silentOriginalRaycast and UtilityModule then
+            UtilityModule.Raycast=silentOriginalRaycast
+        end
+    end)
     for _,c in pairs(ActiveConnections) do pcall(function() c:Disconnect() end) end
     gui:Destroy()
 end)
@@ -1046,53 +1342,11 @@ end))
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- OPEN ANIMATION
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-mainFrame.Size=UDim2.new(0,WIN_W,0,0)
-mainFrame.BackgroundTransparency=1
+mainFrame.Size=UDim2.new(0,WIN_W,0,0); mainFrame.BackgroundTransparency=1
 task.wait(0.15)
 tw(mainFrame,0.3,{Size=UDim2.new(0,WIN_W,0,WIN_H),BackgroundTransparency=0})
 
-print("[RIVALS TOOL v7.0] POV Split + Emotes | "..(IsMobile and "MOBILE" or "PC"))
-
---[[
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- EMOTE SYSTEM — HOW IT WORKS:
-
- ┌────────────────────────────────────────────────────────────────────────┐
- │                                                                        │
- │  1. Enter animation ID (numbers only, e.g. 92281817840531)            │
- │     OR tap a preset button                                            │
- │                                                                        │
- │  2. System resolves ID through game:GetObjects()                      │
- │     Falls back to rbxassetid:// if GetObjects fails                   │
- │                                                                        │
- │  3. Stops ALL current animation tracks on Humanoid                    │
- │                                                                        │
- │  4. Creates new Animation instance with resolved ID                   │
- │                                                                        │
- │  5. Loads via Humanoid:LoadAnimation (or Animator fallback)           │
- │                                                                        │
- │  6. Sets Priority = Action4 (overrides everything)                    │
- │                                                                        │
- │  7. Plays at configured Speed (adjustable live)                       │
- │                                                                        │
- │  8. On Stopped event: auto-replays if Loop is ON                      │
- │                                                                        │
- │  9. On respawn: auto-replays if emote was active                      │
- │                                                                        │
- │  WORKS WITH:                                                           │
- │  • Direct animation IDs (e.g. 4212455893)                             │
- │  • rbxassetid:// links                                                │
- │  • Asset IDs that contain Animation objects                           │
- │  • Mobile keyboard input (TextBox with touch focus)                   │
- │                                                                        │
- └────────────────────────────────────────────────────────────────────────┘
-
- PRESET LIST:
- [P2] Test every preset ID — some may be broken/deleted
- [P2] Replace broken IDs with working ones for Rivals
- [P2] Add game-specific emotes if Rivals has custom ones
- [P3] Consider adding a "favorites" save system
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-]]
+print("[RIVALS TOOL v8.0] Full Suite | "..(IsMobile and "MOBILE" or "PC"))
+print("  Tabs: LEGITBOT | SILENT AIM | TRIGGERBOT | RAGE | EMOTES | SETTINGS")
+print("  CameraController: "..(CameraController and "OK" or "NOT FOUND"))
+print("  Silent Aim Hook: "..(silentHookApplied and "OK" or "FAILED"))

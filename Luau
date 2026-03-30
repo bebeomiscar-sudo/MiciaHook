@@ -1,13 +1,11 @@
 --[[
 ╔══════════════════════════════════════════════════════════════╗
-║   RIVALS TOOL v6.0 — POV SPLIT DESYNC                      ║
+║   RIVALS TOOL v7.0 — POV SPLIT DESYNC + EMOTES             ║
 ║                                                              ║
 ║   YOUR POV:  Normal gameplay, stable camera, move & shoot   ║
 ║   ENEMY POV: Your character is UNDERGROUND, unhittable      ║
 ║                                                              ║
-║   Attack window briefly brings hitbox up to fire, then      ║
-║   incremental CFrame stepping pulls it back underground     ║
-║   before enemy ragebot can react.                           ║
+║   EMOTES: Play any animation by ID, custom speed, presets   ║
 ║                                                              ║
 ║   PC: RightControl  |  Mobile: Floating [R] button          ║
 ╚══════════════════════════════════════════════════════════════╝
@@ -49,6 +47,12 @@ local CFG = {
         ProjectileMimic = false,
         DetectionRange  = 80,
     },
+    Emote = {
+        On       = false,
+        AnimID   = "",
+        Speed    = 1,
+        Loop     = true,
+    },
     UIKey = Enum.KeyCode.RightControl,
 }
 
@@ -58,37 +62,54 @@ local ActiveConnections = {}
 -- CHARACTER MANAGEMENT
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-local character          = LP.Character or LP.CharacterAdded:Wait()
-local humanoidRootPart   = character:WaitForChild("HumanoidRootPart")
-local humanoid           = character:WaitForChild("Humanoid")
+local character        = LP.Character or LP.CharacterAdded:Wait()
+local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+local humanoid         = character:WaitForChild("Humanoid")
+
+local Desync = {
+    active       = false,
+    realCFrame   = nil,
+    currentDepth = 0,
+    phase        = "idle",
+    phaseTimer   = 0,
+    shotsFired   = 0,
+    shotCooldown = 0,
+    projCheckCD  = 0,
+    projDetected = false,
+    totalCycles  = 0,
+}
+
+-- Emote state
+local EmoteState = {
+    currentTrack = nil,
+    animObject   = nil,
+    playing      = false,
+}
 
 LP.CharacterAdded:Connect(function(newChar)
     character        = newChar
     humanoidRootPart = newChar:WaitForChild("HumanoidRootPart")
     humanoid         = newChar:WaitForChild("Humanoid")
-    -- Reset desync on respawn
-    Desync.active     = false
-    Desync.realCFrame = nil
+    Desync.active      = false
+    Desync.realCFrame   = nil
     Desync.currentDepth = 0
-    Desync.phase      = "idle"
+    Desync.phase        = "idle"
+
+    -- Replay emote on respawn
+    if CFG.Emote.On and CFG.Emote.AnimID ~= "" then
+        task.wait(0.5)
+        pcall(function()
+            EmoteState.playing = false
+            EmoteState.currentTrack = nil
+        end)
+        -- Will be re-triggered by the emote system
+        task.defer(function()
+            if CFG.Emote.On then
+                playEmote(CFG.Emote.AnimID, CFG.Emote.Speed)
+            end
+        end)
+    end
 end)
-
---━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
--- DESYNC STATE
---━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-local Desync = {
-    active        = false,
-    realCFrame    = nil,
-    currentDepth  = 0,
-    phase         = "idle",
-    phaseTimer    = 0,
-    shotsFired    = 0,
-    shotCooldown  = 0,
-    projCheckCD   = 0,
-    projDetected  = false,
-    totalCycles   = 0,
-}
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- SCALING
@@ -102,7 +123,7 @@ end
 local function s(n) return math.floor(n * SF) end
 
 local WIN_W     = s(540)
-local WIN_H     = s(460)
+local WIN_H     = s(470)
 local SIDE_W    = s(120)
 local TOP_H     = s(40)
 local STATUS_H  = s(28)
@@ -155,6 +176,102 @@ local function isTMM(i) return i.UserInputType==Enum.UserInputType.MouseMovement
 local function gIP(i) return Vector2.new(i.Position.X,i.Position.Y) end
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- EMOTE ENGINE
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+local function anim2track(asset_id)
+    local success, objs = pcall(function()
+        return game:GetObjects(asset_id)
+    end)
+    if success and objs then
+        for i = 1, #objs do
+            if objs[i]:IsA("Animation") then
+                return objs[i].AnimationId
+            end
+        end
+    end
+    return asset_id
+end
+
+local function stopEmote()
+    EmoteState.playing = false
+    if EmoteState.currentTrack then
+        pcall(function()
+            EmoteState.currentTrack:Stop()
+            EmoteState.currentTrack:Destroy()
+        end)
+        EmoteState.currentTrack = nil
+    end
+    if EmoteState.animObject then
+        pcall(function()
+            EmoteState.animObject:Destroy()
+        end)
+        EmoteState.animObject = nil
+    end
+end
+
+function playEmote(animId, speed)
+    stopEmote()
+
+    if not animId or animId == "" then return end
+    if not character then return end
+    local hum = character:FindFirstChildWhichIsA("Humanoid")
+    if not hum then return end
+
+    -- Clean the ID
+    local cleanId = tostring(animId):gsub("%s+", "")
+    if not cleanId:find("rbxassetid://") then
+        cleanId = "rbxassetid://" .. cleanId
+    end
+
+    -- Try to resolve through GetObjects
+    local resolvedId = anim2track(cleanId)
+
+    -- Create animation
+    local animation = Instance.new("Animation")
+    animation.AnimationId = resolvedId
+    EmoteState.animObject = animation
+
+    -- Stop all current animations
+    for _, track in next, hum:GetPlayingAnimationTracks() do
+        track:Stop()
+    end
+
+    -- Load and play
+    local success, track = pcall(function()
+        return hum:LoadAnimation(animation)
+    end)
+
+    if not success or not track then
+        -- Fallback: try Animator
+        local animator = hum:FindFirstChildOfClass("Animator")
+        if animator then
+            success, track = pcall(function()
+                return animator:LoadAnimation(animation)
+            end)
+        end
+    end
+
+    if success and track then
+        track.Priority = Enum.AnimationPriority.Action4
+        track:Play()
+        track:AdjustSpeed(speed or 1)
+        EmoteState.currentTrack = track
+        EmoteState.playing = true
+
+        -- Loop handler
+        track.Stopped:Connect(function()
+            if CFG.Emote.On and CFG.Emote.Loop and EmoteState.playing then
+                task.wait(0.05)
+                if CFG.Emote.On and character and character:FindFirstChildWhichIsA("Humanoid") then
+                    playEmote(CFG.Emote.AnimID, CFG.Emote.Speed)
+                end
+            end
+        end)
+    end
+end
+
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- AUTO FIRE
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -163,7 +280,7 @@ local function autoFire()
         local vim = game:GetService("VirtualInputManager")
         local cx  = camera.ViewportSize.X / 2
         local cy  = camera.ViewportSize.Y / 2
-        vim:SendMouseButtonEvent(cx, cy, 0, true,  game, 1)
+        vim:SendMouseButtonEvent(cx, cy, 0, true, game, 1)
         task.defer(function()
             pcall(function()
                 vim:SendMouseButtonEvent(cx, cy, 0, false, game, 1)
@@ -179,28 +296,22 @@ end
 local function checkProjectiles()
     if not CFG.Void.ProjectileMimic then return false end
     if not Desync.realCFrame then return false end
-
     local myPos = Desync.realCFrame.Position
     local range = CFG.Void.DetectionRange
-
     local params = OverlapParams.new()
     params.FilterType = Enum.RaycastFilterType.Exclude
     params.FilterDescendantsInstances = {character}
-
     local ok, parts = pcall(function()
         return workspace:GetPartBoundsInRadius(myPos, range, params)
     end)
-
     if not ok or not parts then return false end
-
     for _, part in ipairs(parts) do
         if not part:IsDescendantOf(character) then
             local vel = part.AssemblyLinearVelocity
             if vel.Magnitude > 80 then
                 local toUs = (myPos - part.Position)
                 if toUs.Magnitude > 1 then
-                    local dot = toUs.Unit:Dot(vel.Unit)
-                    if dot > 0.4 then
+                    if toUs.Unit:Dot(vel.Unit) > 0.4 then
                         return true
                     end
                 end
@@ -229,8 +340,7 @@ if not gui.Parent then gui.Parent=LP:WaitForChild("PlayerGui") end
 local floatBtn=make("TextButton",{Size=UDim2.new(0,s(50),0,s(50)),Position=UDim2.new(0,8,0,camera.ViewportSize.Y*0.3),BackgroundColor3=C.accent,BorderSizePixel=0,Text="R",TextColor3=C.text,Font=Enum.Font.GothamBold,TextSize=s(20),ZIndex=100,Parent=gui})
 make("UICorner",{CornerRadius=UDim.new(0,s(12)),Parent=floatBtn})
 make("UIStroke",{Color=C.border,Thickness=1,Parent=floatBtn})
-do
-    local d,ds,sp=false,nil,nil
+do local d,ds,sp=false,nil,nil
     floatBtn.InputBegan:Connect(function(i) if isTM(i) then d=true;ds=gIP(i);sp=floatBtn.Position end end)
     floatBtn.InputEnded:Connect(function(i) if isTM(i) then d=false end end)
     table.insert(ActiveConnections,UIS.InputChanged:Connect(function(i) if d and isTMM(i) then local dt2=gIP(i)-ds;if dt2.Magnitude>8 then floatBtn.Position=UDim2.new(sp.X.Scale,sp.X.Offset+dt2.X,sp.Y.Scale,sp.Y.Offset+dt2.Y) end end end))
@@ -253,7 +363,8 @@ local topBar=make("Frame",{Size=UDim2.new(1,0,0,TOP_H),BackgroundColor3=C.side,B
 make("UICorner",{CornerRadius=UDim.new(0,s(4)),Parent=topBar})
 make("Frame",{Size=UDim2.new(1,0,0,8),Position=UDim2.new(0,0,1,-8),BackgroundColor3=C.side,BorderSizePixel=0,ZIndex=2,Parent=topBar})
 make("TextLabel",{Size=UDim2.new(0.5,0,1,0),Position=UDim2.new(0,s(14),0,0),BackgroundTransparency=1,Text="RIVALS TOOL",TextColor3=C.accent,Font=Enum.Font.GothamBold,TextSize=s(14),TextXAlignment=Enum.TextXAlignment.Left,Parent=topBar})
-make("TextLabel",{Size=UDim2.new(0,s(40),1,0),Position=UDim2.new(0,s(120),0,0),BackgroundTransparency=1,Text="v6.0",TextColor3=C.dim,Font=Enum.Font.Gotham,TextSize=FONT_SMALL,TextXAlignment=Enum.TextXAlignment.Left,Parent=topBar})
+make("TextLabel",{Size=UDim2.new(0,s(40),1,0),Position=UDim2.new(0,s(120),0,0),BackgroundTransparency=1,Text="v7.0",TextColor3=C.dim,Font=Enum.Font.Gotham,TextSize=FONT_SMALL,TextXAlignment=Enum.TextXAlignment.Left,Parent=topBar})
+
 local closeBtn=make("TextButton",{Size=UDim2.new(0,TOP_H,0,TOP_H),Position=UDim2.new(1,-TOP_H,0,0),BackgroundTransparency=1,Text="X",TextColor3=C.dim,Font=Enum.Font.GothamBold,TextSize=s(14),Parent=topBar})
 local minBtn=make("TextButton",{Size=UDim2.new(0,TOP_H,0,TOP_H),Position=UDim2.new(1,-TOP_H*2,0,0),BackgroundTransparency=1,Text="—",TextColor3=C.dim,Font=Enum.Font.GothamBold,TextSize=s(14),Parent=topBar})
 closeBtn.MouseEnter:Connect(function() closeBtn.TextColor3=C.red end)
@@ -306,12 +417,7 @@ local function makeToggle(p,l,d,o,cb)
     local kn=make("Frame",{Size=UDim2.new(0,kS,0,kS),Position=st and UDim2.new(1,-kS-s(2),0.5,-kS/2) or UDim2.new(0,s(2),0.5,-kS/2),BackgroundColor3=C.text,BorderSizePixel=0,Parent=tr})
     make("UICorner",{CornerRadius=UDim.new(1,0),Parent=kn})
     local b=make("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",Parent=f})
-    b.MouseButton1Click:Connect(function()
-        st=not st
-        tw(tr,0.18,{BackgroundColor3=st and C.accent or C.off})
-        tw(kn,0.18,{Position=st and UDim2.new(1,-kS-s(2),0.5,-kS/2) or UDim2.new(0,s(2),0.5,-kS/2)})
-        if cb then cb(st) end
-    end)
+    b.MouseButton1Click:Connect(function() st=not st;tw(tr,0.18,{BackgroundColor3=st and C.accent or C.off});tw(kn,0.18,{Position=st and UDim2.new(1,-kS-s(2),0.5,-kS/2) or UDim2.new(0,s(2),0.5,-kS/2)});if cb then cb(st) end end)
     return {getState=function() return st end,setState=function(v) st=v;tr.BackgroundColor3=v and C.accent or C.off;kn.Position=v and UDim2.new(1,-kS-s(2),0.5,-kS/2) or UDim2.new(0,s(2),0.5,-kS/2) end}
 end
 
@@ -327,12 +433,12 @@ local function makeSlider(p,l,mn,mx,df,inc,o,cb)
     local pc=math.clamp((df-mn)/(mx-mn),0,1)
     local fl=make("Frame",{Size=UDim2.new(pc,0,1,0),BackgroundColor3=C.accent,BorderSizePixel=0,Parent=tB})
     make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=fl})
-    local hS=s(18)
-    local hd=make("Frame",{Size=UDim2.new(0,hS,0,hS),Position=UDim2.new(pc,-hS/2,0.5,-hS/2),BackgroundColor3=C.text,BorderSizePixel=0,ZIndex=3,Parent=tB})
+    local hSz=s(18)
+    local hd=make("Frame",{Size=UDim2.new(0,hSz,0,hSz),Position=UDim2.new(pc,-hSz/2,0.5,-hSz/2),BackgroundColor3=C.text,BorderSizePixel=0,ZIndex=3,Parent=tB})
     make("UICorner",{CornerRadius=UDim.new(1,0),Parent=hd})
     local tz=make("TextButton",{Size=UDim2.new(1,s(20),0,s(30)),Position=UDim2.new(0,-s(10),0.5,-s(15)),BackgroundTransparency=1,Text="",ZIndex=4,Parent=tB})
     local sl=false
-    local function upd(ix) local r=math.clamp((ix-tB.AbsolutePosition.X)/tB.AbsoluteSize.X,0,1);val=math.clamp(math.floor((mn+(mx-mn)*r)/inc+0.5)*inc,mn,mx);local fp=(val-mn)/(mx-mn);fl.Size=UDim2.new(fp,0,1,0);hd.Position=UDim2.new(fp,-hS/2,0.5,-hS/2);vL.Text=fmtN(val,inc);if cb then cb(val) end end
+    local function upd(ix) local r=math.clamp((ix-tB.AbsolutePosition.X)/tB.AbsoluteSize.X,0,1);val=math.clamp(math.floor((mn+(mx-mn)*r)/inc+0.5)*inc,mn,mx);local fp=(val-mn)/(mx-mn);fl.Size=UDim2.new(fp,0,1,0);hd.Position=UDim2.new(fp,-hSz/2,0.5,-hSz/2);vL.Text=fmtN(val,inc);if cb then cb(val) end end
     tz.InputBegan:Connect(function(i) if isTM(i) then sl=true;upd(i.Position.X) end end)
     hd.InputBegan:Connect(function(i) if isTM(i) then sl=true end end)
     table.insert(ActiveConnections,UIS.InputChanged:Connect(function(i) if sl and isTMM(i) then upd(i.Position.X) end end))
@@ -348,11 +454,104 @@ local function makeButton(p,l,c,o,cb)
 end
 
 local function makeInfo(p,t,o)
-    return make("TextLabel",{Size=UDim2.new(1,0,0,s(38)),BackgroundTransparency=1,Text=t,TextColor3=C.dim,Font=Enum.Font.Gotham,TextSize=FONT_TINY,TextWrapped=true,TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Top,LayoutOrder=o or 99,Parent=p})
+    return make("TextLabel",{Size=UDim2.new(1,0,0,s(34)),BackgroundTransparency=1,Text=t,TextColor3=C.dim,Font=Enum.Font.Gotham,TextSize=FONT_TINY,TextWrapped=true,TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Top,LayoutOrder=o or 99,Parent=p})
+end
+
+-- TEXT INPUT (mobile-friendly)
+local function makeTextInput(parent, placeholder, order, callback)
+    local frame = make("Frame",{
+        Size = UDim2.new(1, 0, 0, s(40)),
+        BackgroundColor3 = C.elem,
+        BorderSizePixel = 0,
+        LayoutOrder = order,
+        Parent = parent,
+    })
+    make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=frame})
+
+    local tb = make("TextBox",{
+        Size = UDim2.new(1, -s(20), 1, -s(8)),
+        Position = UDim2.new(0, s(10), 0, s(4)),
+        BackgroundTransparency = 1,
+        Text = "",
+        PlaceholderText = placeholder,
+        PlaceholderColor3 = Color3.fromRGB(70, 70, 80),
+        TextColor3 = C.text,
+        Font = Enum.Font.Gotham,
+        TextSize = FONT_MAIN,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ClearTextOnFocus = false,
+        Parent = frame,
+    })
+
+    tb.FocusLost:Connect(function(enterPressed)
+        if callback then callback(tb.Text) end
+    end)
+
+    -- Highlight on focus
+    tb.Focused:Connect(function()
+        tw(frame, 0.12, {BackgroundColor3 = C.hover})
+    end)
+    tb.FocusLost:Connect(function()
+        tw(frame, 0.12, {BackgroundColor3 = C.elem})
+    end)
+
+    return {
+        getText = function() return tb.Text end,
+        setText = function(t) tb.Text = t end,
+        getTextBox = function() return tb end,
+    }
+end
+
+-- PRESET BUTTON (smaller, inline)
+local function makePresetBtn(parent, label, animId, order, onPlay)
+    local btn = make("TextButton",{
+        Size = UDim2.new(1, 0, 0, s(32)),
+        BackgroundColor3 = C.elem,
+        BorderSizePixel = 0,
+        Text = "",
+        LayoutOrder = order,
+        Parent = parent,
+    })
+    make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=btn})
+
+    make("TextLabel",{
+        Size = UDim2.new(0.65, 0, 1, 0),
+        Position = UDim2.new(0, s(10), 0, 0),
+        BackgroundTransparency = 1,
+        Text = label,
+        TextColor3 = C.text,
+        Font = Enum.Font.Gotham,
+        TextSize = s(12),
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+        Parent = btn,
+    })
+
+    local idLabel = make("TextLabel",{
+        Size = UDim2.new(0.3, 0, 1, 0),
+        Position = UDim2.new(0.67, 0, 0, 0),
+        BackgroundTransparency = 1,
+        Text = animId,
+        TextColor3 = C.dim,
+        Font = Enum.Font.Gotham,
+        TextSize = s(9),
+        TextXAlignment = Enum.TextXAlignment.Right,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+        Parent = btn,
+    })
+
+    btn.MouseButton1Click:Connect(function()
+        if onPlay then onPlay(animId) end
+    end)
+
+    btn.MouseEnter:Connect(function() tw(btn, 0.1, {BackgroundColor3 = C.hover}) end)
+    btn.MouseLeave:Connect(function() tw(btn, 0.1, {BackgroundColor3 = C.elem}) end)
+
+    return btn
 end
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
--- PAGES + TABS
+-- PAGES + TABS (4 tabs now)
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 local function makePage(n)
@@ -363,6 +562,7 @@ local function makePage(n)
 end
 
 local pageVoid     = makePage("Voidspam")
+local pageEmote    = makePage("Emotes")
 local pageOrbit    = makePage("Orbit")
 local pageSettings = makePage("Settings")
 
@@ -381,9 +581,11 @@ local function makeTabBtn(t,pg,o,df)
     end)
     if df then activeTab=tab;pg.Visible=true end
 end
-makeTabBtn("VOIDSPAM",pageVoid,1,true)
-makeTabBtn("ORBIT",pageOrbit,2,false)
-makeTabBtn("SETTINGS",pageSettings,3,false)
+
+makeTabBtn("VOIDSPAM", pageVoid,     1, true)
+makeTabBtn("EMOTES",   pageEmote,    2, false)
+makeTabBtn("ORBIT",    pageOrbit,    3, false)
+makeTabBtn("SETTINGS", pageSettings, 4, false)
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- ORBIT TAB
@@ -409,176 +611,267 @@ makeSlider(pageOrbit,"Speed",0.5,10,2,0.5,9,function(v) CFG.Orbit.Speed=v end)
 makeSlider(pageOrbit,"Height",-20,20,0,1,10,function(v) CFG.Orbit.Height=v end)
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
--- ★★★ VOIDSPAM TAB — POV SPLIT DESYNC ★★★
+-- ★★★ VOIDSPAM TAB — POV SPLIT DESYNC (unchanged from v6) ★★★
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-makeSection(pageVoid, "POV Split Desync", 1)
+makeSection(pageVoid,"POV Split Desync",1)
+make("TextLabel",{Size=UDim2.new(1,0,0,s(52)),BackgroundColor3=Color3.fromRGB(12,20,12),BorderSizePixel=0,Text="  YOUR SCREEN: Normal gameplay, stable camera\n  ENEMY SCREEN: Your character is UNDERGROUND\n  ATTACK: Hitbox peeks up to fire, then hides",TextColor3=C.green,Font=Enum.Font.GothamBold,TextSize=s(9),TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Center,TextWrapped=true,LayoutOrder=2,Parent=pageVoid})
 
--- Explanation banner
-make("TextLabel",{
-    Size=UDim2.new(1,0,0,s(52)),
-    BackgroundColor3=Color3.fromRGB(12,20,12), BorderSizePixel=0,
-    Text="  YOUR SCREEN: Normal gameplay, stable camera\n  ENEMY SCREEN: Your character is UNDERGROUND\n  ATTACK: Hitbox peeks up to fire, then hides",
-    TextColor3=C.green, Font=Enum.Font.GothamBold, TextSize=s(9),
-    TextXAlignment=Enum.TextXAlignment.Left, TextYAlignment=Enum.TextYAlignment.Center,
-    TextWrapped=true, LayoutOrder=2, Parent=pageVoid,
-})
-
--- ── MAIN TOGGLE ──
-local voidToggle = makeToggle(pageVoid, "Enable Voidspam", false, 3, function(state)
-    CFG.Void.On = state
-
+local voidToggle=makeToggle(pageVoid,"Enable Voidspam",false,3,function(state)
+    CFG.Void.On=state
     if state then
-        -- Initialize desync
         if humanoidRootPart and humanoidRootPart.Parent then
-            Desync.realCFrame    = humanoidRootPart.CFrame
-            Desync.currentDepth  = 0
-            Desync.phase         = "hide"
-            Desync.phaseTimer    = 0
-            Desync.shotsFired    = 0
-            Desync.shotCooldown  = 0
-            Desync.totalCycles   = 0
-            Desync.projDetected  = false
-            Desync.active        = true
-            updateStatus("DESYNC ACTIVE — underground", C.red)
-        else
-            Desync.active = false
-            updateStatus("No character!", C.red)
-        end
+            Desync.realCFrame=humanoidRootPart.CFrame;Desync.currentDepth=0;Desync.phase="hide";Desync.phaseTimer=0;Desync.shotsFired=0;Desync.shotCooldown=0;Desync.totalCycles=0;Desync.projDetected=false;Desync.active=true
+            updateStatus("DESYNC ACTIVE — underground",C.red)
+        else Desync.active=false;updateStatus("No character!",C.red) end
     else
-        -- Stop desync — put character back to real position
-        Desync.active = false
-        Desync.phase  = "idle"
-        if Desync.realCFrame and humanoidRootPart and humanoidRootPart.Parent then
-            humanoidRootPart.CFrame = Desync.realCFrame
-        end
-        Desync.currentDepth = 0
-        updateStatus("Idle", C.dim)
+        Desync.active=false;Desync.phase="idle"
+        if Desync.realCFrame and humanoidRootPart and humanoidRootPart.Parent then humanoidRootPart.CFrame=Desync.realCFrame end
+        Desync.currentDepth=0;updateStatus("Idle",C.dim)
     end
 end)
 
--- ── RAGEBOT CYCLE ──
-makeSection(pageVoid, "Ragebot Cycle", 4)
+makeSection(pageVoid,"Ragebot Cycle",4)
+make("TextLabel",{Size=UDim2.new(1,0,0,s(24)),BackgroundColor3=Color3.fromRGB(14,14,22),BorderSizePixel=0,Text="  HIDE = underground | ATTACK = peek & shoot",TextColor3=C.dim,Font=Enum.Font.Gotham,TextSize=s(9),TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Center,LayoutOrder=5,Parent=pageVoid})
+makeSlider(pageVoid,"Hide Timer",0.01,1,0.3,0.01,6,function(v) CFG.Void.HideTime=v end)
+makeSlider(pageVoid,"Attack Timer",0.01,1,0.15,0.01,7,function(v) CFG.Void.AttackTime=v end)
+makeSlider(pageVoid,"Shoot Attempt",1,2,1,1,8,function(v) CFG.Void.ShootAttempt=v end)
+makeToggle(pageVoid,"Auto Fire",false,9,function(v) CFG.Void.AutoFire=v end)
 
-make("TextLabel",{
-    Size=UDim2.new(1,0,0,s(30)),
-    BackgroundColor3=Color3.fromRGB(14,14,22), BorderSizePixel=0,
-    Text="  HIDE = time underground | ATTACK = time to shoot\n  Lower values = faster cycle, harder to hit",
-    TextColor3=C.dim, Font=Enum.Font.Gotham, TextSize=s(9),
-    TextXAlignment=Enum.TextXAlignment.Left, TextYAlignment=Enum.TextYAlignment.Center,
-    TextWrapped=true, LayoutOrder=5, Parent=pageVoid,
-})
+makeSection(pageVoid,"Underground",10)
+make("TextLabel",{Size=UDim2.new(1,0,0,s(20)),BackgroundColor3=Color3.fromRGB(14,14,22),BorderSizePixel=0,Text="  Incremental stepping (anti-cheat safe)",TextColor3=C.dim,Font=Enum.Font.Gotham,TextSize=s(9),TextXAlignment=Enum.TextXAlignment.Left,LayoutOrder=11,Parent=pageVoid})
+makeSlider(pageVoid,"Void Depth",50,500,200,10,12,function(v) CFG.Void.VoidDepth=v end)
+makeSlider(pageVoid,"Step Speed",5,100,30,5,13,function(v) CFG.Void.StepSpeed=v end)
 
-makeSlider(pageVoid, "Hide Timer", 0.01, 1, CFG.Void.HideTime, 0.01, 6, function(v)
-    CFG.Void.HideTime = v
-end)
+makeSection(pageVoid,"Projectile Mimic",14)
+makeToggle(pageVoid,"Projectile Mimic",false,15,function(v) CFG.Void.ProjectileMimic=v end)
+makeSlider(pageVoid,"Detection Range",20,150,80,5,16,function(v) CFG.Void.DetectionRange=v end)
 
-makeSlider(pageVoid, "Attack Timer", 0.01, 1, CFG.Void.AttackTime, 0.01, 7, function(v)
-    CFG.Void.AttackTime = v
-end)
-
-makeSlider(pageVoid, "Shoot Attempt", 1, 2, CFG.Void.ShootAttempt, 1, 8, function(v)
-    CFG.Void.ShootAttempt = v
-end)
-
-makeToggle(pageVoid, "Auto Fire", CFG.Void.AutoFire, 9, function(v)
-    CFG.Void.AutoFire = v
-end)
-
--- ── VOID SETTINGS ──
-makeSection(pageVoid, "Underground Settings", 10)
-
-make("TextLabel",{
-    Size=UDim2.new(1,0,0,s(24)),
-    BackgroundColor3=Color3.fromRGB(14,14,22), BorderSizePixel=0,
-    Text="  Incremental stepping — not instant TP (anti-cheat safe)",
-    TextColor3=C.dim, Font=Enum.Font.Gotham, TextSize=s(9),
-    TextXAlignment=Enum.TextXAlignment.Left, TextYAlignment=Enum.TextYAlignment.Center,
-    LayoutOrder=11, Parent=pageVoid,
-})
-
-makeSlider(pageVoid, "Void Depth", 50, 500, CFG.Void.VoidDepth, 10, 12, function(v)
-    CFG.Void.VoidDepth = v
-end)
-
-makeSlider(pageVoid, "Step Speed", 5, 100, CFG.Void.StepSpeed, 5, 13, function(v)
-    CFG.Void.StepSpeed = v
-end)
-
--- ── PROJECTILE MIMIC ──
-makeSection(pageVoid, "Projectile Mimic", 14)
-
-make("TextLabel",{
-    Size=UDim2.new(1,0,0,s(30)),
-    BackgroundColor3=Color3.fromRGB(14,14,22), BorderSizePixel=0,
-    Text="  Detects incoming projectiles during attack window\n  Instantly aborts attack and dives underground",
-    TextColor3=C.dim, Font=Enum.Font.Gotham, TextSize=s(9),
-    TextXAlignment=Enum.TextXAlignment.Left, TextYAlignment=Enum.TextYAlignment.Center,
-    TextWrapped=true, LayoutOrder=15, Parent=pageVoid,
-})
-
-makeToggle(pageVoid, "Projectile Mimic", CFG.Void.ProjectileMimic, 16, function(v)
-    CFG.Void.ProjectileMimic = v
-end)
-
-makeSlider(pageVoid, "Detection Range", 20, 150, CFG.Void.DetectionRange, 5, 17, function(v)
-    CFG.Void.DetectionRange = v
-end)
-
--- ── LIVE COMBAT MONITOR ──
-makeSection(pageVoid, "Live Monitor", 18)
-
-local monFrame = make("Frame",{
-    Size=UDim2.new(1,0,0,s(100)),
-    BackgroundColor3=Color3.fromRGB(12,12,18),
-    BorderSizePixel=0, LayoutOrder=19, Parent=pageVoid,
-})
+-- Monitor
+makeSection(pageVoid,"Live Monitor",17)
+local monFrame=make("Frame",{Size=UDim2.new(1,0,0,s(82)),BackgroundColor3=Color3.fromRGB(12,12,18),BorderSizePixel=0,LayoutOrder=18,Parent=pageVoid})
 make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=monFrame})
 make("UIStroke",{Color=C.border,Thickness=1,Parent=monFrame})
+local monPhaseV=make("TextLabel",{Size=UDim2.new(1,-s(16),0,s(16)),Position=UDim2.new(0,s(10),0,s(6)),BackgroundTransparency=1,Text="PHASE: IDLE",TextColor3=C.dim,Font=Enum.Font.GothamBold,TextSize=FONT_SMALL,TextXAlignment=Enum.TextXAlignment.Left,Parent=monFrame})
+local monDepthV=make("TextLabel",{Size=UDim2.new(1,-s(16),0,s(16)),Position=UDim2.new(0,s(10),0,s(22)),BackgroundTransparency=1,Text="DEPTH: 0",TextColor3=C.dim,Font=Enum.Font.GothamBold,TextSize=FONT_TINY,TextXAlignment=Enum.TextXAlignment.Left,Parent=monFrame})
+local monShotsV=make("TextLabel",{Size=UDim2.new(1,-s(16),0,s(16)),Position=UDim2.new(0,s(10),0,s(38)),BackgroundTransparency=1,Text="SHOTS: 0 / 1",TextColor3=C.dim,Font=Enum.Font.GothamBold,TextSize=FONT_TINY,TextXAlignment=Enum.TextXAlignment.Left,Parent=monFrame})
+local monCycleV=make("TextLabel",{Size=UDim2.new(1,-s(16),0,s(16)),Position=UDim2.new(0,s(10),0,s(54)),BackgroundTransparency=1,Text="CYCLES: 0",TextColor3=C.dim,Font=Enum.Font.GothamBold,TextSize=FONT_TINY,TextXAlignment=Enum.TextXAlignment.Left,Parent=monFrame})
 
-local monPhaseV = make("TextLabel",{
-    Size=UDim2.new(1,-s(16),0,s(16)),Position=UDim2.new(0,s(10),0,s(6)),
-    BackgroundTransparency=1,Text="PHASE: IDLE",TextColor3=C.dim,
-    Font=Enum.Font.GothamBold,TextSize=FONT_SMALL,TextXAlignment=Enum.TextXAlignment.Left,Parent=monFrame,
-})
-local monDepthV = make("TextLabel",{
-    Size=UDim2.new(1,-s(16),0,s(16)),Position=UDim2.new(0,s(10),0,s(24)),
-    BackgroundTransparency=1,Text="DEPTH: 0 studs",TextColor3=C.dim,
-    Font=Enum.Font.GothamBold,TextSize=FONT_TINY,TextXAlignment=Enum.TextXAlignment.Left,Parent=monFrame,
-})
-local monShotsV = make("TextLabel",{
-    Size=UDim2.new(1,-s(16),0,s(16)),Position=UDim2.new(0,s(10),0,s(40)),
-    BackgroundTransparency=1,Text="SHOTS: 0 / 1",TextColor3=C.dim,
-    Font=Enum.Font.GothamBold,TextSize=FONT_TINY,TextXAlignment=Enum.TextXAlignment.Left,Parent=monFrame,
-})
-local monCycleV = make("TextLabel",{
-    Size=UDim2.new(1,-s(16),0,s(16)),Position=UDim2.new(0,s(10),0,s(56)),
-    BackgroundTransparency=1,Text="CYCLES: 0",TextColor3=C.dim,
-    Font=Enum.Font.GothamBold,TextSize=FONT_TINY,TextXAlignment=Enum.TextXAlignment.Left,Parent=monFrame,
-})
-local monProjV = make("TextLabel",{
-    Size=UDim2.new(1,-s(16),0,s(16)),Position=UDim2.new(0,s(10),0,s(72)),
-    BackgroundTransparency=1,Text="PROJ MIMIC: OFF",TextColor3=C.dim,
-    Font=Enum.Font.GothamBold,TextSize=FONT_TINY,TextXAlignment=Enum.TextXAlignment.Left,Parent=monFrame,
-})
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- ★★★ EMOTES TAB ★★★
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
--- ── HOW IT WORKS ──
-make("TextLabel",{
-    Size=UDim2.new(1,0,0,s(72)),
-    BackgroundColor3=Color3.fromRGB(14,14,22), BorderSizePixel=0,
-    Text="  HOW POV SPLIT WORKS:\n  • RenderStep: HRP → real position (you see normal)\n  • Heartbeat: HRP → underground (server sees void)\n  • Attack: HRP briefly at real pos → fire → back down\n  • Stepping: gradual CFrame shift (not instant TP)",
-    TextColor3=C.dim, Font=Enum.Font.Gotham, TextSize=s(8),
-    TextXAlignment=Enum.TextXAlignment.Left, TextYAlignment=Enum.TextYAlignment.Top,
-    TextWrapped=true, LayoutOrder=20, Parent=pageVoid,
-})
+makeSection(pageEmote, "Custom Animation", 1)
 
 make("TextLabel",{
     Size=UDim2.new(1,0,0,s(28)),
-    BackgroundColor3=Color3.fromRGB(35,10,10), BorderSizePixel=0,
-    Text="  !! DESYNC EXPLOIT — USE AT YOUR OWN RISK !!",
-    TextColor3=C.red, Font=Enum.Font.GothamBold, TextSize=FONT_TINY,
-    TextXAlignment=Enum.TextXAlignment.Left, LayoutOrder=21, Parent=pageVoid,
+    BackgroundColor3=Color3.fromRGB(20,14,28), BorderSizePixel=0,
+    Text="  Play any animation ID — works like UE emotes",
+    TextColor3=C.purple, Font=Enum.Font.GothamBold, TextSize=s(9),
+    TextXAlignment=Enum.TextXAlignment.Left, TextYAlignment=Enum.TextYAlignment.Center,
+    LayoutOrder=2, Parent=pageEmote,
 })
+
+-- ── ANIMATION ID INPUT ──
+makeSection(pageEmote, "Animation ID", 3)
+
+local animInput = makeTextInput(pageEmote, "Enter animation ID (numbers only)...", 4, function(text)
+    -- Clean: remove spaces, extract numbers
+    local cleaned = text:gsub("%s+", "")
+    CFG.Emote.AnimID = cleaned
+end)
+
+-- ── PLAY / STOP BUTTONS ──
+local playBtnFrame = make("Frame",{
+    Size = UDim2.new(1, 0, 0, BTN_H),
+    BackgroundTransparency = 1,
+    LayoutOrder = 5,
+    Parent = pageEmote,
+})
+
+local playBtn = make("TextButton",{
+    Size = UDim2.new(0.48, 0, 1, 0),
+    Position = UDim2.new(0, 0, 0, 0),
+    BackgroundColor3 = C.green,
+    BorderSizePixel = 0,
+    Text = "PLAY",
+    TextColor3 = C.text,
+    Font = Enum.Font.GothamBold,
+    TextSize = FONT_MAIN,
+    Parent = playBtnFrame,
+})
+make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=playBtn})
+
+local stopBtn = make("TextButton",{
+    Size = UDim2.new(0.48, 0, 1, 0),
+    Position = UDim2.new(0.52, 0, 0, 0),
+    BackgroundColor3 = C.red,
+    BorderSizePixel = 0,
+    Text = "STOP",
+    TextColor3 = C.text,
+    Font = Enum.Font.GothamBold,
+    TextSize = FONT_MAIN,
+    Parent = playBtnFrame,
+})
+make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=stopBtn})
+
+-- ── EMOTE STATUS ──
+local emoteStatusFrame = make("Frame",{
+    Size = UDim2.new(1, 0, 0, s(36)),
+    BackgroundColor3 = Color3.fromRGB(14, 14, 20),
+    BorderSizePixel = 0,
+    LayoutOrder = 6,
+    Parent = pageEmote,
+})
+make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=emoteStatusFrame})
+
+local emoteStatusDot = make("Frame",{
+    Size = UDim2.new(0, s(8), 0, s(8)),
+    Position = UDim2.new(0, s(10), 0.5, -s(4)),
+    BackgroundColor3 = C.off,
+    BorderSizePixel = 0,
+    Parent = emoteStatusFrame,
+})
+make("UICorner",{CornerRadius=UDim.new(1,0),Parent=emoteStatusDot})
+
+local emoteStatusLabel = make("TextLabel",{
+    Size = UDim2.new(1, -s(30), 1, 0),
+    Position = UDim2.new(0, s(24), 0, 0),
+    BackgroundTransparency = 1,
+    Text = "No animation playing",
+    TextColor3 = C.dim,
+    Font = Enum.Font.GothamSemibold,
+    TextSize = s(12),
+    TextXAlignment = Enum.TextXAlignment.Left,
+    TextTruncate = Enum.TextTruncate.AtEnd,
+    Parent = emoteStatusFrame,
+})
+
+local function updateEmoteStatus(msg, color)
+    emoteStatusLabel.Text = msg
+    emoteStatusDot.BackgroundColor3 = color or C.off
+end
+
+-- ── SETTINGS ──
+makeSection(pageEmote, "Settings", 7)
+
+makeSlider(pageEmote, "Speed", 0.1, 5, 1, 0.1, 8, function(v)
+    CFG.Emote.Speed = v
+    -- Update speed live if playing
+    if EmoteState.currentTrack then
+        pcall(function()
+            EmoteState.currentTrack:AdjustSpeed(v)
+        end)
+    end
+end)
+
+makeToggle(pageEmote, "Loop Animation", true, 9, function(v)
+    CFG.Emote.Loop = v
+end)
+
+-- ── PLAY / STOP LOGIC ──
+
+playBtn.MouseButton1Click:Connect(function()
+    local id = animInput.getText()
+    if id == "" then
+        updateEmoteStatus("Enter an animation ID first!", C.red)
+        return
+    end
+
+    CFG.Emote.AnimID = id:gsub("%s+", "")
+    CFG.Emote.On = true
+
+    updateEmoteStatus("Loading: " .. CFG.Emote.AnimID .. "...", C.orange)
+
+    task.defer(function()
+        playEmote(CFG.Emote.AnimID, CFG.Emote.Speed)
+
+        if EmoteState.playing then
+            updateEmoteStatus("Playing: " .. CFG.Emote.AnimID, C.green)
+        else
+            updateEmoteStatus("Failed to load animation", C.red)
+            CFG.Emote.On = false
+        end
+    end)
+end)
+
+stopBtn.MouseButton1Click:Connect(function()
+    CFG.Emote.On = false
+    stopEmote()
+    updateEmoteStatus("Stopped", C.dim)
+end)
+
+-- ── PRESETS ──
+makeSection(pageEmote, "Preset Emotes", 10)
+
+make("TextLabel",{
+    Size=UDim2.new(1,0,0,s(20)),
+    BackgroundColor3=Color3.fromRGB(14,14,22), BorderSizePixel=0,
+    Text="  Tap a preset to play it instantly",
+    TextColor3=C.dim, Font=Enum.Font.Gotham, TextSize=s(9),
+    TextXAlignment=Enum.TextXAlignment.Left, TextYAlignment=Enum.TextYAlignment.Center,
+    LayoutOrder=11, Parent=pageEmote,
+})
+
+-- Preset emote list
+-- [P2] Replace these IDs with actual working animation IDs for Rivals
+local presets = {
+    {"Griddy",          "4212455893"},
+    {"Sturdy",          "12534727886"},
+    {"Hawk Tuah",       "92281817840531"},
+    {"Orange Justice",  "2374020973"},
+    {"Hype",            "2066774042"},
+    {"Headless Walk",   "5833928936"},
+    {"Floss",           "3337994105"},
+    {"Default Dance",   "5104377791"},
+    {"T-Pose",          "5104340929"},
+    {"Spin",            "5104336439"},
+    {"Lay Down",        "4689362868"},
+    {"Push Ups",        "4840397106"},
+}
+
+local function onPresetPlay(animId)
+    CFG.Emote.AnimID = animId
+    CFG.Emote.On = true
+    animInput.setText(animId)
+    updateEmoteStatus("Loading: " .. animId .. "...", C.orange)
+
+    task.defer(function()
+        playEmote(animId, CFG.Emote.Speed)
+        if EmoteState.playing then
+            updateEmoteStatus("Playing: " .. animId, C.green)
+        else
+            updateEmoteStatus("Failed — ID may be invalid", C.red)
+            CFG.Emote.On = false
+        end
+    end)
+end
+
+for i, preset in ipairs(presets) do
+    makePresetBtn(pageEmote, preset[1], preset[2], 11 + i, onPresetPlay)
+end
+
+-- ── EXTRA TOOLS ──
+makeSection(pageEmote, "Tools", 30)
+
+makeButton(pageEmote, "STOP ALL ANIMATIONS", C.off, 31, function()
+    CFG.Emote.On = false
+    stopEmote()
+
+    -- Also stop ALL playing animation tracks
+    if character then
+        local hum = character:FindFirstChildWhichIsA("Humanoid")
+        if hum then
+            for _, track in next, hum:GetPlayingAnimationTracks() do
+                pcall(function() track:Stop() end)
+            end
+        end
+    end
+
+    updateEmoteStatus("All animations stopped", C.dim)
+end)
+
+makeInfo(pageEmote, "Paste any Roblox animation ID. Works with asset IDs and rbxassetid:// links. Speed 1 = normal. Loops auto-replay when animation ends.", 32)
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- SETTINGS TAB
@@ -587,20 +880,24 @@ make("TextLabel",{
 makeSection(pageSettings,"General",1)
 make("TextLabel",{Size=UDim2.new(1,0,0,s(34)),BackgroundColor3=C.elem,BorderSizePixel=0,Text=IsMobile and "  Toggle UI: Floating [R] button" or "  Toggle UI: RCtrl / [R] button",TextColor3=C.text,Font=Enum.Font.Gotham,TextSize=s(12),TextXAlignment=Enum.TextXAlignment.Left,LayoutOrder=2,Parent=pageSettings})
 make("TextLabel",{Size=UDim2.new(1,0,0,s(28)),BackgroundColor3=C.elem,BorderSizePixel=0,Text="  Device: "..(IsMobile and "MOBILE" or "PC"),TextColor3=IsMobile and C.green or C.accent,Font=Enum.Font.GothamSemibold,TextSize=s(12),TextXAlignment=Enum.TextXAlignment.Left,LayoutOrder=3,Parent=pageSettings})
+
 makeButton(pageSettings,"STOP ALL",C.red,4,function()
-    CFG.Orbit.On=false;CFG.Void.On=false
+    CFG.Orbit.On=false;CFG.Void.On=false;CFG.Emote.On=false
     orbitToggle.setState(false);voidToggle.setState(false)
+    stopEmote()
     Desync.active=false;Desync.phase="idle"
     if Desync.realCFrame and humanoidRootPart and humanoidRootPart.Parent then
         humanoidRootPart.CFrame=Desync.realCFrame
     end
     Desync.currentDepth=0
     updateStatus("All stopped",C.dim)
+    updateEmoteStatus("Stopped",C.dim)
 end)
+
 makeSection(pageSettings,"Script",5)
 makeButton(pageSettings,"DESTROY SCRIPT",C.red,6,function()
-    CFG.Orbit.On=false;CFG.Void.On=false
-    Desync.active=false
+    CFG.Orbit.On=false;CFG.Void.On=false;CFG.Emote.On=false
+    Desync.active=false;stopEmote()
     if Desync.realCFrame and humanoidRootPart and humanoidRootPart.Parent then
         humanoidRootPart.CFrame=Desync.realCFrame
     end
@@ -608,6 +905,7 @@ makeButton(pageSettings,"DESTROY SCRIPT",C.red,6,function()
     for _,c in pairs(ActiveConnections) do pcall(function() c:Disconnect() end) end
     gui:Destroy()
 end)
+
 makeSection(pageSettings,"Team",7)
 make("TextLabel",{Size=UDim2.new(1,0,0,s(55)),BackgroundColor3=C.elem,BorderSizePixel=0,Text="  [P1] Builder\n  [P2] Tester & Tweaker\n  [P3] Polish & Deploy",TextColor3=C.dim,Font=Enum.Font.Gotham,TextSize=FONT_TINY,TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Top,LayoutOrder=8,Parent=pageSettings})
 
@@ -630,268 +928,97 @@ table.insert(ActiveConnections,RunService.Heartbeat:Connect(function(dt)
     mr.CFrame=CFrame.new(tp+Vector3.new(math.cos(orbitAngle)*CFG.Orbit.Radius,CFG.Orbit.Height,math.sin(orbitAngle)*CFG.Orbit.Radius),tp)
 end))
 
---━━━━━━━���━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
--- ★★★ CORE: POV SPLIT DESYNC ENGINE ★★★
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
---[[
-    FRAME CYCLE — HOW THE DESYNC WORKS:
-    
-    ┌─────────────────────────────────────────────────┐
-    │ WITHIN EACH FRAME:                               │
-    │                                                   │
-    │ 1. [RenderStep priority 199]                     │
-    │    Set HRP → realCFrame                          │
-    │    Camera follows HRP at real position            │
-    │    YOU SEE: yourself standing normally            │
-    │                                                   │
-    │ 2. [Rendering happens]                           │
-    │    Character model draws at real position         │
-    │    Your screen shows normal gameplay              │
-    │                                                   │
-    │ 3. [Physics simulation]                          │
-    │    HRP is at realCFrame                          │
-    │    Movement controller works normally             │
-    │    WASD/joystick movement applies                 │
-    │                                                   │
-    │ 4. [Heartbeat - after physics]                   │
-    │    Read HRP position (has movement applied)      │
-    │    Save as new realCFrame                        │
-    │    Set HRP → underground position                │
-    │    SERVER RECEIVES: underground position         │
-    │    ENEMIES SEE: character underground            │
-    │    THEIR ESP: dot/model shows underground        │
-    │    THEIR AIMBOT: locks onto underground pos      │
-    │                                                   │
-    │ 5. [Replication to server]                       │
-    │    Server has underground CFrame                  │
-    │    All other clients render you underground       │
-    │                                                   │
-    │ NEXT FRAME: Step 1 snaps HRP back for camera     │
-    └─────────────────────────────────────────────────┘
-    
-    HIDE/ATTACK CYCLE:
-    
-    HIDE PHASE (HideTime seconds):
-      ├─ currentDepth steps toward VoidDepth
-      ├─ Each frame: depth += StepSpeed (incremental, not instant)
-      ├─ Server sees character sinking underground gradually
-      ├─ Enemy ESP follows the sinking position
-      ├─ Anti-cheat sees gradual CFrame change (not teleport)
-      └─ After HideTime expires → switch to ATTACK
-    
-    ATTACK PHASE (AttackTime seconds):
-      ├─ currentDepth steps toward 0 (3x faster going UP)
-      ├─ When depth < 2 studs → character is at real position
-      ├─ Auto Fire: clicks mouse 1-2 times
-      ├─ Manual: player can aim and shoot normally
-      ├─ Projectile Mimic: if incoming projectile detected,
-      │  immediately abort attack → dive back underground
-      └─ After AttackTime expires → switch to HIDE
-    
-    RESULT:
-      You play normally. They can't hit you.
-      During your attack window, you can hit them.
-      Their ragebot shoots underground, missing every time.
-]]
-
--- ══════════════════════════════════════════
--- RENDERSTEP: Set HRP to real position
--- Runs BEFORE camera (priority 199)
--- Player sees character at real position
--- ══════════════════════════════════════════
+-- CORE: POV SPLIT DESYNC ENGINE (unchanged from v6)
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 RunService:BindToRenderStep("RivalsDesync", Enum.RenderPriority.Camera.Value - 1, function()
     if not Desync.active then return end
     if not Desync.realCFrame then return end
     if not humanoidRootPart or not humanoidRootPart.Parent then return end
-
-    -- Set HRP to real position → camera follows this
-    -- Player sees themselves at the real position, completely normal
     humanoidRootPart.CFrame = Desync.realCFrame
 end)
-
--- ══════════════════════════════════════════
--- HEARTBEAT: Save real position, apply underground, manage phases
--- Runs AFTER physics (movement has been applied)
--- Server receives the underground position
--- ══════════════════════════════════════════
 
 local monitorClock = 0
 
 table.insert(ActiveConnections, RunService.Heartbeat:Connect(function(dt)
     if not Desync.active then return end
     if not humanoidRootPart or not humanoidRootPart.Parent then
-        Desync.active = false
-        return
+        Desync.active = false; return
     end
 
-    -- Check if alive
     local hum = character:FindFirstChildOfClass("Humanoid")
     if not hum or hum.Health <= 0 then
-        -- Died while desynced — restore position and stop
-        if Desync.realCFrame then
-            humanoidRootPart.CFrame = Desync.realCFrame
-        end
-        Desync.active      = false
-        Desync.phase        = "idle"
-        Desync.currentDepth = 0
+        if Desync.realCFrame then humanoidRootPart.CFrame = Desync.realCFrame end
+        Desync.active = false; Desync.phase = "idle"; Desync.currentDepth = 0
         return
     end
 
-    -- ── SAVE REAL POSITION ──
-    -- After physics/movement, HRP has been moved by the character controller
-    -- This is the player's ACTUAL intended position (where they moved to)
     Desync.realCFrame = humanoidRootPart.CFrame
-
-    -- ── UPDATE PHASE TIMER ──
     Desync.phaseTimer = Desync.phaseTimer + dt
 
-    -- ── PHASE STATE MACHINE ──
-
     if Desync.phase == "hide" then
-        -- ─── HIDE: Step underground gradually ───
-        -- Incremental stepping: move down by StepSpeed studs per frame
-        -- NOT instant teleport — anti-cheat sees gradual CFrame change
-        Desync.currentDepth = math.min(
-            Desync.currentDepth + CFG.Void.StepSpeed,
-            CFG.Void.VoidDepth
-        )
-
-        -- Check if hide time expired → switch to attack
+        Desync.currentDepth = math.min(Desync.currentDepth + CFG.Void.StepSpeed, CFG.Void.VoidDepth)
         if Desync.phaseTimer >= CFG.Void.HideTime then
-            Desync.phase      = "attack"
-            Desync.phaseTimer  = 0
-            Desync.shotsFired  = 0
-            Desync.shotCooldown = 0
+            Desync.phase = "attack"; Desync.phaseTimer = 0; Desync.shotsFired = 0; Desync.shotCooldown = 0
         end
 
     elseif Desync.phase == "attack" then
-        -- ─── ATTACK: Step back up to real position ───
-        -- Come up 3x faster than going down (minimize exposure)
-        Desync.currentDepth = math.max(
-            Desync.currentDepth - CFG.Void.StepSpeed * 3,
-            0
-        )
+        Desync.currentDepth = math.max(Desync.currentDepth - CFG.Void.StepSpeed * 3, 0)
 
-        -- ─── PROJECTILE MIMIC ───
-        -- Check for incoming projectiles every 3 frames (performance)
         Desync.projCheckCD = Desync.projCheckCD + 1
         if Desync.projCheckCD >= 3 then
             Desync.projCheckCD = 0
             Desync.projDetected = checkProjectiles()
-
             if Desync.projDetected then
-                -- Incoming projectile! Abort attack immediately
-                -- Dive back underground before it hits
-                Desync.phase      = "hide"
-                Desync.phaseTimer = 0
-                Desync.totalCycles = Desync.totalCycles + 1
-                -- Skip the rest of this frame's attack logic
-                -- currentDepth will start increasing next frame
+                Desync.phase = "hide"; Desync.phaseTimer = 0; Desync.totalCycles = Desync.totalCycles + 1
             end
         end
 
-        -- ─── AUTO FIRE ───
-        -- Only fire when character is near surface (depth < 2 studs)
         if Desync.phase == "attack" and Desync.currentDepth <= 2 then
             if CFG.Void.AutoFire then
                 Desync.shotCooldown = Desync.shotCooldown - dt
                 if Desync.shotsFired < CFG.Void.ShootAttempt and Desync.shotCooldown <= 0 then
                     autoFire()
-                    Desync.shotsFired   = Desync.shotsFired + 1
-                    Desync.shotCooldown = 0.05 -- 50ms between shots
+                    Desync.shotsFired = Desync.shotsFired + 1
+                    Desync.shotCooldown = 0.05
                 end
             end
-            -- If auto fire is OFF, player shoots manually during this window
-            -- Their shots fire from real position because HRP is at realCFrame
-            -- during RenderStep (which is when input/raycasts use HRP position)
         end
 
-        -- Check if attack time expired → switch to hide
         if Desync.phase == "attack" and Desync.phaseTimer >= CFG.Void.AttackTime then
-            Desync.phase       = "hide"
-            Desync.phaseTimer  = 0
-            Desync.totalCycles = Desync.totalCycles + 1
+            Desync.phase = "hide"; Desync.phaseTimer = 0; Desync.totalCycles = Desync.totalCycles + 1
         end
     end
 
-    -- ── APPLY UNDERGROUND POSITION ──
-    -- This is what the SERVER sees. This is what ENEMIES see.
-    -- Their ESP dot, their character model of us, their aimbot target
-    -- is ALL at this underground position.
     if Desync.currentDepth > 0 then
-        -- Keep same XZ and rotation, only shift Y downward
-        local realPos  = Desync.realCFrame.Position
-        local rotation = Desync.realCFrame - realPos -- Extract rotation component
-
-        local undergroundPos = Vector3.new(
-            realPos.X,
-            realPos.Y - Desync.currentDepth,
-            realPos.Z
-        )
-
-        humanoidRootPart.CFrame = CFrame.new(undergroundPos) * rotation
-
-        -- This CFrame gets replicated to the server
-        -- All other players see our character model at undergroundPos
-        -- Their ESP overlay renders at undergroundPos
-        -- Their aimbot locks onto undergroundPos
-        -- Their bullets fire toward undergroundPos
-        -- But WE are actually at realPos (shown in next RenderStep)
+        local realPos = Desync.realCFrame.Position
+        local rotation = Desync.realCFrame - realPos
+        humanoidRootPart.CFrame = CFrame.new(Vector3.new(realPos.X, realPos.Y - Desync.currentDepth, realPos.Z)) * rotation
     end
-    -- If currentDepth is 0 (during attack at surface), HRP stays at realCFrame
-    -- This is the brief window where our hitbox is actually hittable
-    -- But it's so brief (AttackTime) that their ragebot barely has time to react
 
-    -- ── UPDATE MONITOR ──
+    -- Monitor update
     monitorClock = monitorClock + dt
     if monitorClock >= 0.15 then
         monitorClock = 0
-
-        -- Phase display
-        local phaseText = Desync.phase == "hide" and "HIDING (underground)" or
-                         Desync.phase == "attack" and "ATTACKING (surface)" or "IDLE"
-        local phaseColor = Desync.phase == "hide" and C.cyan or
-                          Desync.phase == "attack" and C.orange or C.dim
-        monPhaseV.Text = "PHASE: " .. phaseText
-        monPhaseV.TextColor3 = phaseColor
-
-        -- Depth
-        monDepthV.Text = string.format("DEPTH: %.0f / %d studs", Desync.currentDepth, CFG.Void.VoidDepth)
+        local pTxt = Desync.phase == "hide" and "HIDING" or Desync.phase == "attack" and "ATTACKING" or "IDLE"
+        local pCol = Desync.phase == "hide" and C.cyan or Desync.phase == "attack" and C.orange or C.dim
+        monPhaseV.Text = "PHASE: " .. pTxt; monPhaseV.TextColor3 = pCol
+        monDepthV.Text = string.format("DEPTH: %.0f / %d", Desync.currentDepth, CFG.Void.VoidDepth)
         monDepthV.TextColor3 = Desync.currentDepth > 0 and C.green or C.orange
-
-        -- Shots
-        monShotsV.Text = string.format("SHOTS: %d / %d%s",
-            Desync.shotsFired, CFG.Void.ShootAttempt,
-            CFG.Void.AutoFire and " (auto)" or " (manual)")
-        monShotsV.TextColor3 = Desync.shotsFired > 0 and C.yellow or C.dim
-
-        -- Cycles
+        monShotsV.Text = string.format("SHOTS: %d / %d%s", Desync.shotsFired, CFG.Void.ShootAttempt, CFG.Void.AutoFire and " (auto)" or " (manual)")
         monCycleV.Text = "CYCLES: " .. Desync.totalCycles
-        monCycleV.TextColor3 = Desync.totalCycles > 0 and C.text or C.dim
-
-        -- Projectile
-        if CFG.Void.ProjectileMimic then
-            monProjV.Text = "PROJ MIMIC: " .. (Desync.projDetected and "!! INCOMING !!" or "scanning...")
-            monProjV.TextColor3 = Desync.projDetected and C.red or C.green
-        else
-            monProjV.Text = "PROJ MIMIC: OFF"
-            monProjV.TextColor3 = C.dim
-        end
     end
 end))
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- CLOSE / MINIMIZE / TOGGLE
---━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+--━━━━━━━���━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 closeBtn.MouseButton1Click:Connect(function()
-    CFG.Orbit.On=false;CFG.Void.On=false
-    Desync.active=false
-    if Desync.realCFrame and humanoidRootPart and humanoidRootPart.Parent then
-        humanoidRootPart.CFrame=Desync.realCFrame
-    end
+    CFG.Orbit.On=false;CFG.Void.On=false;CFG.Emote.On=false
+    Desync.active=false;stopEmote()
+    if Desync.realCFrame and humanoidRootPart and humanoidRootPart.Parent then humanoidRootPart.CFrame=Desync.realCFrame end
     pcall(function() RunService:UnbindFromRenderStep("RivalsDesync") end)
     for _,c in pairs(ActiveConnections) do pcall(function() c:Disconnect() end) end
     gui:Destroy()
@@ -912,102 +1039,60 @@ floatBtn.MouseButton1Click:Connect(function()
     task.wait(0.2);floatDebounce=false
 end)
 
-table.insert(ActiveConnections,UIS.InputBegan:Connect(function(i,g)
-    if g then return end
-    if i.KeyCode==CFG.UIKey then
-        mainFrame.Visible=not mainFrame.Visible
-        floatBtn.BackgroundColor3=mainFrame.Visible and C.accent or C.off
-    end
+table.insert(ActiveConnections,UIS.InputBegan:Connect(function(i,g) if g then return end
+    if i.KeyCode==CFG.UIKey then mainFrame.Visible=not mainFrame.Visible;floatBtn.BackgroundColor3=mainFrame.Visible and C.accent or C.off end
 end))
 
---━━━━━━━���━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- OPEN ANIMATION
---━━━━━━━���━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 mainFrame.Size=UDim2.new(0,WIN_W,0,0)
 mainFrame.BackgroundTransparency=1
 task.wait(0.15)
 tw(mainFrame,0.3,{Size=UDim2.new(0,WIN_W,0,WIN_H),BackgroundTransparency=0})
 
-print("[RIVALS TOOL v6.0] POV Split Desync | "..(IsMobile and "MOBILE" or "PC"))
+print("[RIVALS TOOL v7.0] POV Split + Emotes | "..(IsMobile and "MOBILE" or "PC"))
 
 --[[
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- COMPLETE BREAKDOWN — POV SPLIT DESYNC:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ EMOTE SYSTEM — HOW IT WORKS:
 
- ┌─────────────────────────────────────────────────────────────────────────┐
- │                                                                         │
- │  YOUR SCREEN (LocalPlayer):                                            │
- │  ┌───────────────────────┐                                             │
- │  │ You see yourself      │  Camera is stable                           │
- │  │ standing on the map   │  No shaking, no void                        │
- │  │ moving normally       │  WASD/joystick works                        │
- │  │ aiming normally       │  You can look around                        │
- │  │ shooting normally     │  Shots fire from real pos                   │
- │  └───────────────────────┘                                             │
- │                                                                         │
- │  WHY: BindToRenderStep sets HRP to realCFrame before camera renders    │
- │       Physics runs with HRP at realCFrame so movement works            │
- │       Camera follows HRP at realCFrame = stable normal view            │
- │                                                                         │
- │  ─────────────────────────────────────────────────────────────────────  │
- │                                                                         │
- │  ENEMY SCREEN (Other players / ESP / Aimbot):                          │
- │  ┌───────────────────────┐                                             │
- │  │ They see your char    │  200 studs underground                      │
- │  │ UNDERGROUND           │  Below the map                              │
- │  │ Their ESP dot is      │  Shows underground position                 │
- │  │ underground too       │  Their aimbot aims underground              │
- │  │ Their bullets go      │  Into the void — miss every time            │
- │  │ underground           │                                             │
- │  └───────────────────────┘                                             │
- │                                                                         │
- │  WHY: Heartbeat sets HRP underground AFTER physics                     │
- │       Server receives underground CFrame                               │
- │       All other clients render character at server position             │
- │       ESP reads server position = underground                          │
- │       Aimbot reads server position = underground                       │
- │                                                                         │
- │  ─────────────────────────────────────────────────────────────────────  │
- │                                                                         │
- │  ATTACK WINDOW:                                                        │
- │  ┌───────────────────────┐                                             │
- │  │ For AttackTime secs:  │  Your hitbox is at REAL position            │
- │  │ HRP steps up to       │  You can shoot enemies                      │
- │  │ real position         │  Auto fire or manual aim                    │
- │  │ You fire 1-2 shots    │  Then immediately dive back                 │
- │  │ Dive back underground │  Before their ragebot can react             │
- │  └───────────────────────┘                                             │
- │                                                                         │
- │  ANTI-CHEAT SAFETY:                                                    │
- │  • Incremental CFrame stepping (not instant teleport)                  │
- │  • Server sees gradual Y decrease, like walking downhill               │
- │  • StepSpeed controls how fast (lower = more gradual)                  │
- │  • No velocity spoof, no CFrame spam — just smooth movement           │
- │                                                                         │
- │  PROJECTILE MIMIC:                                                     │
- │  • During attack window, scans for fast-moving BaseParts               │
- │  • If projectile heading toward us is detected                         │
- │  • Immediately abort attack and dive underground                       │
- │  • Projectile arrives at real position but we're already gone          │
- │                                                                         │
- └─────────────────────────────────────────────────────────────────────────┘
+ ┌────────────────────────────────────────────────────────────────────────┐
+ │                                                                        │
+ │  1. Enter animation ID (numbers only, e.g. 92281817840531)            │
+ │     OR tap a preset button                                            │
+ │                                                                        │
+ │  2. System resolves ID through game:GetObjects()                      │
+ │     Falls back to rbxassetid:// if GetObjects fails                   │
+ │                                                                        │
+ │  3. Stops ALL current animation tracks on Humanoid                    │
+ │                                                                        │
+ │  4. Creates new Animation instance with resolved ID                   │
+ │                                                                        │
+ │  5. Loads via Humanoid:LoadAnimation (or Animator fallback)           │
+ │                                                                        │
+ │  6. Sets Priority = Action4 (overrides everything)                    │
+ │                                                                        │
+ │  7. Plays at configured Speed (adjustable live)                       │
+ │                                                                        │
+ │  8. On Stopped event: auto-replays if Loop is ON                      │
+ │                                                                        │
+ │  9. On respawn: auto-replays if emote was active                      │
+ │                                                                        │
+ │  WORKS WITH:                                                           │
+ │  • Direct animation IDs (e.g. 4212455893)                             │
+ │  • rbxassetid:// links                                                │
+ │  • Asset IDs that contain Animation objects                           │
+ │  • Mobile keyboard input (TextBox with touch focus)                   │
+ │                                                                        │
+ └────────────────────────────────────────────────────────────────────────┘
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- FOR P2:
- • Test Hide Timer: 0.3s hide + 0.1s attack is a good starting point
- • Test Void Depth: 200 studs should be enough, increase if ESP still sees you
- • Test Step Speed: 30 is balanced, lower for smoother (but slower to hide)
- • Test Auto Fire: try both ON and OFF, manual aim may be more accurate
- • Have a friend watch you: confirm they see character underground
- • Have a friend use ESP: confirm ESP dot shows underground
- • Have a friend shoot you: confirm bullets miss
- • Test on every Rivals map: some maps have different ground levels
+ PRESET LIST:
+ [P2] Test every preset ID — some may be broken/deleted
+ [P2] Replace broken IDs with working ones for Rivals
+ [P2] Add game-specific emotes if Rivals has custom ones
+ [P3] Consider adding a "favorites" save system
 
- FOR P3:
- • Obfuscate the RenderStep name "RivalsDesync"
- • Test on mobile executors (Fluxus, Delta)
- • Add FPS monitoring: if FPS drops below 30, auto-increase step speed
- • Consider adding depth randomization (+/- 20 studs) per cycle
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ]]

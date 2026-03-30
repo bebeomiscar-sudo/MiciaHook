@@ -1,13 +1,16 @@
 --[[
-╔═══════════════════════════════════════════════════════════╗
-║   RIVALS TOOL v5.0 — CLEAN VOIDSPAM + ORBIT             ║
-║   Mobile + PC | Random TP Desync                         ║
-║                                                           ║
-║   Voidspam: random direction + distance teleport loop    ║
-║   No keybinds — everything controlled from UI            ║
-║                                                           ║
-║   PC: RightControl  |  Mobile: Floating [R] button       ║
-╚═══════════════════════════════════════════════════════════╝
+╔══════════════════════════════════════════════════════════════╗
+║   RIVALS TOOL v6.0 — POV SPLIT DESYNC                      ║
+║                                                              ║
+║   YOUR POV:  Normal gameplay, stable camera, move & shoot   ║
+║   ENEMY POV: Your character is UNDERGROUND, unhittable      ║
+║                                                              ║
+║   Attack window briefly brings hitbox up to fire, then      ║
+║   incremental CFrame stepping pulls it back underground     ║
+║   before enemy ragebot can react.                           ║
+║                                                              ║
+║   PC: RightControl  |  Mobile: Floating [R] button          ║
+╚══════════════════════════════════════════════════════════════╝
 ]]
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -21,6 +24,7 @@ local TweenService = game:GetService("TweenService")
 
 local LP       = Players.LocalPlayer
 local IsMobile = UIS.TouchEnabled and not UIS.KeyboardEnabled
+local camera   = workspace.CurrentCamera
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- CONFIG
@@ -35,109 +39,176 @@ local CFG = {
         Height = 0,
     },
     Void = {
-        On           = false,
-        MinDistance   = 500,
-        MaxDistance   = 5000,
-        TeleportDelay = 0.1,
-        HeightBoost  = 100,
+        On              = false,
+        HideTime        = 0.3,
+        AttackTime      = 0.15,
+        ShootAttempt    = 1,
+        AutoFire        = false,
+        VoidDepth       = 200,
+        StepSpeed       = 30,
+        ProjectileMimic = false,
+        DetectionRange  = 80,
     },
     UIKey = Enum.KeyCode.RightControl,
 }
 
 local ActiveConnections = {}
 
--- Character references
-local character = LP.Character or LP.CharacterAdded:Wait()
-local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- CHARACTER MANAGEMENT
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
--- Respawn handler
-LP.CharacterAdded:Connect(function(newCharacter)
-    character = newCharacter
-    humanoidRootPart = newCharacter:WaitForChild("HumanoidRootPart")
+local character          = LP.Character or LP.CharacterAdded:Wait()
+local humanoidRootPart   = character:WaitForChild("HumanoidRootPart")
+local humanoid           = character:WaitForChild("Humanoid")
+
+LP.CharacterAdded:Connect(function(newChar)
+    character        = newChar
+    humanoidRootPart = newChar:WaitForChild("HumanoidRootPart")
+    humanoid         = newChar:WaitForChild("Humanoid")
+    -- Reset desync on respawn
+    Desync.active     = false
+    Desync.realCFrame = nil
+    Desync.currentDepth = 0
+    Desync.phase      = "idle"
 end)
 
--- Void state
-local voidLoop = nil
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- DESYNC STATE
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+local Desync = {
+    active        = false,
+    realCFrame    = nil,
+    currentDepth  = 0,
+    phase         = "idle",
+    phaseTimer    = 0,
+    shotsFired    = 0,
+    shotCooldown  = 0,
+    projCheckCD   = 0,
+    projDetected  = false,
+    totalCycles   = 0,
+}
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- SCALING
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-local camera  = workspace.CurrentCamera
 local screenW = camera.ViewportSize.X
-
 local SF = 1
 if IsMobile then
     SF = screenW < 500 and 0.62 or screenW < 800 and 0.75 or 0.85
 end
 local function s(n) return math.floor(n * SF) end
 
-local WIN_W      = s(540)
-local WIN_H      = s(400)
-local SIDE_W     = s(120)
-local TOP_H      = s(40)
-local STATUS_H   = s(28)
-local BTN_H      = s(38)
-local TOGGLE_H   = s(40)
-local SLIDER_H   = s(56)
-local FONT_MAIN  = s(13)
-local FONT_SMALL = s(11)
-local FONT_TINY  = s(10)
+local WIN_W     = s(540)
+local WIN_H     = s(460)
+local SIDE_W    = s(120)
+local TOP_H     = s(40)
+local STATUS_H  = s(28)
+local BTN_H     = s(38)
+local TOGGLE_H  = s(40)
+local SLIDER_H  = s(56)
+local FONT_MAIN = s(13)
+local FONT_SMALL= s(11)
+local FONT_TINY = s(10)
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- PALETTE
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 local C = {
-    bg      = Color3.fromRGB(10,10,14),
-    side    = Color3.fromRGB(15,15,20),
-    panel   = Color3.fromRGB(20,20,26),
-    elem    = Color3.fromRGB(28,28,35),
-    border  = Color3.fromRGB(42,42,52),
-    hover   = Color3.fromRGB(36,36,45),
-    accent  = Color3.fromRGB(185,28,38),
-    accentL = Color3.fromRGB(220,45,55),
-    text    = Color3.fromRGB(215,215,220),
-    dim     = Color3.fromRGB(105,105,118),
-    green   = Color3.fromRGB(40,180,70),
-    off     = Color3.fromRGB(52,52,62),
-    red     = Color3.fromRGB(200,40,40),
-    orange  = Color3.fromRGB(210,140,30),
-    cyan    = Color3.fromRGB(40,180,200),
+    bg=Color3.fromRGB(10,10,14), side=Color3.fromRGB(15,15,20),
+    panel=Color3.fromRGB(20,20,26), elem=Color3.fromRGB(28,28,35),
+    border=Color3.fromRGB(42,42,52), hover=Color3.fromRGB(36,36,45),
+    accent=Color3.fromRGB(185,28,38), accentL=Color3.fromRGB(220,45,55),
+    text=Color3.fromRGB(215,215,220), dim=Color3.fromRGB(105,105,118),
+    green=Color3.fromRGB(40,180,70), off=Color3.fromRGB(52,52,62),
+    red=Color3.fromRGB(200,40,40), orange=Color3.fromRGB(210,140,30),
+    cyan=Color3.fromRGB(40,180,200), purple=Color3.fromRGB(140,60,210),
+    yellow=Color3.fromRGB(220,200,40),
 }
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- HELPERS
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-local function make(class, props)
-    local obj = Instance.new(class)
-    for k, v in pairs(props) do if k ~= "Parent" then obj[k] = v end end
-    if props.Parent then obj.Parent = props.Parent end
-    return obj
+local function make(class,props)
+    local o=Instance.new(class)
+    for k,v in pairs(props) do if k~="Parent" then o[k]=v end end
+    if props.Parent then o.Parent=props.Parent end
+    return o
 end
 
-local function tw(obj, dur, goals)
-    TweenService:Create(obj, TweenInfo.new(dur, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), goals):Play()
+local function tw(o,d,g)
+    TweenService:Create(o,TweenInfo.new(d,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),g):Play()
 end
 
-local function fmtN(val, inc)
-    if inc >= 1 then return tostring(math.floor(val)) end
-    if inc >= 0.1 then return string.format("%.1f", val) end
-    return string.format("%.2f", val)
+local function fmtN(v,i)
+    if i>=1 then return tostring(math.floor(v)) end
+    if i>=0.1 then return string.format("%.1f",v) end
+    return string.format("%.2f",v)
 end
 
-local function isTM(i)
-    return i.UserInputType == Enum.UserInputType.MouseButton1
-        or i.UserInputType == Enum.UserInputType.Touch
+local function isTM(i) return i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch end
+local function isTMM(i) return i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch end
+local function gIP(i) return Vector2.new(i.Position.X,i.Position.Y) end
+
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- AUTO FIRE
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+local function autoFire()
+    pcall(function()
+        local vim = game:GetService("VirtualInputManager")
+        local cx  = camera.ViewportSize.X / 2
+        local cy  = camera.ViewportSize.Y / 2
+        vim:SendMouseButtonEvent(cx, cy, 0, true,  game, 1)
+        task.defer(function()
+            pcall(function()
+                vim:SendMouseButtonEvent(cx, cy, 0, false, game, 1)
+            end)
+        end)
+    end)
 end
 
-local function isTMM(i)
-    return i.UserInputType == Enum.UserInputType.MouseMovement
-        or i.UserInputType == Enum.UserInputType.Touch
-end
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- PROJECTILE DETECTION
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-local function gIP(i) return Vector2.new(i.Position.X, i.Position.Y) end
+local function checkProjectiles()
+    if not CFG.Void.ProjectileMimic then return false end
+    if not Desync.realCFrame then return false end
+
+    local myPos = Desync.realCFrame.Position
+    local range = CFG.Void.DetectionRange
+
+    local params = OverlapParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = {character}
+
+    local ok, parts = pcall(function()
+        return workspace:GetPartBoundsInRadius(myPos, range, params)
+    end)
+
+    if not ok or not parts then return false end
+
+    for _, part in ipairs(parts) do
+        if not part:IsDescendantOf(character) then
+            local vel = part.AssemblyLinearVelocity
+            if vel.Magnitude > 80 then
+                local toUs = (myPos - part.Position)
+                if toUs.Magnitude > 1 then
+                    local dot = toUs.Unit:Dot(vel.Unit)
+                    if dot > 0.4 then
+                        return true
+                    end
+                end
+            end
+        end
+    end
+    return false
+end
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- SCREENGUI
@@ -146,663 +217,669 @@ local function gIP(i) return Vector2.new(i.Position.X, i.Position.Y) end
 if game:GetService("CoreGui"):FindFirstChild("RivalsTool") then
     game:GetService("CoreGui"):FindFirstChild("RivalsTool"):Destroy()
 end
-local gui = Instance.new("ScreenGui")
-gui.Name = "RivalsTool"
-gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-gui.ResetOnSpawn = false
-pcall(function() gui.Parent = game:GetService("CoreGui") end)
-if not gui.Parent then gui.Parent = LP:WaitForChild("PlayerGui") end
+local gui=Instance.new("ScreenGui")
+gui.Name="RivalsTool";gui.ZIndexBehavior=Enum.ZIndexBehavior.Sibling;gui.ResetOnSpawn=false
+pcall(function() gui.Parent=game:GetService("CoreGui") end)
+if not gui.Parent then gui.Parent=LP:WaitForChild("PlayerGui") end
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- FLOAT BUTTON
---━━━━━━━���━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-local floatBtn = make("TextButton", {
-    Size = UDim2.new(0, s(50), 0, s(50)),
-    Position = UDim2.new(0, 8, 0, camera.ViewportSize.Y * 0.3),
-    BackgroundColor3 = C.accent, BorderSizePixel = 0,
-    Text = "R", TextColor3 = C.text, Font = Enum.Font.GothamBold,
-    TextSize = s(20), ZIndex = 100, Parent = gui,
-})
-make("UICorner", { CornerRadius = UDim.new(0, s(12)), Parent = floatBtn })
-make("UIStroke", { Color = C.border, Thickness = 1, Parent = floatBtn })
-
+local floatBtn=make("TextButton",{Size=UDim2.new(0,s(50),0,s(50)),Position=UDim2.new(0,8,0,camera.ViewportSize.Y*0.3),BackgroundColor3=C.accent,BorderSizePixel=0,Text="R",TextColor3=C.text,Font=Enum.Font.GothamBold,TextSize=s(20),ZIndex=100,Parent=gui})
+make("UICorner",{CornerRadius=UDim.new(0,s(12)),Parent=floatBtn})
+make("UIStroke",{Color=C.border,Thickness=1,Parent=floatBtn})
 do
-    local d, ds, sp = false, nil, nil
-    floatBtn.InputBegan:Connect(function(i) if isTM(i) then d = true; ds = gIP(i); sp = floatBtn.Position end end)
-    floatBtn.InputEnded:Connect(function(i) if isTM(i) then d = false end end)
-    table.insert(ActiveConnections, UIS.InputChanged:Connect(function(i)
-        if d and isTMM(i) then
-            local delta = gIP(i) - ds
-            if delta.Magnitude > 8 then
-                floatBtn.Position = UDim2.new(sp.X.Scale, sp.X.Offset + delta.X, sp.Y.Scale, sp.Y.Offset + delta.Y)
-            end
-        end
-    end))
+    local d,ds,sp=false,nil,nil
+    floatBtn.InputBegan:Connect(function(i) if isTM(i) then d=true;ds=gIP(i);sp=floatBtn.Position end end)
+    floatBtn.InputEnded:Connect(function(i) if isTM(i) then d=false end end)
+    table.insert(ActiveConnections,UIS.InputChanged:Connect(function(i) if d and isTMM(i) then local dt2=gIP(i)-ds;if dt2.Magnitude>8 then floatBtn.Position=UDim2.new(sp.X.Scale,sp.X.Offset+dt2.X,sp.Y.Scale,sp.Y.Offset+dt2.Y) end end end))
 end
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- MAIN WINDOW
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-local mainFrame = make("Frame", {
-    Name = "Main", Size = UDim2.new(0, WIN_W, 0, WIN_H),
-    Position = UDim2.new(0.5, -WIN_W / 2, 0.5, -WIN_H / 2),
-    BackgroundColor3 = C.bg, BorderSizePixel = 0, Parent = gui,
-})
-make("UICorner", { CornerRadius = UDim.new(0, s(4)), Parent = mainFrame })
-make("UIStroke", { Color = C.border, Thickness = 1, Parent = mainFrame })
-make("ImageLabel", {
-    Size = UDim2.new(1, 30, 1, 30), Position = UDim2.new(0, -15, 0, -15),
-    BackgroundTransparency = 1, Image = "rbxassetid://6015897843",
-    ImageColor3 = Color3.new(0, 0, 0), ImageTransparency = 0.5,
-    ScaleType = Enum.ScaleType.Slice, SliceCenter = Rect.new(49, 49, 450, 450),
-    ZIndex = 0, Parent = mainFrame,
-})
+local mainFrame=make("Frame",{Name="Main",Size=UDim2.new(0,WIN_W,0,WIN_H),Position=UDim2.new(0.5,-WIN_W/2,0.5,-WIN_H/2),BackgroundColor3=C.bg,BorderSizePixel=0,Parent=gui})
+make("UICorner",{CornerRadius=UDim.new(0,s(4)),Parent=mainFrame})
+make("UIStroke",{Color=C.border,Thickness=1,Parent=mainFrame})
+make("ImageLabel",{Size=UDim2.new(1,30,1,30),Position=UDim2.new(0,-15,0,-15),BackgroundTransparency=1,Image="rbxassetid://6015897843",ImageColor3=Color3.new(0,0,0),ImageTransparency=0.5,ScaleType=Enum.ScaleType.Slice,SliceCenter=Rect.new(49,49,450,450),ZIndex=0,Parent=mainFrame})
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- TOP BAR
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-local topBar = make("Frame", {
-    Size = UDim2.new(1, 0, 0, TOP_H), BackgroundColor3 = C.side,
-    BorderSizePixel = 0, Parent = mainFrame,
-})
-make("UICorner", { CornerRadius = UDim.new(0, s(4)), Parent = topBar })
-make("Frame", { Size = UDim2.new(1, 0, 0, 8), Position = UDim2.new(0, 0, 1, -8), BackgroundColor3 = C.side, BorderSizePixel = 0, ZIndex = 2, Parent = topBar })
+local topBar=make("Frame",{Size=UDim2.new(1,0,0,TOP_H),BackgroundColor3=C.side,BorderSizePixel=0,Parent=mainFrame})
+make("UICorner",{CornerRadius=UDim.new(0,s(4)),Parent=topBar})
+make("Frame",{Size=UDim2.new(1,0,0,8),Position=UDim2.new(0,0,1,-8),BackgroundColor3=C.side,BorderSizePixel=0,ZIndex=2,Parent=topBar})
+make("TextLabel",{Size=UDim2.new(0.5,0,1,0),Position=UDim2.new(0,s(14),0,0),BackgroundTransparency=1,Text="RIVALS TOOL",TextColor3=C.accent,Font=Enum.Font.GothamBold,TextSize=s(14),TextXAlignment=Enum.TextXAlignment.Left,Parent=topBar})
+make("TextLabel",{Size=UDim2.new(0,s(40),1,0),Position=UDim2.new(0,s(120),0,0),BackgroundTransparency=1,Text="v6.0",TextColor3=C.dim,Font=Enum.Font.Gotham,TextSize=FONT_SMALL,TextXAlignment=Enum.TextXAlignment.Left,Parent=topBar})
+local closeBtn=make("TextButton",{Size=UDim2.new(0,TOP_H,0,TOP_H),Position=UDim2.new(1,-TOP_H,0,0),BackgroundTransparency=1,Text="X",TextColor3=C.dim,Font=Enum.Font.GothamBold,TextSize=s(14),Parent=topBar})
+local minBtn=make("TextButton",{Size=UDim2.new(0,TOP_H,0,TOP_H),Position=UDim2.new(1,-TOP_H*2,0,0),BackgroundTransparency=1,Text="—",TextColor3=C.dim,Font=Enum.Font.GothamBold,TextSize=s(14),Parent=topBar})
+closeBtn.MouseEnter:Connect(function() closeBtn.TextColor3=C.red end)
+closeBtn.MouseLeave:Connect(function() closeBtn.TextColor3=C.dim end)
+minBtn.MouseEnter:Connect(function() minBtn.TextColor3=C.text end)
+minBtn.MouseLeave:Connect(function() minBtn.TextColor3=C.dim end)
 
-make("TextLabel", {
-    Size = UDim2.new(0.5, 0, 1, 0), Position = UDim2.new(0, s(14), 0, 0),
-    BackgroundTransparency = 1, Text = "RIVALS TOOL", TextColor3 = C.accent,
-    Font = Enum.Font.GothamBold, TextSize = s(14), TextXAlignment = Enum.TextXAlignment.Left, Parent = topBar,
-})
-make("TextLabel", {
-    Size = UDim2.new(0, s(40), 1, 0), Position = UDim2.new(0, s(120), 0, 0),
-    BackgroundTransparency = 1, Text = "v5.0", TextColor3 = C.dim,
-    Font = Enum.Font.Gotham, TextSize = FONT_SMALL, TextXAlignment = Enum.TextXAlignment.Left, Parent = topBar,
-})
-
-local closeBtn = make("TextButton", {
-    Size = UDim2.new(0, TOP_H, 0, TOP_H), Position = UDim2.new(1, -TOP_H, 0, 0),
-    BackgroundTransparency = 1, Text = "X", TextColor3 = C.dim,
-    Font = Enum.Font.GothamBold, TextSize = s(14), Parent = topBar,
-})
-local minBtn = make("TextButton", {
-    Size = UDim2.new(0, TOP_H, 0, TOP_H), Position = UDim2.new(1, -TOP_H * 2, 0, 0),
-    BackgroundTransparency = 1, Text = "—", TextColor3 = C.dim,
-    Font = Enum.Font.GothamBold, TextSize = s(14), Parent = topBar,
-})
-closeBtn.MouseEnter:Connect(function() closeBtn.TextColor3 = C.red end)
-closeBtn.MouseLeave:Connect(function() closeBtn.TextColor3 = C.dim end)
-minBtn.MouseEnter:Connect(function() minBtn.TextColor3 = C.text end)
-minBtn.MouseLeave:Connect(function() minBtn.TextColor3 = C.dim end)
-
--- DRAG
-do
-    local d, ds, sp = false, nil, nil
-    local dz = make("TextButton", {
-        Size = UDim2.new(1, -TOP_H * 2, 1, 0), BackgroundTransparency = 1,
-        Text = "", ZIndex = 5, Parent = topBar,
-    })
-    dz.InputBegan:Connect(function(i) if isTM(i) then d = true; ds = gIP(i); sp = mainFrame.Position end end)
-    dz.InputEnded:Connect(function(i) if isTM(i) then d = false end end)
-    table.insert(ActiveConnections, UIS.InputChanged:Connect(function(i)
-        if d and isTMM(i) then
-            local delta = gIP(i) - ds
-            mainFrame.Position = UDim2.new(sp.X.Scale, sp.X.Offset + delta.X, sp.Y.Scale, sp.Y.Offset + delta.Y)
-        end
-    end))
+do local d,ds,sp=false,nil,nil
+    local dz=make("TextButton",{Size=UDim2.new(1,-TOP_H*2,1,0),BackgroundTransparency=1,Text="",ZIndex=5,Parent=topBar})
+    dz.InputBegan:Connect(function(i) if isTM(i) then d=true;ds=gIP(i);sp=mainFrame.Position end end)
+    dz.InputEnded:Connect(function(i) if isTM(i) then d=false end end)
+    table.insert(ActiveConnections,UIS.InputChanged:Connect(function(i) if d and isTMM(i) then local dt2=gIP(i)-ds;mainFrame.Position=UDim2.new(sp.X.Scale,sp.X.Offset+dt2.X,sp.Y.Scale,sp.Y.Offset+dt2.Y) end end))
 end
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- SIDEBAR + CONTENT + STATUS
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-local sidebar = make("Frame", {
-    Size = UDim2.new(0, SIDE_W, 1, -TOP_H), Position = UDim2.new(0, 0, 0, TOP_H),
-    BackgroundColor3 = C.side, BorderSizePixel = 0, Parent = mainFrame,
-})
-make("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, s(2)), Parent = sidebar })
-make("UIPadding", { PaddingTop = UDim.new(0, s(8)), PaddingLeft = UDim.new(0, s(5)), PaddingRight = UDim.new(0, s(5)), Parent = sidebar })
-make("Frame", { Size = UDim2.new(0, 1, 1, -TOP_H), Position = UDim2.new(0, SIDE_W, 0, TOP_H), BackgroundColor3 = C.border, BorderSizePixel = 0, ZIndex = 5, Parent = mainFrame })
+local sidebar=make("Frame",{Size=UDim2.new(0,SIDE_W,1,-TOP_H),Position=UDim2.new(0,0,0,TOP_H),BackgroundColor3=C.side,BorderSizePixel=0,Parent=mainFrame})
+make("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,s(2)),Parent=sidebar})
+make("UIPadding",{PaddingTop=UDim.new(0,s(8)),PaddingLeft=UDim.new(0,s(5)),PaddingRight=UDim.new(0,s(5)),Parent=sidebar})
+make("Frame",{Size=UDim2.new(0,1,1,-TOP_H),Position=UDim2.new(0,SIDE_W,0,TOP_H),BackgroundColor3=C.border,BorderSizePixel=0,ZIndex=5,Parent=mainFrame})
 
-local contentArea = make("Frame", {
-    Name = "Content", Size = UDim2.new(1, -(SIDE_W + 1), 1, -(TOP_H + STATUS_H)),
-    Position = UDim2.new(0, SIDE_W + 1, 0, TOP_H), BackgroundColor3 = C.panel,
-    BorderSizePixel = 0, ClipsDescendants = true, Parent = mainFrame,
-})
+local contentArea=make("Frame",{Name="Content",Size=UDim2.new(1,-(SIDE_W+1),1,-(TOP_H+STATUS_H)),Position=UDim2.new(0,SIDE_W+1,0,TOP_H),BackgroundColor3=C.panel,BorderSizePixel=0,ClipsDescendants=true,Parent=mainFrame})
 
-local statusBar = make("Frame", {
-    Size = UDim2.new(1, 0, 0, STATUS_H), Position = UDim2.new(0, 0, 1, -STATUS_H),
-    BackgroundColor3 = C.side, BorderSizePixel = 0, Parent = mainFrame,
-})
-make("UICorner", { CornerRadius = UDim.new(0, s(4)), Parent = statusBar })
-make("Frame", { Size = UDim2.new(1, 0, 0, 8), BackgroundColor3 = C.side, BorderSizePixel = 0, ZIndex = 2, Parent = statusBar })
-
-local statusDot = make("Frame", {
-    Size = UDim2.new(0, s(6), 0, s(6)), Position = UDim2.new(0, s(10), 0.5, -s(3)),
-    BackgroundColor3 = C.dim, BorderSizePixel = 0, Parent = statusBar,
-})
-make("UICorner", { CornerRadius = UDim.new(1, 0), Parent = statusDot })
-
-local statusLabel = make("TextLabel", {
-    Size = UDim2.new(1, -s(20), 1, 0), Position = UDim2.new(0, s(22), 0, 0),
-    BackgroundTransparency = 1, Text = "Idle", TextColor3 = C.dim,
-    Font = Enum.Font.Gotham, TextSize = FONT_TINY, TextXAlignment = Enum.TextXAlignment.Left,
-    TextTruncate = Enum.TextTruncate.AtEnd, Parent = statusBar,
-})
-
-local function updateStatus(msg, color)
-    statusLabel.Text = msg
-    statusDot.BackgroundColor3 = color or C.dim
-end
+local statusBar=make("Frame",{Size=UDim2.new(1,0,0,STATUS_H),Position=UDim2.new(0,0,1,-STATUS_H),BackgroundColor3=C.side,BorderSizePixel=0,Parent=mainFrame})
+make("UICorner",{CornerRadius=UDim.new(0,s(4)),Parent=statusBar})
+make("Frame",{Size=UDim2.new(1,0,0,8),BackgroundColor3=C.side,BorderSizePixel=0,ZIndex=2,Parent=statusBar})
+local statusDot=make("Frame",{Size=UDim2.new(0,s(6),0,s(6)),Position=UDim2.new(0,s(10),0.5,-s(3)),BackgroundColor3=C.dim,BorderSizePixel=0,Parent=statusBar})
+make("UICorner",{CornerRadius=UDim.new(1,0),Parent=statusDot})
+local statusLabel=make("TextLabel",{Size=UDim2.new(1,-s(20),1,0),Position=UDim2.new(0,s(22),0,0),BackgroundTransparency=1,Text="Idle",TextColor3=C.dim,Font=Enum.Font.Gotham,TextSize=FONT_TINY,TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd,Parent=statusBar})
+local function updateStatus(m,c) statusLabel.Text=m;statusDot.BackgroundColor3=c or C.dim end
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- UI BUILDERS
---━━━━━━━���━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-local function makeSection(parent, text, order)
-    return make("TextLabel", {
-        Size = UDim2.new(1, 0, 0, s(22)), BackgroundTransparency = 1,
-        Text = string.upper(text), TextColor3 = C.dim, Font = Enum.Font.GothamBold,
-        TextSize = FONT_TINY, TextXAlignment = Enum.TextXAlignment.Left,
-        LayoutOrder = order or 0, Parent = parent,
-    })
+local function makeSection(p,t,o)
+    return make("TextLabel",{Size=UDim2.new(1,0,0,s(22)),BackgroundTransparency=1,Text=string.upper(t),TextColor3=C.dim,Font=Enum.Font.GothamBold,TextSize=FONT_TINY,TextXAlignment=Enum.TextXAlignment.Left,LayoutOrder=o or 0,Parent=p})
 end
 
-local function makeToggle(parent, label, default, order, callback)
-    local state = default or false
-    local frame = make("Frame", { Size = UDim2.new(1, 0, 0, TOGGLE_H), BackgroundColor3 = C.elem, BorderSizePixel = 0, LayoutOrder = order, Parent = parent })
-    make("UICorner", { CornerRadius = UDim.new(0, s(3)), Parent = frame })
-    make("TextLabel", {
-        Size = UDim2.new(1, -s(60), 1, 0), Position = UDim2.new(0, s(12), 0, 0),
-        BackgroundTransparency = 1, Text = label, TextColor3 = C.text, Font = Enum.Font.Gotham,
-        TextSize = FONT_MAIN, TextXAlignment = Enum.TextXAlignment.Left,
-        TextTruncate = Enum.TextTruncate.AtEnd, Parent = frame,
-    })
-    local tW, tH, kS = s(40), s(20), s(16)
-    local track = make("Frame", {
-        Size = UDim2.new(0, tW, 0, tH), Position = UDim2.new(1, -tW - s(10), 0.5, -tH / 2),
-        BackgroundColor3 = state and C.accent or C.off, BorderSizePixel = 0, Parent = frame,
-    })
-    make("UICorner", { CornerRadius = UDim.new(0, tH / 2), Parent = track })
-    local knob = make("Frame", {
-        Size = UDim2.new(0, kS, 0, kS),
-        Position = state and UDim2.new(1, -kS - s(2), 0.5, -kS / 2) or UDim2.new(0, s(2), 0.5, -kS / 2),
-        BackgroundColor3 = C.text, BorderSizePixel = 0, Parent = track,
-    })
-    make("UICorner", { CornerRadius = UDim.new(1, 0), Parent = knob })
-    local btn = make("TextButton", { Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = "", Parent = frame })
-    btn.MouseButton1Click:Connect(function()
-        state = not state
-        tw(track, 0.18, { BackgroundColor3 = state and C.accent or C.off })
-        tw(knob, 0.18, { Position = state and UDim2.new(1, -kS - s(2), 0.5, -kS / 2) or UDim2.new(0, s(2), 0.5, -kS / 2) })
-        if callback then callback(state) end
+local function makeToggle(p,l,d,o,cb)
+    local st=d or false
+    local f=make("Frame",{Size=UDim2.new(1,0,0,TOGGLE_H),BackgroundColor3=C.elem,BorderSizePixel=0,LayoutOrder=o,Parent=p})
+    make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=f})
+    make("TextLabel",{Size=UDim2.new(1,-s(60),1,0),Position=UDim2.new(0,s(12),0,0),BackgroundTransparency=1,Text=l,TextColor3=C.text,Font=Enum.Font.Gotham,TextSize=FONT_MAIN,TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd,Parent=f})
+    local tW,tH,kS=s(40),s(20),s(16)
+    local tr=make("Frame",{Size=UDim2.new(0,tW,0,tH),Position=UDim2.new(1,-tW-s(10),0.5,-tH/2),BackgroundColor3=st and C.accent or C.off,BorderSizePixel=0,Parent=f})
+    make("UICorner",{CornerRadius=UDim.new(0,tH/2),Parent=tr})
+    local kn=make("Frame",{Size=UDim2.new(0,kS,0,kS),Position=st and UDim2.new(1,-kS-s(2),0.5,-kS/2) or UDim2.new(0,s(2),0.5,-kS/2),BackgroundColor3=C.text,BorderSizePixel=0,Parent=tr})
+    make("UICorner",{CornerRadius=UDim.new(1,0),Parent=kn})
+    local b=make("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",Parent=f})
+    b.MouseButton1Click:Connect(function()
+        st=not st
+        tw(tr,0.18,{BackgroundColor3=st and C.accent or C.off})
+        tw(kn,0.18,{Position=st and UDim2.new(1,-kS-s(2),0.5,-kS/2) or UDim2.new(0,s(2),0.5,-kS/2)})
+        if cb then cb(st) end
     end)
-    return {
-        getState = function() return state end,
-        setState = function(v)
-            state = v
-            track.BackgroundColor3 = v and C.accent or C.off
-            knob.Position = v and UDim2.new(1, -kS - s(2), 0.5, -kS / 2) or UDim2.new(0, s(2), 0.5, -kS / 2)
-        end,
-    }
+    return {getState=function() return st end,setState=function(v) st=v;tr.BackgroundColor3=v and C.accent or C.off;kn.Position=v and UDim2.new(1,-kS-s(2),0.5,-kS/2) or UDim2.new(0,s(2),0.5,-kS/2) end}
 end
 
-local function makeSlider(parent, label, min, max, default, increment, order, callback)
-    local value = default
-    local frame = make("Frame", { Size = UDim2.new(1, 0, 0, SLIDER_H), BackgroundColor3 = C.elem, BorderSizePixel = 0, LayoutOrder = order, Parent = parent })
-    make("UICorner", { CornerRadius = UDim.new(0, s(3)), Parent = frame })
-    make("TextLabel", {
-        Size = UDim2.new(0.55, 0, 0, s(22)), Position = UDim2.new(0, s(12), 0, s(2)),
-        BackgroundTransparency = 1, Text = label, TextColor3 = C.text, Font = Enum.Font.Gotham,
-        TextSize = s(12), TextXAlignment = Enum.TextXAlignment.Left,
-        TextTruncate = Enum.TextTruncate.AtEnd, Parent = frame,
-    })
-    local valLabel = make("TextLabel", {
-        Size = UDim2.new(0.4, 0, 0, s(22)), Position = UDim2.new(0.57, 0, 0, s(2)),
-        BackgroundTransparency = 1, Text = fmtN(value, increment), TextColor3 = C.dim,
-        Font = Enum.Font.GothamSemibold, TextSize = s(12), TextXAlignment = Enum.TextXAlignment.Right, Parent = frame,
-    })
-    local bH = s(8)
-    local trackBG = make("Frame", {
-        Size = UDim2.new(1, -s(24), 0, bH), Position = UDim2.new(0, s(12), 0, SLIDER_H - bH - s(10)),
-        BackgroundColor3 = C.border, BorderSizePixel = 0, Parent = frame,
-    })
-    make("UICorner", { CornerRadius = UDim.new(0, s(3)), Parent = trackBG })
-    local pct = math.clamp((default - min) / (max - min), 0, 1)
-    local fill = make("Frame", { Size = UDim2.new(pct, 0, 1, 0), BackgroundColor3 = C.accent, BorderSizePixel = 0, Parent = trackBG })
-    make("UICorner", { CornerRadius = UDim.new(0, s(3)), Parent = fill })
-    local hS = s(18)
-    local handle = make("Frame", {
-        Size = UDim2.new(0, hS, 0, hS), Position = UDim2.new(pct, -hS / 2, 0.5, -hS / 2),
-        BackgroundColor3 = C.text, BorderSizePixel = 0, ZIndex = 3, Parent = trackBG,
-    })
-    make("UICorner", { CornerRadius = UDim.new(1, 0), Parent = handle })
-    local touchZone = make("TextButton", {
-        Size = UDim2.new(1, s(20), 0, s(30)), Position = UDim2.new(0, -s(10), 0.5, -s(15)),
-        BackgroundTransparency = 1, Text = "", ZIndex = 4, Parent = trackBG,
-    })
-    local sliding = false
-    local function upd(ix)
-        local r = math.clamp((ix - trackBG.AbsolutePosition.X) / trackBG.AbsoluteSize.X, 0, 1)
-        value = math.clamp(math.floor((min + (max - min) * r) / increment + 0.5) * increment, min, max)
-        local fp = (value - min) / (max - min)
-        fill.Size = UDim2.new(fp, 0, 1, 0)
-        handle.Position = UDim2.new(fp, -hS / 2, 0.5, -hS / 2)
-        valLabel.Text = fmtN(value, increment)
-        if callback then callback(value) end
-    end
-    touchZone.InputBegan:Connect(function(i) if isTM(i) then sliding = true; upd(i.Position.X) end end)
-    handle.InputBegan:Connect(function(i) if isTM(i) then sliding = true end end)
-    table.insert(ActiveConnections, UIS.InputChanged:Connect(function(i) if sliding and isTMM(i) then upd(i.Position.X) end end))
-    table.insert(ActiveConnections, UIS.InputEnded:Connect(function(i) if isTM(i) then sliding = false end end))
-    return {
-        getValue = function() return value end,
-        setValue = function(v)
-            value = v; local p = (v - min) / (max - min)
-            fill.Size = UDim2.new(p, 0, 1, 0); handle.Position = UDim2.new(p, -hS / 2, 0.5, -hS / 2)
-            valLabel.Text = fmtN(v, increment)
-        end,
-    }
+local function makeSlider(p,l,mn,mx,df,inc,o,cb)
+    local val=df
+    local f=make("Frame",{Size=UDim2.new(1,0,0,SLIDER_H),BackgroundColor3=C.elem,BorderSizePixel=0,LayoutOrder=o,Parent=p})
+    make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=f})
+    make("TextLabel",{Size=UDim2.new(0.55,0,0,s(22)),Position=UDim2.new(0,s(12),0,s(2)),BackgroundTransparency=1,Text=l,TextColor3=C.text,Font=Enum.Font.Gotham,TextSize=s(12),TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd,Parent=f})
+    local vL=make("TextLabel",{Size=UDim2.new(0.4,0,0,s(22)),Position=UDim2.new(0.57,0,0,s(2)),BackgroundTransparency=1,Text=fmtN(val,inc),TextColor3=C.dim,Font=Enum.Font.GothamSemibold,TextSize=s(12),TextXAlignment=Enum.TextXAlignment.Right,Parent=f})
+    local bH=s(8)
+    local tB=make("Frame",{Size=UDim2.new(1,-s(24),0,bH),Position=UDim2.new(0,s(12),0,SLIDER_H-bH-s(10)),BackgroundColor3=C.border,BorderSizePixel=0,Parent=f})
+    make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=tB})
+    local pc=math.clamp((df-mn)/(mx-mn),0,1)
+    local fl=make("Frame",{Size=UDim2.new(pc,0,1,0),BackgroundColor3=C.accent,BorderSizePixel=0,Parent=tB})
+    make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=fl})
+    local hS=s(18)
+    local hd=make("Frame",{Size=UDim2.new(0,hS,0,hS),Position=UDim2.new(pc,-hS/2,0.5,-hS/2),BackgroundColor3=C.text,BorderSizePixel=0,ZIndex=3,Parent=tB})
+    make("UICorner",{CornerRadius=UDim.new(1,0),Parent=hd})
+    local tz=make("TextButton",{Size=UDim2.new(1,s(20),0,s(30)),Position=UDim2.new(0,-s(10),0.5,-s(15)),BackgroundTransparency=1,Text="",ZIndex=4,Parent=tB})
+    local sl=false
+    local function upd(ix) local r=math.clamp((ix-tB.AbsolutePosition.X)/tB.AbsoluteSize.X,0,1);val=math.clamp(math.floor((mn+(mx-mn)*r)/inc+0.5)*inc,mn,mx);local fp=(val-mn)/(mx-mn);fl.Size=UDim2.new(fp,0,1,0);hd.Position=UDim2.new(fp,-hS/2,0.5,-hS/2);vL.Text=fmtN(val,inc);if cb then cb(val) end end
+    tz.InputBegan:Connect(function(i) if isTM(i) then sl=true;upd(i.Position.X) end end)
+    hd.InputBegan:Connect(function(i) if isTM(i) then sl=true end end)
+    table.insert(ActiveConnections,UIS.InputChanged:Connect(function(i) if sl and isTMM(i) then upd(i.Position.X) end end))
+    table.insert(ActiveConnections,UIS.InputEnded:Connect(function(i) if isTM(i) then sl=false end end))
+    return {getValue=function() return val end}
 end
 
-local function makeButton(parent, label, color, order, callback)
-    local btn = make("TextButton", {
-        Size = UDim2.new(1, 0, 0, BTN_H), BackgroundColor3 = color or C.elem,
-        BorderSizePixel = 0, Text = label, TextColor3 = C.text, Font = Enum.Font.GothamSemibold,
-        TextSize = FONT_MAIN, LayoutOrder = order, Parent = parent,
-    })
-    make("UICorner", { CornerRadius = UDim.new(0, s(3)), Parent = btn })
-    btn.MouseButton1Click:Connect(function() if callback then callback() end end)
-    return btn
+local function makeButton(p,l,c,o,cb)
+    local b=make("TextButton",{Size=UDim2.new(1,0,0,BTN_H),BackgroundColor3=c or C.elem,BorderSizePixel=0,Text=l,TextColor3=C.text,Font=Enum.Font.GothamSemibold,TextSize=FONT_MAIN,LayoutOrder=o,Parent=p})
+    make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=b})
+    b.MouseButton1Click:Connect(function() if cb then cb() end end)
+    return b
 end
 
-local function makeInfo(parent, text, order)
-    return make("TextLabel", {
-        Size = UDim2.new(1, 0, 0, s(38)), BackgroundTransparency = 1, Text = text,
-        TextColor3 = C.dim, Font = Enum.Font.Gotham, TextSize = FONT_TINY, TextWrapped = true,
-        TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top,
-        LayoutOrder = order or 99, Parent = parent,
-    })
+local function makeInfo(p,t,o)
+    return make("TextLabel",{Size=UDim2.new(1,0,0,s(38)),BackgroundTransparency=1,Text=t,TextColor3=C.dim,Font=Enum.Font.Gotham,TextSize=FONT_TINY,TextWrapped=true,TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Top,LayoutOrder=o or 99,Parent=p})
 end
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
--- CONTENT PAGES
+-- PAGES + TABS
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-local function makePage(name)
-    local pg = make("ScrollingFrame", {
-        Name = name, Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1,
-        BorderSizePixel = 0, ScrollBarThickness = s(3), ScrollBarImageColor3 = C.border,
-        CanvasSize = UDim2.new(0, 0, 0, 0), AutomaticCanvasSize = Enum.AutomaticSize.Y,
-        Visible = false, ScrollingDirection = Enum.ScrollingDirection.Y, Parent = contentArea,
-    })
-    make("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, s(5)), Parent = pg })
-    make("UIPadding", { PaddingTop = UDim.new(0, s(10)), PaddingBottom = UDim.new(0, s(15)), PaddingLeft = UDim.new(0, s(10)), PaddingRight = UDim.new(0, s(10)), Parent = pg })
+local function makePage(n)
+    local pg=make("ScrollingFrame",{Name=n,Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,BorderSizePixel=0,ScrollBarThickness=s(3),ScrollBarImageColor3=C.border,CanvasSize=UDim2.new(0,0,0,0),AutomaticCanvasSize=Enum.AutomaticSize.Y,Visible=false,ScrollingDirection=Enum.ScrollingDirection.Y,Parent=contentArea})
+    make("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,s(4)),Parent=pg})
+    make("UIPadding",{PaddingTop=UDim.new(0,s(8)),PaddingBottom=UDim.new(0,s(15)),PaddingLeft=UDim.new(0,s(10)),PaddingRight=UDim.new(0,s(10)),Parent=pg})
     return pg
 end
 
-local pageOrbit    = makePage("Orbit")
 local pageVoid     = makePage("Voidspam")
+local pageOrbit    = makePage("Orbit")
 local pageSettings = makePage("Settings")
 
---━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
--- TABS
---━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-local tabData = {}
-local activeTab = nil
-
-local function makeTabBtn(text, page, order, default)
-    local btn = make("TextButton", {
-        Size = UDim2.new(1, 0, 0, s(36)),
-        BackgroundColor3 = default and C.panel or Color3.new(0, 0, 0),
-        BackgroundTransparency = default and 0 or 1, BorderSizePixel = 0,
-        Text = "", LayoutOrder = order, Parent = sidebar,
-    })
-    make("UICorner", { CornerRadius = UDim.new(0, s(3)), Parent = btn })
-    local ind = make("Frame", {
-        Size = UDim2.new(0, s(3), 0.55, 0), Position = UDim2.new(0, 0, 0.225, 0),
-        BackgroundColor3 = C.accent, BorderSizePixel = 0, Visible = default or false, Parent = btn,
-    })
-    make("UICorner", { CornerRadius = UDim.new(0, 1), Parent = ind })
-    local lbl = make("TextLabel", {
-        Size = UDim2.new(1, -s(16), 1, 0), Position = UDim2.new(0, s(12), 0, 0),
-        BackgroundTransparency = 1, Text = text, TextColor3 = default and C.text or C.dim,
-        Font = Enum.Font.GothamSemibold, TextSize = s(11), TextXAlignment = Enum.TextXAlignment.Left,
-        TextTruncate = Enum.TextTruncate.AtEnd, Parent = btn,
-    })
-    local tab = { btn = btn, indicator = ind, lbl = lbl, page = page }
-    table.insert(tabData, tab)
-    btn.MouseButton1Click:Connect(function()
-        if activeTab then
-            activeTab.indicator.Visible = false; activeTab.lbl.TextColor3 = C.dim
-            activeTab.btn.BackgroundTransparency = 1; activeTab.page.Visible = false
-        end
-        activeTab = tab; tab.indicator.Visible = true; tab.lbl.TextColor3 = C.text
-        tw(tab.btn, 0.15, { BackgroundTransparency = 0 }); tab.btn.BackgroundColor3 = C.panel
-        tab.page.Visible = true
+local tabData,activeTab={},nil
+local function makeTabBtn(t,pg,o,df)
+    local b=make("TextButton",{Size=UDim2.new(1,0,0,s(36)),BackgroundColor3=df and C.panel or Color3.new(0,0,0),BackgroundTransparency=df and 0 or 1,BorderSizePixel=0,Text="",LayoutOrder=o,Parent=sidebar})
+    make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=b})
+    local ind=make("Frame",{Size=UDim2.new(0,s(3),0.55,0),Position=UDim2.new(0,0,0.225,0),BackgroundColor3=C.accent,BorderSizePixel=0,Visible=df or false,Parent=b})
+    make("UICorner",{CornerRadius=UDim.new(0,1),Parent=ind})
+    local lb=make("TextLabel",{Size=UDim2.new(1,-s(16),1,0),Position=UDim2.new(0,s(12),0,0),BackgroundTransparency=1,Text=t,TextColor3=df and C.text or C.dim,Font=Enum.Font.GothamSemibold,TextSize=s(11),TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd,Parent=b})
+    local tab={btn=b,indicator=ind,lbl=lb,page=pg}
+    table.insert(tabData,tab)
+    b.MouseButton1Click:Connect(function()
+        if activeTab then activeTab.indicator.Visible=false;activeTab.lbl.TextColor3=C.dim;activeTab.btn.BackgroundTransparency=1;activeTab.page.Visible=false end
+        activeTab=tab;tab.indicator.Visible=true;tab.lbl.TextColor3=C.text;tw(tab.btn,0.15,{BackgroundTransparency=0});tab.btn.BackgroundColor3=C.panel;tab.page.Visible=true
     end)
-    if default then activeTab = tab; page.Visible = true end
+    if df then activeTab=tab;pg.Visible=true end
 end
-
-makeTabBtn("VOIDSPAM", pageVoid,     1, true)
-makeTabBtn("ORBIT",    pageOrbit,    2, false)
-makeTabBtn("SETTINGS", pageSettings, 3, false)
+makeTabBtn("VOIDSPAM",pageVoid,1,true)
+makeTabBtn("ORBIT",pageOrbit,2,false)
+makeTabBtn("SETTINGS",pageSettings,3,false)
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- ORBIT TAB
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-makeSection(pageOrbit, "Orbit Target", 1)
-
-local orbitSelDisp = make("Frame", { Size = UDim2.new(1, 0, 0, s(34)), BackgroundColor3 = C.elem, BorderSizePixel = 0, LayoutOrder = 2, Parent = pageOrbit })
-make("UICorner", { CornerRadius = UDim.new(0, s(3)), Parent = orbitSelDisp })
-local orbitSelText = make("TextLabel", {
-    Size = UDim2.new(1, -s(16), 1, 0), Position = UDim2.new(0, s(10), 0, 0),
-    BackgroundTransparency = 1, Text = "Orbit: None", TextColor3 = C.dim,
-    Font = Enum.Font.GothamSemibold, TextSize = FONT_MAIN, TextXAlignment = Enum.TextXAlignment.Left,
-    TextTruncate = Enum.TextTruncate.AtEnd, Parent = orbitSelDisp,
-})
-
-local orbitPL = make("Frame", { Name = "OPL", Size = UDim2.new(1, 0, 0, 0), BackgroundTransparency = 1, AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = 3, Parent = pageOrbit })
-make("UIListLayout", { SortOrder = Enum.SortOrder.Name, Padding = UDim.new(0, s(3)), Parent = orbitPL })
-
-local function selectOrbitTarget(p)
-    CFG.OrbitTarget = p
-    orbitSelText.Text = p and ("Orbit: " .. p.Name) or "Orbit: None"
-    orbitSelText.TextColor3 = p and C.accentL or C.dim
-end
-
-local function addOrbitPE(p)
-    if p == LP or orbitPL:FindFirstChild("OE_" .. p.Name) then return end
-    local e = make("Frame", { Name = "OE_" .. p.Name, Size = UDim2.new(1, 0, 0, s(32)), BackgroundColor3 = C.elem, BorderSizePixel = 0, Parent = orbitPL })
-    make("UICorner", { CornerRadius = UDim.new(0, s(3)), Parent = e })
-    make("TextLabel", {
-        Size = UDim2.new(1, -s(70), 1, 0), Position = UDim2.new(0, s(10), 0, 0),
-        BackgroundTransparency = 1, Text = p.DisplayName, TextColor3 = C.text,
-        Font = Enum.Font.Gotham, TextSize = s(11), TextXAlignment = Enum.TextXAlignment.Left,
-        TextTruncate = Enum.TextTruncate.AtEnd, Parent = e,
-    })
-    local sb = make("TextButton", {
-        Size = UDim2.new(0, s(50), 0, s(22)), Position = UDim2.new(1, -s(58), 0.5, -s(11)),
-        BackgroundColor3 = C.accent, BorderSizePixel = 0, Text = "SET", TextColor3 = C.text,
-        Font = Enum.Font.GothamBold, TextSize = FONT_TINY, Parent = e,
-    })
-    make("UICorner", { CornerRadius = UDim.new(0, s(2)), Parent = sb })
-    sb.MouseButton1Click:Connect(function() selectOrbitTarget(p) end)
-end
-
-local function remOrbitPE(p)
-    local e = orbitPL:FindFirstChild("OE_" .. p.Name); if e then e:Destroy() end
-    if CFG.OrbitTarget == p then selectOrbitTarget(nil) end
-end
-
-for _, p in pairs(Players:GetPlayers()) do addOrbitPE(p) end
-Players.PlayerAdded:Connect(addOrbitPE)
-Players.PlayerRemoving:Connect(remOrbitPE)
-
-makeButton(pageOrbit, "DESELECT", C.off, 4, function() selectOrbitTarget(nil) end)
-
-makeSection(pageOrbit, "Orbit Controls", 5)
-
-local orbitToggle = makeToggle(pageOrbit, "Enable Orbit", false, 6, function(state)
-    CFG.Orbit.On = state
-    if state and not CFG.OrbitTarget then
-        updateStatus("Orbit ON — no target!", C.red)
-    elseif state then
-        updateStatus("Orbiting " .. CFG.OrbitTarget.Name, C.green)
-    else
-        updateStatus("Idle", C.dim)
-    end
-end)
-
-makeSection(pageOrbit, "Parameters", 7)
-makeSlider(pageOrbit, "Radius", 3, 35, CFG.Orbit.Radius, 1, 8, function(v) CFG.Orbit.Radius = v end)
-makeSlider(pageOrbit, "Speed", 0.5, 10, CFG.Orbit.Speed, 0.5, 9, function(v) CFG.Orbit.Speed = v end)
-makeSlider(pageOrbit, "Height", -20, 20, CFG.Orbit.Height, 1, 10, function(v) CFG.Orbit.Height = v end)
+makeSection(pageOrbit,"Orbit Target",1)
+local oSD=make("Frame",{Size=UDim2.new(1,0,0,s(34)),BackgroundColor3=C.elem,BorderSizePixel=0,LayoutOrder=2,Parent=pageOrbit})
+make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=oSD})
+local oST=make("TextLabel",{Size=UDim2.new(1,-s(16),1,0),Position=UDim2.new(0,s(10),0,0),BackgroundTransparency=1,Text="Orbit: None",TextColor3=C.dim,Font=Enum.Font.GothamSemibold,TextSize=FONT_MAIN,TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd,Parent=oSD})
+local oPL=make("Frame",{Name="OPL",Size=UDim2.new(1,0,0,0),BackgroundTransparency=1,AutomaticSize=Enum.AutomaticSize.Y,LayoutOrder=3,Parent=pageOrbit})
+make("UIListLayout",{SortOrder=Enum.SortOrder.Name,Padding=UDim.new(0,s(3)),Parent=oPL})
+local function selOT(p) CFG.OrbitTarget=p;oST.Text=p and("Orbit: "..p.Name) or "Orbit: None";oST.TextColor3=p and C.accentL or C.dim end
+local function addOPE(p) if p==LP or oPL:FindFirstChild("OE_"..p.Name) then return end local e=make("Frame",{Name="OE_"..p.Name,Size=UDim2.new(1,0,0,s(32)),BackgroundColor3=C.elem,BorderSizePixel=0,Parent=oPL});make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=e});make("TextLabel",{Size=UDim2.new(1,-s(70),1,0),Position=UDim2.new(0,s(10),0,0),BackgroundTransparency=1,Text=p.DisplayName,TextColor3=C.text,Font=Enum.Font.Gotham,TextSize=s(11),TextXAlignment=Enum.TextXAlignment.Left,TextTruncate=Enum.TextTruncate.AtEnd,Parent=e});local sb=make("TextButton",{Size=UDim2.new(0,s(50),0,s(22)),Position=UDim2.new(1,-s(58),0.5,-s(11)),BackgroundColor3=C.accent,BorderSizePixel=0,Text="SET",TextColor3=C.text,Font=Enum.Font.GothamBold,TextSize=FONT_TINY,Parent=e});make("UICorner",{CornerRadius=UDim.new(0,s(2)),Parent=sb});sb.MouseButton1Click:Connect(function() selOT(p) end) end
+local function remOPE(p) local e=oPL:FindFirstChild("OE_"..p.Name);if e then e:Destroy() end;if CFG.OrbitTarget==p then selOT(nil) end end
+for _,p in pairs(Players:GetPlayers()) do addOPE(p) end
+Players.PlayerAdded:Connect(addOPE);Players.PlayerRemoving:Connect(remOPE)
+makeButton(pageOrbit,"DESELECT",C.off,4,function() selOT(nil) end)
+makeSection(pageOrbit,"Orbit Controls",5)
+local orbitToggle=makeToggle(pageOrbit,"Enable Orbit",false,6,function(v) CFG.Orbit.On=v;if v and not CFG.OrbitTarget then updateStatus("Orbit — no target!",C.red) elseif v then updateStatus("Orbiting "..CFG.OrbitTarget.Name,C.green) else updateStatus("Idle",C.dim) end end)
+makeSection(pageOrbit,"Parameters",7)
+makeSlider(pageOrbit,"Radius",3,35,12,1,8,function(v) CFG.Orbit.Radius=v end)
+makeSlider(pageOrbit,"Speed",0.5,10,2,0.5,9,function(v) CFG.Orbit.Speed=v end)
+makeSlider(pageOrbit,"Height",-20,20,0,1,10,function(v) CFG.Orbit.Height=v end)
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
--- ★ VOIDSPAM TAB — CLEAN RANDOM TP ★
---━━━━━━━���━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- ★★★ VOIDSPAM TAB — POV SPLIT DESYNC ★★★
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-makeSection(pageVoid, "Continuous Teleport", 1)
+makeSection(pageVoid, "POV Split Desync", 1)
 
-make("TextLabel", {
-    Size = UDim2.new(1, 0, 0, s(28)),
-    BackgroundColor3 = Color3.fromRGB(18, 28, 18),
-    BorderSizePixel = 0,
-    Text = "  Teleports you randomly — no target needed",
-    TextColor3 = C.green, Font = Enum.Font.GothamSemibold, TextSize = FONT_TINY,
-    TextXAlignment = Enum.TextXAlignment.Left, LayoutOrder = 2, Parent = pageVoid,
+-- Explanation banner
+make("TextLabel",{
+    Size=UDim2.new(1,0,0,s(52)),
+    BackgroundColor3=Color3.fromRGB(12,20,12), BorderSizePixel=0,
+    Text="  YOUR SCREEN: Normal gameplay, stable camera\n  ENEMY SCREEN: Your character is UNDERGROUND\n  ATTACK: Hitbox peeks up to fire, then hides",
+    TextColor3=C.green, Font=Enum.Font.GothamBold, TextSize=s(9),
+    TextXAlignment=Enum.TextXAlignment.Left, TextYAlignment=Enum.TextYAlignment.Center,
+    TextWrapped=true, LayoutOrder=2, Parent=pageVoid,
 })
 
 -- ── MAIN TOGGLE ──
-
 local voidToggle = makeToggle(pageVoid, "Enable Voidspam", false, 3, function(state)
     CFG.Void.On = state
 
     if state then
-        -- Start teleport loop
-        if voidLoop then
-            voidLoop:Disconnect()
-            voidLoop = nil
+        -- Initialize desync
+        if humanoidRootPart and humanoidRootPart.Parent then
+            Desync.realCFrame    = humanoidRootPart.CFrame
+            Desync.currentDepth  = 0
+            Desync.phase         = "hide"
+            Desync.phaseTimer    = 0
+            Desync.shotsFired    = 0
+            Desync.shotCooldown  = 0
+            Desync.totalCycles   = 0
+            Desync.projDetected  = false
+            Desync.active        = true
+            updateStatus("DESYNC ACTIVE — underground", C.red)
+        else
+            Desync.active = false
+            updateStatus("No character!", C.red)
         end
-
-        voidLoop = RunService.Heartbeat:Connect(function()
-            -- Safety check
-            if not character or not humanoidRootPart or not humanoidRootPart.Parent then
-                return
-            end
-
-            local hum = character:FindFirstChildOfClass("Humanoid")
-            if hum and hum.Health <= 0 then
-                return
-            end
-
-            -- Get current position
-            local currentPosition = humanoidRootPart.Position
-
-            -- Pick random direction and distance
-            local randomAngle = math.random() * math.pi * 2
-            local randomDistance = math.random(CFG.Void.MinDistance, CFG.Void.MaxDistance)
-
-            -- Calculate new position
-            local newX = currentPosition.X + math.cos(randomAngle) * randomDistance
-            local newZ = currentPosition.Z + math.sin(randomAngle) * randomDistance
-            local newY = currentPosition.Y + CFG.Void.HeightBoost
-
-            -- Teleport
-            humanoidRootPart.CFrame = CFrame.new(newX, newY, newZ)
-
-            -- Delay between teleports
-            task.wait(CFG.Void.TeleportDelay)
-        end)
-
-        updateStatus("VOIDSPAM ACTIVE — TPing randomly", C.red)
     else
-        -- Stop teleport loop
-        if voidLoop then
-            voidLoop:Disconnect()
-            voidLoop = nil
+        -- Stop desync — put character back to real position
+        Desync.active = false
+        Desync.phase  = "idle"
+        if Desync.realCFrame and humanoidRootPart and humanoidRootPart.Parent then
+            humanoidRootPart.CFrame = Desync.realCFrame
         end
-
+        Desync.currentDepth = 0
         updateStatus("Idle", C.dim)
     end
 end)
 
--- ── SLIDERS ──
+-- ── RAGEBOT CYCLE ──
+makeSection(pageVoid, "Ragebot Cycle", 4)
 
-makeSection(pageVoid, "Distance", 4)
-
-makeSlider(pageVoid, "Min Distance", 100, 5000, CFG.Void.MinDistance, 100, 5, function(v)
-    CFG.Void.MinDistance = v
-end)
-
-makeSlider(pageVoid, "Max Distance", 500, 10000, CFG.Void.MaxDistance, 100, 6, function(v)
-    CFG.Void.MaxDistance = v
-end)
-
-makeSection(pageVoid, "Timing", 7)
-
-makeSlider(pageVoid, "Teleport Delay", 0.01, 1, CFG.Void.TeleportDelay, 0.01, 8, function(v)
-    CFG.Void.TeleportDelay = v
-end)
-
-makeSection(pageVoid, "Height", 9)
-
-makeSlider(pageVoid, "Height Boost", 0, 500, CFG.Void.HeightBoost, 10, 10, function(v)
-    CFG.Void.HeightBoost = v
-end)
-
--- ── LIVE MONITOR ──
-
-makeSection(pageVoid, "Live Info", 11)
-
-local monFrame = make("Frame", {
-    Size = UDim2.new(1, 0, 0, s(65)),
-    BackgroundColor3 = Color3.fromRGB(12, 12, 18),
-    BorderSizePixel = 0, LayoutOrder = 12, Parent = pageVoid,
-})
-make("UICorner", { CornerRadius = UDim.new(0, s(3)), Parent = monFrame })
-make("UIStroke", { Color = C.border, Thickness = 1, Parent = monFrame })
-
-local monStatusV = make("TextLabel", {
-    Size = UDim2.new(1, -s(16), 0, s(18)),
-    Position = UDim2.new(0, s(10), 0, s(6)),
-    BackgroundTransparency = 1, Text = "STATUS: IDLE", TextColor3 = C.dim,
-    Font = Enum.Font.GothamBold, TextSize = FONT_SMALL,
-    TextXAlignment = Enum.TextXAlignment.Left, Parent = monFrame,
+make("TextLabel",{
+    Size=UDim2.new(1,0,0,s(30)),
+    BackgroundColor3=Color3.fromRGB(14,14,22), BorderSizePixel=0,
+    Text="  HIDE = time underground | ATTACK = time to shoot\n  Lower values = faster cycle, harder to hit",
+    TextColor3=C.dim, Font=Enum.Font.Gotham, TextSize=s(9),
+    TextXAlignment=Enum.TextXAlignment.Left, TextYAlignment=Enum.TextYAlignment.Center,
+    TextWrapped=true, LayoutOrder=5, Parent=pageVoid,
 })
 
-local monDistV = make("TextLabel", {
-    Size = UDim2.new(1, -s(16), 0, s(16)),
-    Position = UDim2.new(0, s(10), 0, s(26)),
-    BackgroundTransparency = 1, Text = "RANGE: 500 - 5000 studs", TextColor3 = C.dim,
-    Font = Enum.Font.GothamBold, TextSize = FONT_TINY,
-    TextXAlignment = Enum.TextXAlignment.Left, Parent = monFrame,
-})
-
-local monDelayV = make("TextLabel", {
-    Size = UDim2.new(1, -s(16), 0, s(16)),
-    Position = UDim2.new(0, s(10), 0, s(42)),
-    BackgroundTransparency = 1, Text = "DELAY: 0.10s  |  HEIGHT: +100", TextColor3 = C.dim,
-    Font = Enum.Font.GothamBold, TextSize = FONT_TINY,
-    TextXAlignment = Enum.TextXAlignment.Left, Parent = monFrame,
-})
-
--- Update monitor periodically
-task.spawn(function()
-    while gui.Parent do
-        if CFG.Void.On then
-            monStatusV.Text = "STATUS: ACTIVE"
-            monStatusV.TextColor3 = C.green
-        else
-            monStatusV.Text = "STATUS: IDLE"
-            monStatusV.TextColor3 = C.dim
-        end
-
-        monDistV.Text = "RANGE: " .. CFG.Void.MinDistance .. " - " .. CFG.Void.MaxDistance .. " studs"
-        monDistV.TextColor3 = CFG.Void.On and C.cyan or C.dim
-
-        monDelayV.Text = string.format("DELAY: %.2fs  |  HEIGHT: +%d", CFG.Void.TeleportDelay, CFG.Void.HeightBoost)
-        monDelayV.TextColor3 = CFG.Void.On and C.orange or C.dim
-
-        task.wait(0.5)
-    end
+makeSlider(pageVoid, "Hide Timer", 0.01, 1, CFG.Void.HideTime, 0.01, 6, function(v)
+    CFG.Void.HideTime = v
 end)
 
--- ── INFO ──
+makeSlider(pageVoid, "Attack Timer", 0.01, 1, CFG.Void.AttackTime, 0.01, 7, function(v)
+    CFG.Void.AttackTime = v
+end)
 
-makeInfo(pageVoid, "Teleports you to a random position within the distance range every cycle. Adjust delay for speed. Height boost lifts you above obstacles.", 13)
+makeSlider(pageVoid, "Shoot Attempt", 1, 2, CFG.Void.ShootAttempt, 1, 8, function(v)
+    CFG.Void.ShootAttempt = v
+end)
 
-make("TextLabel", {
-    Size = UDim2.new(1, 0, 0, s(28)),
-    BackgroundColor3 = Color3.fromRGB(40, 12, 12),
-    BorderSizePixel = 0,
-    Text = "  !! USE AT YOUR OWN RISK !!",
-    TextColor3 = C.red, Font = Enum.Font.GothamBold, TextSize = FONT_TINY,
-    TextXAlignment = Enum.TextXAlignment.Left, LayoutOrder = 14, Parent = pageVoid,
+makeToggle(pageVoid, "Auto Fire", CFG.Void.AutoFire, 9, function(v)
+    CFG.Void.AutoFire = v
+end)
+
+-- ── VOID SETTINGS ──
+makeSection(pageVoid, "Underground Settings", 10)
+
+make("TextLabel",{
+    Size=UDim2.new(1,0,0,s(24)),
+    BackgroundColor3=Color3.fromRGB(14,14,22), BorderSizePixel=0,
+    Text="  Incremental stepping — not instant TP (anti-cheat safe)",
+    TextColor3=C.dim, Font=Enum.Font.Gotham, TextSize=s(9),
+    TextXAlignment=Enum.TextXAlignment.Left, TextYAlignment=Enum.TextYAlignment.Center,
+    LayoutOrder=11, Parent=pageVoid,
+})
+
+makeSlider(pageVoid, "Void Depth", 50, 500, CFG.Void.VoidDepth, 10, 12, function(v)
+    CFG.Void.VoidDepth = v
+end)
+
+makeSlider(pageVoid, "Step Speed", 5, 100, CFG.Void.StepSpeed, 5, 13, function(v)
+    CFG.Void.StepSpeed = v
+end)
+
+-- ── PROJECTILE MIMIC ──
+makeSection(pageVoid, "Projectile Mimic", 14)
+
+make("TextLabel",{
+    Size=UDim2.new(1,0,0,s(30)),
+    BackgroundColor3=Color3.fromRGB(14,14,22), BorderSizePixel=0,
+    Text="  Detects incoming projectiles during attack window\n  Instantly aborts attack and dives underground",
+    TextColor3=C.dim, Font=Enum.Font.Gotham, TextSize=s(9),
+    TextXAlignment=Enum.TextXAlignment.Left, TextYAlignment=Enum.TextYAlignment.Center,
+    TextWrapped=true, LayoutOrder=15, Parent=pageVoid,
+})
+
+makeToggle(pageVoid, "Projectile Mimic", CFG.Void.ProjectileMimic, 16, function(v)
+    CFG.Void.ProjectileMimic = v
+end)
+
+makeSlider(pageVoid, "Detection Range", 20, 150, CFG.Void.DetectionRange, 5, 17, function(v)
+    CFG.Void.DetectionRange = v
+end)
+
+-- ── LIVE COMBAT MONITOR ──
+makeSection(pageVoid, "Live Monitor", 18)
+
+local monFrame = make("Frame",{
+    Size=UDim2.new(1,0,0,s(100)),
+    BackgroundColor3=Color3.fromRGB(12,12,18),
+    BorderSizePixel=0, LayoutOrder=19, Parent=pageVoid,
+})
+make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=monFrame})
+make("UIStroke",{Color=C.border,Thickness=1,Parent=monFrame})
+
+local monPhaseV = make("TextLabel",{
+    Size=UDim2.new(1,-s(16),0,s(16)),Position=UDim2.new(0,s(10),0,s(6)),
+    BackgroundTransparency=1,Text="PHASE: IDLE",TextColor3=C.dim,
+    Font=Enum.Font.GothamBold,TextSize=FONT_SMALL,TextXAlignment=Enum.TextXAlignment.Left,Parent=monFrame,
+})
+local monDepthV = make("TextLabel",{
+    Size=UDim2.new(1,-s(16),0,s(16)),Position=UDim2.new(0,s(10),0,s(24)),
+    BackgroundTransparency=1,Text="DEPTH: 0 studs",TextColor3=C.dim,
+    Font=Enum.Font.GothamBold,TextSize=FONT_TINY,TextXAlignment=Enum.TextXAlignment.Left,Parent=monFrame,
+})
+local monShotsV = make("TextLabel",{
+    Size=UDim2.new(1,-s(16),0,s(16)),Position=UDim2.new(0,s(10),0,s(40)),
+    BackgroundTransparency=1,Text="SHOTS: 0 / 1",TextColor3=C.dim,
+    Font=Enum.Font.GothamBold,TextSize=FONT_TINY,TextXAlignment=Enum.TextXAlignment.Left,Parent=monFrame,
+})
+local monCycleV = make("TextLabel",{
+    Size=UDim2.new(1,-s(16),0,s(16)),Position=UDim2.new(0,s(10),0,s(56)),
+    BackgroundTransparency=1,Text="CYCLES: 0",TextColor3=C.dim,
+    Font=Enum.Font.GothamBold,TextSize=FONT_TINY,TextXAlignment=Enum.TextXAlignment.Left,Parent=monFrame,
+})
+local monProjV = make("TextLabel",{
+    Size=UDim2.new(1,-s(16),0,s(16)),Position=UDim2.new(0,s(10),0,s(72)),
+    BackgroundTransparency=1,Text="PROJ MIMIC: OFF",TextColor3=C.dim,
+    Font=Enum.Font.GothamBold,TextSize=FONT_TINY,TextXAlignment=Enum.TextXAlignment.Left,Parent=monFrame,
+})
+
+-- ── HOW IT WORKS ──
+make("TextLabel",{
+    Size=UDim2.new(1,0,0,s(72)),
+    BackgroundColor3=Color3.fromRGB(14,14,22), BorderSizePixel=0,
+    Text="  HOW POV SPLIT WORKS:\n  • RenderStep: HRP → real position (you see normal)\n  • Heartbeat: HRP → underground (server sees void)\n  • Attack: HRP briefly at real pos → fire → back down\n  • Stepping: gradual CFrame shift (not instant TP)",
+    TextColor3=C.dim, Font=Enum.Font.Gotham, TextSize=s(8),
+    TextXAlignment=Enum.TextXAlignment.Left, TextYAlignment=Enum.TextYAlignment.Top,
+    TextWrapped=true, LayoutOrder=20, Parent=pageVoid,
+})
+
+make("TextLabel",{
+    Size=UDim2.new(1,0,0,s(28)),
+    BackgroundColor3=Color3.fromRGB(35,10,10), BorderSizePixel=0,
+    Text="  !! DESYNC EXPLOIT — USE AT YOUR OWN RISK !!",
+    TextColor3=C.red, Font=Enum.Font.GothamBold, TextSize=FONT_TINY,
+    TextXAlignment=Enum.TextXAlignment.Left, LayoutOrder=21, Parent=pageVoid,
 })
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- SETTINGS TAB
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-makeSection(pageSettings, "General", 1)
-
-make("TextLabel", {
-    Size = UDim2.new(1, 0, 0, s(34)), BackgroundColor3 = C.elem, BorderSizePixel = 0,
-    Text = IsMobile and "  Toggle UI: Floating [R] button" or "  Toggle UI: RightControl / [R] button",
-    TextColor3 = C.text, Font = Enum.Font.Gotham, TextSize = s(12),
-    TextXAlignment = Enum.TextXAlignment.Left, LayoutOrder = 2, Parent = pageSettings,
-})
-
-make("TextLabel", {
-    Size = UDim2.new(1, 0, 0, s(28)), BackgroundColor3 = C.elem, BorderSizePixel = 0,
-    Text = "  Device: " .. (IsMobile and "MOBILE" or "PC"),
-    TextColor3 = IsMobile and C.green or C.accent, Font = Enum.Font.GothamSemibold,
-    TextSize = s(12), TextXAlignment = Enum.TextXAlignment.Left, LayoutOrder = 3, Parent = pageSettings,
-})
-
-makeButton(pageSettings, "STOP ALL", C.red, 4, function()
-    CFG.Orbit.On = false
-    CFG.Void.On = false
-    orbitToggle.setState(false)
-    voidToggle.setState(false)
-    if voidLoop then
-        voidLoop:Disconnect()
-        voidLoop = nil
+makeSection(pageSettings,"General",1)
+make("TextLabel",{Size=UDim2.new(1,0,0,s(34)),BackgroundColor3=C.elem,BorderSizePixel=0,Text=IsMobile and "  Toggle UI: Floating [R] button" or "  Toggle UI: RCtrl / [R] button",TextColor3=C.text,Font=Enum.Font.Gotham,TextSize=s(12),TextXAlignment=Enum.TextXAlignment.Left,LayoutOrder=2,Parent=pageSettings})
+make("TextLabel",{Size=UDim2.new(1,0,0,s(28)),BackgroundColor3=C.elem,BorderSizePixel=0,Text="  Device: "..(IsMobile and "MOBILE" or "PC"),TextColor3=IsMobile and C.green or C.accent,Font=Enum.Font.GothamSemibold,TextSize=s(12),TextXAlignment=Enum.TextXAlignment.Left,LayoutOrder=3,Parent=pageSettings})
+makeButton(pageSettings,"STOP ALL",C.red,4,function()
+    CFG.Orbit.On=false;CFG.Void.On=false
+    orbitToggle.setState(false);voidToggle.setState(false)
+    Desync.active=false;Desync.phase="idle"
+    if Desync.realCFrame and humanoidRootPart and humanoidRootPart.Parent then
+        humanoidRootPart.CFrame=Desync.realCFrame
     end
-    updateStatus("All stopped", C.dim)
+    Desync.currentDepth=0
+    updateStatus("All stopped",C.dim)
 end)
-
-makeSection(pageSettings, "Script", 5)
-
-makeButton(pageSettings, "DESTROY SCRIPT", C.red, 6, function()
-    CFG.Orbit.On = false
-    CFG.Void.On = false
-    if voidLoop then
-        voidLoop:Disconnect()
-        voidLoop = nil
+makeSection(pageSettings,"Script",5)
+makeButton(pageSettings,"DESTROY SCRIPT",C.red,6,function()
+    CFG.Orbit.On=false;CFG.Void.On=false
+    Desync.active=false
+    if Desync.realCFrame and humanoidRootPart and humanoidRootPart.Parent then
+        humanoidRootPart.CFrame=Desync.realCFrame
     end
-    for _, c in pairs(ActiveConnections) do pcall(function() c:Disconnect() end) end
+    pcall(function() RunService:UnbindFromRenderStep("RivalsDesync") end)
+    for _,c in pairs(ActiveConnections) do pcall(function() c:Disconnect() end) end
     gui:Destroy()
 end)
-
-makeSection(pageSettings, "Team", 7)
-
-make("TextLabel", {
-    Size = UDim2.new(1, 0, 0, s(55)), BackgroundColor3 = C.elem, BorderSizePixel = 0,
-    Text = "  [P1] Builder\n  [P2] Tester & Tweaker\n  [P3] Polish & Deploy",
-    TextColor3 = C.dim, Font = Enum.Font.Gotham, TextSize = FONT_TINY,
-    TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top,
-    LayoutOrder = 8, Parent = pageSettings,
-})
+makeSection(pageSettings,"Team",7)
+make("TextLabel",{Size=UDim2.new(1,0,0,s(55)),BackgroundColor3=C.elem,BorderSizePixel=0,Text="  [P1] Builder\n  [P2] Tester & Tweaker\n  [P3] Polish & Deploy",TextColor3=C.dim,Font=Enum.Font.Gotham,TextSize=FONT_TINY,TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Top,LayoutOrder=8,Parent=pageSettings})
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- CORE: ORBIT
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-local orbitAngle = 0
+local orbitAngle=0
+table.insert(ActiveConnections,RunService.Heartbeat:Connect(function(dt)
+    if not CFG.Orbit.On or Desync.active or not CFG.OrbitTarget then return end
+    local mc=LP.Character;if not mc then return end
+    local mr=mc:FindFirstChild("HumanoidRootPart");if not mr then return end
+    local tc=CFG.OrbitTarget.Character;if not tc then return end
+    local tr=tc:FindFirstChild("HumanoidRootPart");if not tr then return end
+    local mh=mc:FindFirstChildOfClass("Humanoid")
+    if mh and mh.Health<=0 then return end
+    orbitAngle=orbitAngle+(CFG.Orbit.Speed*dt)
+    if orbitAngle>math.pi*2 then orbitAngle=orbitAngle-math.pi*2 end
+    local tp=tr.Position
+    mr.CFrame=CFrame.new(tp+Vector3.new(math.cos(orbitAngle)*CFG.Orbit.Radius,CFG.Orbit.Height,math.sin(orbitAngle)*CFG.Orbit.Radius),tp)
+end))
+
+--━━━━━━━���━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- ★★★ CORE: POV SPLIT DESYNC ENGINE ★★★
+--━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+--[[
+    FRAME CYCLE — HOW THE DESYNC WORKS:
+    
+    ┌─────────────────────────────────────────────────┐
+    │ WITHIN EACH FRAME:                               │
+    │                                                   │
+    │ 1. [RenderStep priority 199]                     │
+    │    Set HRP → realCFrame                          │
+    │    Camera follows HRP at real position            │
+    │    YOU SEE: yourself standing normally            │
+    │                                                   │
+    │ 2. [Rendering happens]                           │
+    │    Character model draws at real position         │
+    │    Your screen shows normal gameplay              │
+    │                                                   │
+    │ 3. [Physics simulation]                          │
+    │    HRP is at realCFrame                          │
+    │    Movement controller works normally             │
+    │    WASD/joystick movement applies                 │
+    │                                                   │
+    │ 4. [Heartbeat - after physics]                   │
+    │    Read HRP position (has movement applied)      │
+    │    Save as new realCFrame                        │
+    │    Set HRP → underground position                │
+    │    SERVER RECEIVES: underground position         │
+    │    ENEMIES SEE: character underground            │
+    │    THEIR ESP: dot/model shows underground        │
+    │    THEIR AIMBOT: locks onto underground pos      │
+    │                                                   │
+    │ 5. [Replication to server]                       │
+    │    Server has underground CFrame                  │
+    │    All other clients render you underground       │
+    │                                                   │
+    │ NEXT FRAME: Step 1 snaps HRP back for camera     │
+    └─────────────────────────────────────────────────┘
+    
+    HIDE/ATTACK CYCLE:
+    
+    HIDE PHASE (HideTime seconds):
+      ├─ currentDepth steps toward VoidDepth
+      ├─ Each frame: depth += StepSpeed (incremental, not instant)
+      ├─ Server sees character sinking underground gradually
+      ├─ Enemy ESP follows the sinking position
+      ├─ Anti-cheat sees gradual CFrame change (not teleport)
+      └─ After HideTime expires → switch to ATTACK
+    
+    ATTACK PHASE (AttackTime seconds):
+      ├─ currentDepth steps toward 0 (3x faster going UP)
+      ├─ When depth < 2 studs → character is at real position
+      ├─ Auto Fire: clicks mouse 1-2 times
+      ├─ Manual: player can aim and shoot normally
+      ├─ Projectile Mimic: if incoming projectile detected,
+      │  immediately abort attack → dive back underground
+      └─ After AttackTime expires → switch to HIDE
+    
+    RESULT:
+      You play normally. They can't hit you.
+      During your attack window, you can hit them.
+      Their ragebot shoots underground, missing every time.
+]]
+
+-- ══════════════════════════════════════════
+-- RENDERSTEP: Set HRP to real position
+-- Runs BEFORE camera (priority 199)
+-- Player sees character at real position
+-- ══════════════════════════════════════════
+
+RunService:BindToRenderStep("RivalsDesync", Enum.RenderPriority.Camera.Value - 1, function()
+    if not Desync.active then return end
+    if not Desync.realCFrame then return end
+    if not humanoidRootPart or not humanoidRootPart.Parent then return end
+
+    -- Set HRP to real position → camera follows this
+    -- Player sees themselves at the real position, completely normal
+    humanoidRootPart.CFrame = Desync.realCFrame
+end)
+
+-- ══════════════════════════════════════════
+-- HEARTBEAT: Save real position, apply underground, manage phases
+-- Runs AFTER physics (movement has been applied)
+-- Server receives the underground position
+-- ══════════════════════════════════════════
+
+local monitorClock = 0
 
 table.insert(ActiveConnections, RunService.Heartbeat:Connect(function(dt)
-    if not CFG.Orbit.On or CFG.Void.On or not CFG.OrbitTarget then return end
-    local mc = LP.Character; if not mc then return end
-    local mr = mc:FindFirstChild("HumanoidRootPart"); if not mr then return end
-    local tc = CFG.OrbitTarget.Character; if not tc then return end
-    local tr = tc:FindFirstChild("HumanoidRootPart"); if not tr then return end
-    local mh = mc:FindFirstChildOfClass("Humanoid")
-    if mh and mh.Health <= 0 then return end
-    orbitAngle = orbitAngle + (CFG.Orbit.Speed * dt)
-    if orbitAngle > math.pi * 2 then orbitAngle = orbitAngle - math.pi * 2 end
-    local tp = tr.Position
-    mr.CFrame = CFrame.new(tp + Vector3.new(
-        math.cos(orbitAngle) * CFG.Orbit.Radius,
-        CFG.Orbit.Height,
-        math.sin(orbitAngle) * CFG.Orbit.Radius
-    ), tp)
+    if not Desync.active then return end
+    if not humanoidRootPart or not humanoidRootPart.Parent then
+        Desync.active = false
+        return
+    end
+
+    -- Check if alive
+    local hum = character:FindFirstChildOfClass("Humanoid")
+    if not hum or hum.Health <= 0 then
+        -- Died while desynced — restore position and stop
+        if Desync.realCFrame then
+            humanoidRootPart.CFrame = Desync.realCFrame
+        end
+        Desync.active      = false
+        Desync.phase        = "idle"
+        Desync.currentDepth = 0
+        return
+    end
+
+    -- ── SAVE REAL POSITION ──
+    -- After physics/movement, HRP has been moved by the character controller
+    -- This is the player's ACTUAL intended position (where they moved to)
+    Desync.realCFrame = humanoidRootPart.CFrame
+
+    -- ── UPDATE PHASE TIMER ──
+    Desync.phaseTimer = Desync.phaseTimer + dt
+
+    -- ── PHASE STATE MACHINE ──
+
+    if Desync.phase == "hide" then
+        -- ─── HIDE: Step underground gradually ───
+        -- Incremental stepping: move down by StepSpeed studs per frame
+        -- NOT instant teleport — anti-cheat sees gradual CFrame change
+        Desync.currentDepth = math.min(
+            Desync.currentDepth + CFG.Void.StepSpeed,
+            CFG.Void.VoidDepth
+        )
+
+        -- Check if hide time expired → switch to attack
+        if Desync.phaseTimer >= CFG.Void.HideTime then
+            Desync.phase      = "attack"
+            Desync.phaseTimer  = 0
+            Desync.shotsFired  = 0
+            Desync.shotCooldown = 0
+        end
+
+    elseif Desync.phase == "attack" then
+        -- ─── ATTACK: Step back up to real position ───
+        -- Come up 3x faster than going down (minimize exposure)
+        Desync.currentDepth = math.max(
+            Desync.currentDepth - CFG.Void.StepSpeed * 3,
+            0
+        )
+
+        -- ─── PROJECTILE MIMIC ───
+        -- Check for incoming projectiles every 3 frames (performance)
+        Desync.projCheckCD = Desync.projCheckCD + 1
+        if Desync.projCheckCD >= 3 then
+            Desync.projCheckCD = 0
+            Desync.projDetected = checkProjectiles()
+
+            if Desync.projDetected then
+                -- Incoming projectile! Abort attack immediately
+                -- Dive back underground before it hits
+                Desync.phase      = "hide"
+                Desync.phaseTimer = 0
+                Desync.totalCycles = Desync.totalCycles + 1
+                -- Skip the rest of this frame's attack logic
+                -- currentDepth will start increasing next frame
+            end
+        end
+
+        -- ─── AUTO FIRE ───
+        -- Only fire when character is near surface (depth < 2 studs)
+        if Desync.phase == "attack" and Desync.currentDepth <= 2 then
+            if CFG.Void.AutoFire then
+                Desync.shotCooldown = Desync.shotCooldown - dt
+                if Desync.shotsFired < CFG.Void.ShootAttempt and Desync.shotCooldown <= 0 then
+                    autoFire()
+                    Desync.shotsFired   = Desync.shotsFired + 1
+                    Desync.shotCooldown = 0.05 -- 50ms between shots
+                end
+            end
+            -- If auto fire is OFF, player shoots manually during this window
+            -- Their shots fire from real position because HRP is at realCFrame
+            -- during RenderStep (which is when input/raycasts use HRP position)
+        end
+
+        -- Check if attack time expired → switch to hide
+        if Desync.phase == "attack" and Desync.phaseTimer >= CFG.Void.AttackTime then
+            Desync.phase       = "hide"
+            Desync.phaseTimer  = 0
+            Desync.totalCycles = Desync.totalCycles + 1
+        end
+    end
+
+    -- ── APPLY UNDERGROUND POSITION ──
+    -- This is what the SERVER sees. This is what ENEMIES see.
+    -- Their ESP dot, their character model of us, their aimbot target
+    -- is ALL at this underground position.
+    if Desync.currentDepth > 0 then
+        -- Keep same XZ and rotation, only shift Y downward
+        local realPos  = Desync.realCFrame.Position
+        local rotation = Desync.realCFrame - realPos -- Extract rotation component
+
+        local undergroundPos = Vector3.new(
+            realPos.X,
+            realPos.Y - Desync.currentDepth,
+            realPos.Z
+        )
+
+        humanoidRootPart.CFrame = CFrame.new(undergroundPos) * rotation
+
+        -- This CFrame gets replicated to the server
+        -- All other players see our character model at undergroundPos
+        -- Their ESP overlay renders at undergroundPos
+        -- Their aimbot locks onto undergroundPos
+        -- Their bullets fire toward undergroundPos
+        -- But WE are actually at realPos (shown in next RenderStep)
+    end
+    -- If currentDepth is 0 (during attack at surface), HRP stays at realCFrame
+    -- This is the brief window where our hitbox is actually hittable
+    -- But it's so brief (AttackTime) that their ragebot barely has time to react
+
+    -- ── UPDATE MONITOR ──
+    monitorClock = monitorClock + dt
+    if monitorClock >= 0.15 then
+        monitorClock = 0
+
+        -- Phase display
+        local phaseText = Desync.phase == "hide" and "HIDING (underground)" or
+                         Desync.phase == "attack" and "ATTACKING (surface)" or "IDLE"
+        local phaseColor = Desync.phase == "hide" and C.cyan or
+                          Desync.phase == "attack" and C.orange or C.dim
+        monPhaseV.Text = "PHASE: " .. phaseText
+        monPhaseV.TextColor3 = phaseColor
+
+        -- Depth
+        monDepthV.Text = string.format("DEPTH: %.0f / %d studs", Desync.currentDepth, CFG.Void.VoidDepth)
+        monDepthV.TextColor3 = Desync.currentDepth > 0 and C.green or C.orange
+
+        -- Shots
+        monShotsV.Text = string.format("SHOTS: %d / %d%s",
+            Desync.shotsFired, CFG.Void.ShootAttempt,
+            CFG.Void.AutoFire and " (auto)" or " (manual)")
+        monShotsV.TextColor3 = Desync.shotsFired > 0 and C.yellow or C.dim
+
+        -- Cycles
+        monCycleV.Text = "CYCLES: " .. Desync.totalCycles
+        monCycleV.TextColor3 = Desync.totalCycles > 0 and C.text or C.dim
+
+        -- Projectile
+        if CFG.Void.ProjectileMimic then
+            monProjV.Text = "PROJ MIMIC: " .. (Desync.projDetected and "!! INCOMING !!" or "scanning...")
+            monProjV.TextColor3 = Desync.projDetected and C.red or C.green
+        else
+            monProjV.Text = "PROJ MIMIC: OFF"
+            monProjV.TextColor3 = C.dim
+        end
+    end
 end))
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -810,48 +887,127 @@ end))
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 closeBtn.MouseButton1Click:Connect(function()
-    CFG.Orbit.On = false
-    CFG.Void.On = false
-    if voidLoop then voidLoop:Disconnect(); voidLoop = nil end
-    for _, c in pairs(ActiveConnections) do pcall(function() c:Disconnect() end) end
+    CFG.Orbit.On=false;CFG.Void.On=false
+    Desync.active=false
+    if Desync.realCFrame and humanoidRootPart and humanoidRootPart.Parent then
+        humanoidRootPart.CFrame=Desync.realCFrame
+    end
+    pcall(function() RunService:UnbindFromRenderStep("RivalsDesync") end)
+    for _,c in pairs(ActiveConnections) do pcall(function() c:Disconnect() end) end
     gui:Destroy()
 end)
 
-local minimized = false
+local minimized=false
 minBtn.MouseButton1Click:Connect(function()
-    minimized = not minimized
-    tw(mainFrame, 0.25, { Size = minimized and UDim2.new(0, WIN_W, 0, TOP_H) or UDim2.new(0, WIN_W, 0, WIN_H) })
-    contentArea.Visible = not minimized
-    sidebar.Visible = not minimized
-    statusBar.Visible = not minimized
+    minimized=not minimized
+    tw(mainFrame,0.25,{Size=minimized and UDim2.new(0,WIN_W,0,TOP_H) or UDim2.new(0,WIN_W,0,WIN_H)})
+    contentArea.Visible=not minimized;sidebar.Visible=not minimized;statusBar.Visible=not minimized
 end)
 
-local floatDebounce = false
+local floatDebounce=false
 floatBtn.MouseButton1Click:Connect(function()
-    if floatDebounce then return end
-    floatDebounce = true
-    mainFrame.Visible = not mainFrame.Visible
-    floatBtn.BackgroundColor3 = mainFrame.Visible and C.accent or C.off
-    task.wait(0.2)
-    floatDebounce = false
+    if floatDebounce then return end;floatDebounce=true
+    mainFrame.Visible=not mainFrame.Visible
+    floatBtn.BackgroundColor3=mainFrame.Visible and C.accent or C.off
+    task.wait(0.2);floatDebounce=false
 end)
 
--- PC keyboard toggle (UI only, NOT voidspam)
-table.insert(ActiveConnections, UIS.InputBegan:Connect(function(input, gpe)
-    if gpe then return end
-    if input.KeyCode == CFG.UIKey then
-        mainFrame.Visible = not mainFrame.Visible
-        floatBtn.BackgroundColor3 = mainFrame.Visible and C.accent or C.off
+table.insert(ActiveConnections,UIS.InputBegan:Connect(function(i,g)
+    if g then return end
+    if i.KeyCode==CFG.UIKey then
+        mainFrame.Visible=not mainFrame.Visible
+        floatBtn.BackgroundColor3=mainFrame.Visible and C.accent or C.off
     end
 end))
 
 --━━━━━━━���━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- OPEN ANIMATION
---━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+--━━━━━━━���━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-mainFrame.Size = UDim2.new(0, WIN_W, 0, 0)
-mainFrame.BackgroundTransparency = 1
+mainFrame.Size=UDim2.new(0,WIN_W,0,0)
+mainFrame.BackgroundTransparency=1
 task.wait(0.15)
-tw(mainFrame, 0.3, { Size = UDim2.new(0, WIN_W, 0, WIN_H), BackgroundTransparency = 0 })
+tw(mainFrame,0.3,{Size=UDim2.new(0,WIN_W,0,WIN_H),BackgroundTransparency=0})
 
-print("[RIVALS TOOL v5.0] Loaded | " .. (IsMobile and "MOBILE" or "PC") .. " | Clean TP Voidspam")
+print("[RIVALS TOOL v6.0] POV Split Desync | "..(IsMobile and "MOBILE" or "PC"))
+
+--[[
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ COMPLETE BREAKDOWN — POV SPLIT DESYNC:
+
+ ┌─────────────────────────────────────────────────────────────────────────┐
+ │                                                                         │
+ │  YOUR SCREEN (LocalPlayer):                                            │
+ │  ┌───────────────────────┐                                             │
+ │  │ You see yourself      │  Camera is stable                           │
+ │  │ standing on the map   │  No shaking, no void                        │
+ │  │ moving normally       │  WASD/joystick works                        │
+ │  │ aiming normally       │  You can look around                        │
+ │  │ shooting normally     │  Shots fire from real pos                   │
+ │  └───────────────────────┘                                             │
+ │                                                                         │
+ │  WHY: BindToRenderStep sets HRP to realCFrame before camera renders    │
+ │       Physics runs with HRP at realCFrame so movement works            │
+ │       Camera follows HRP at realCFrame = stable normal view            │
+ │                                                                         │
+ │  ─────────────────────────────────────────────────────────────────────  │
+ │                                                                         │
+ │  ENEMY SCREEN (Other players / ESP / Aimbot):                          │
+ │  ┌───────────────────────┐                                             │
+ │  │ They see your char    │  200 studs underground                      │
+ │  │ UNDERGROUND           │  Below the map                              │
+ │  │ Their ESP dot is      │  Shows underground position                 │
+ │  │ underground too       │  Their aimbot aims underground              │
+ │  │ Their bullets go      │  Into the void — miss every time            │
+ │  │ underground           │                                             │
+ │  └───────────────────────┘                                             │
+ │                                                                         │
+ │  WHY: Heartbeat sets HRP underground AFTER physics                     │
+ │       Server receives underground CFrame                               │
+ │       All other clients render character at server position             │
+ │       ESP reads server position = underground                          │
+ │       Aimbot reads server position = underground                       │
+ │                                                                         │
+ │  ─────────────────────────────────────────────────────────────────────  │
+ │                                                                         │
+ │  ATTACK WINDOW:                                                        │
+ │  ┌───────────────────────┐                                             │
+ │  │ For AttackTime secs:  │  Your hitbox is at REAL position            │
+ │  │ HRP steps up to       │  You can shoot enemies                      │
+ │  │ real position         │  Auto fire or manual aim                    │
+ │  │ You fire 1-2 shots    │  Then immediately dive back                 │
+ │  │ Dive back underground │  Before their ragebot can react             │
+ │  └───────────────────────┘                                             │
+ │                                                                         │
+ │  ANTI-CHEAT SAFETY:                                                    │
+ │  • Incremental CFrame stepping (not instant teleport)                  │
+ │  • Server sees gradual Y decrease, like walking downhill               │
+ │  • StepSpeed controls how fast (lower = more gradual)                  │
+ │  • No velocity spoof, no CFrame spam — just smooth movement           │
+ │                                                                         │
+ │  PROJECTILE MIMIC:                                                     │
+ │  • During attack window, scans for fast-moving BaseParts               │
+ │  • If projectile heading toward us is detected                         │
+ │  • Immediately abort attack and dive underground                       │
+ │  • Projectile arrives at real position but we're already gone          │
+ │                                                                         │
+ └─────────────────────────────────────────────────────────────────────────┘
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ FOR P2:
+ • Test Hide Timer: 0.3s hide + 0.1s attack is a good starting point
+ • Test Void Depth: 200 studs should be enough, increase if ESP still sees you
+ • Test Step Speed: 30 is balanced, lower for smoother (but slower to hide)
+ • Test Auto Fire: try both ON and OFF, manual aim may be more accurate
+ • Have a friend watch you: confirm they see character underground
+ • Have a friend use ESP: confirm ESP dot shows underground
+ • Have a friend shoot you: confirm bullets miss
+ • Test on every Rivals map: some maps have different ground levels
+
+ FOR P3:
+ • Obfuscate the RenderStep name "RivalsDesync"
+ • Test on mobile executors (Fluxus, Delta)
+ • Add FPS monitoring: if FPS drops below 30, auto-increase step speed
+ • Consider adding depth randomization (+/- 20 studs) per cycle
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+]]

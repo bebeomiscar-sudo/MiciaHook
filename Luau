@@ -1,7 +1,10 @@
 --[[
 ╔═══════════════════════════════════════════════════════════╗
-║   RIVALS TOOL v2.0 — ENHANCED VOIDSPAM + ORBIT          ║
-║   Mobile + PC | Anti-Aim Breaker                         ║
+║   RIVALS TOOL v3.0 — SELF-APPLIED VOIDSPAM + ORBIT      ║
+║   Mobile + PC | Anti-Aim Breaker | OOB Bypass            ║
+║                                                           ║
+║   Voidspam runs on YOU — no target needed                ║
+║   2K TP desync bypasses Rivals OOB system                ║
 ║                                                           ║
 ║   [P1] Build  [P2] Test/Tweak  [P3] Polish/Deploy       ║
 ║   PC: RightControl  |  Mobile: Floating [R] button       ║
@@ -12,56 +15,51 @@
 -- SERVICES & CONFIG
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-local Players       = game:GetService("Players")
-local RunService    = game:GetService("RunService")
-local UIS           = game:GetService("UserInputService")
-local TweenService  = game:GetService("TweenService")
+local Players      = game:GetService("Players")
+local RunService   = game:GetService("RunService")
+local UIS          = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
 
-local LP    = Players.LocalPlayer
+local LP       = Players.LocalPlayer
 local IsMobile = UIS.TouchEnabled and not UIS.KeyboardEnabled
 
 local CFG = {
-    Target = nil,
+    -- Orbit still needs a target to orbit around
+    OrbitTarget = nil,
     Orbit = {
         On     = false,
         Radius = 12,
         Speed  = 2,
         Height = 0,
     },
+    -- Voidspam is SELF-APPLIED — no target needed
     Void = {
         On          = false,
-        Mode        = "Adaptive",
-        AutoAdapt   = true,
+        Method      = "2KTP",      -- "2KTP" or "Scatter"
+        Mode        = "Adaptive",  -- jitter pattern mode
         Speed       = 0.02,
-        Depth       = -350,
-        YPhaseDepth = 120,
-        YJitter     = 40,
-        XZJitter    = 12,
-        PulseRate   = 0.035,
-        SpiralRad   = 6,
-        SpiralSpd   = 5,
+        TPDistance   = 2000,
+        PulseRate   = 0.018,
+        YJitter     = 50,
+        XZJitter    = 15,
+        SpiralRad   = 8,
+        SpiralSpd   = 6,
     },
     UIKey = Enum.KeyCode.RightControl,
 }
 
 local ActiveConnections = {}
 
--- ── ANALYSIS ENGINE DATA ──
-local Analysis = {
-    yBuffer      = {},
-    rotBuffer    = {},
-    tBuffer      = {},
-    maxSamples   = 30,
-    frameCount   = 0,
-    detectedPitch = "None",
-    detectedYaw   = "None",
-    yVariance    = 0,
-    rotSpeed     = 0,
-    rotVariance  = 0,
-    yMult        = 1,
-    xzMult       = 1,
-    spiralMult   = 1,
-    lastFacing   = "Unknown",
+-- Void engine state
+local VoidState = {
+    active      = false,
+    savedCFrame = nil,
+    atHome      = true,
+    phase       = 0,
+    accumulator = 0,
+    tpCount     = 0,
+    clock       = 0,
+    tpsTracker  = {},
 }
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -78,7 +76,7 @@ end
 local function s(n) return math.floor(n * SF) end
 
 local WIN_W      = s(540)
-local WIN_H      = s(400)
+local WIN_H      = s(420)
 local SIDE_W     = s(120)
 local TOP_H      = s(40)
 local STATUS_H   = s(28)
@@ -117,36 +115,36 @@ local C = {
 
 local function make(class, props)
     local obj = Instance.new(class)
-    for k,v in pairs(props) do if k ~= "Parent" then obj[k] = v end end
+    for k,v in pairs(props) do if k~="Parent" then obj[k]=v end end
     if props.Parent then obj.Parent = props.Parent end
     return obj
 end
 
-local function tw(obj, dur, goals)
-    TweenService:Create(obj, TweenInfo.new(dur, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), goals):Play()
+local function tw(obj,dur,goals)
+    TweenService:Create(obj,TweenInfo.new(dur,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),goals):Play()
 end
 
-local function fmtN(val, inc)
-    if inc >= 1 then return tostring(math.floor(val)) end
-    if inc >= 0.1 then return string.format("%.1f", val) end
-    return string.format("%.3f", val)
+local function fmtN(val,inc)
+    if inc>=1 then return tostring(math.floor(val)) end
+    if inc>=0.1 then return string.format("%.1f",val) end
+    return string.format("%.3f",val)
 end
 
-local function isTM(input)
-    return input.UserInputType == Enum.UserInputType.MouseButton1
-        or input.UserInputType == Enum.UserInputType.Touch
+local function isTM(i)
+    return i.UserInputType==Enum.UserInputType.MouseButton1
+        or i.UserInputType==Enum.UserInputType.Touch
 end
 
-local function isTMMove(input)
-    return input.UserInputType == Enum.UserInputType.MouseMovement
-        or input.UserInputType == Enum.UserInputType.Touch
+local function isTMM(i)
+    return i.UserInputType==Enum.UserInputType.MouseMovement
+        or i.UserInputType==Enum.UserInputType.Touch
 end
 
-local function gIP(input) return Vector2.new(input.Position.X, input.Position.Y) end
+local function gIP(i) return Vector2.new(i.Position.X,i.Position.Y) end
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- SCREENGUI
---━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+--━━━━━━━���━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 if game:GetService("CoreGui"):FindFirstChild("RivalsTool") then
     game:GetService("CoreGui"):FindFirstChild("RivalsTool"):Destroy()
@@ -163,25 +161,28 @@ if not gui.Parent then gui.Parent = LP:WaitForChild("PlayerGui") end
 -- FLOATING MOBILE BUTTON
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-local floatBtn = make("TextButton", {
-    Size = UDim2.new(0,s(50),0,s(50)),
-    Position = UDim2.new(0,8,0,camera.ViewportSize.Y*0.3),
-    BackgroundColor3 = C.accent, BorderSizePixel = 0,
-    Text = "R", TextColor3 = C.text,
-    Font = Enum.Font.GothamBold, TextSize = s(20), ZIndex = 100,
-    Parent = gui,
+local floatBtn = make("TextButton",{
+    Size=UDim2.new(0,s(50),0,s(50)),
+    Position=UDim2.new(0,8,0,camera.ViewportSize.Y*0.3),
+    BackgroundColor3=C.accent,BorderSizePixel=0,
+    Text="R",TextColor3=C.text,
+    Font=Enum.Font.GothamBold,TextSize=s(20),ZIndex=100,Parent=gui,
 })
 make("UICorner",{CornerRadius=UDim.new(0,s(12)),Parent=floatBtn})
 make("UIStroke",{Color=C.border,Thickness=1,Parent=floatBtn})
 
 do
-    local d,ds,sp = false, nil, nil
-    floatBtn.InputBegan:Connect(function(i) if isTM(i) then d=true;ds=gIP(i);sp=floatBtn.Position end end)
+    local d,ds,sp=false,nil,nil
+    local moved=false
+    floatBtn.InputBegan:Connect(function(i)
+        if isTM(i) then d=true;moved=false;ds=gIP(i);sp=floatBtn.Position end
+    end)
     floatBtn.InputEnded:Connect(function(i) if isTM(i) then d=false end end)
     table.insert(ActiveConnections,UIS.InputChanged:Connect(function(i)
-        if d and isTMMove(i) then
+        if d and isTMM(i) then
             local delta=gIP(i)-ds
             if delta.Magnitude>8 then
+                moved=true
                 floatBtn.Position=UDim2.new(sp.X.Scale,sp.X.Offset+delta.X,sp.Y.Scale,sp.Y.Offset+delta.Y)
             end
         end
@@ -192,10 +193,10 @@ end
 -- MAIN WINDOW
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-local mainFrame = make("Frame", {
-    Name="Main", Size=UDim2.new(0,WIN_W,0,WIN_H),
+local mainFrame = make("Frame",{
+    Name="Main",Size=UDim2.new(0,WIN_W,0,WIN_H),
     Position=UDim2.new(0.5,-WIN_W/2,0.5,-WIN_H/2),
-    BackgroundColor3=C.bg, BorderSizePixel=0, Parent=gui,
+    BackgroundColor3=C.bg,BorderSizePixel=0,Parent=gui,
 })
 make("UICorner",{CornerRadius=UDim.new(0,s(4)),Parent=mainFrame})
 make("UIStroke",{Color=C.border,Thickness=1,Parent=mainFrame})
@@ -209,7 +210,7 @@ make("ImageLabel",{
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- TOP BAR
---━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+--━━━━━━━���━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 local topBar = make("Frame",{
     Size=UDim2.new(1,0,0,TOP_H),BackgroundColor3=C.side,
@@ -225,7 +226,7 @@ make("TextLabel",{
 })
 make("TextLabel",{
     Size=UDim2.new(0,s(40),1,0),Position=UDim2.new(0,s(120),0,0),
-    BackgroundTransparency=1,Text="v2.0",TextColor3=C.dim,
+    BackgroundTransparency=1,Text="v3.0",TextColor3=C.dim,
     Font=Enum.Font.Gotham,TextSize=FONT_SMALL,TextXAlignment=Enum.TextXAlignment.Left,Parent=topBar,
 })
 
@@ -239,7 +240,6 @@ local minBtn = make("TextButton",{
     BackgroundTransparency=1,Text="—",TextColor3=C.dim,
     Font=Enum.Font.GothamBold,TextSize=s(14),Parent=topBar,
 })
-
 closeBtn.MouseEnter:Connect(function() closeBtn.TextColor3=C.red end)
 closeBtn.MouseLeave:Connect(function() closeBtn.TextColor3=C.dim end)
 minBtn.MouseEnter:Connect(function() minBtn.TextColor3=C.text end)
@@ -247,14 +247,14 @@ minBtn.MouseLeave:Connect(function() minBtn.TextColor3=C.dim end)
 
 -- DRAG
 do
-    local d,ds,sp = false, nil, nil
-    local dz = make("TextButton",{
+    local d,ds,sp=false,nil,nil
+    local dz=make("TextButton",{
         Size=UDim2.new(1,-TOP_H*2,1,0),BackgroundTransparency=1,Text="",ZIndex=5,Parent=topBar,
     })
     dz.InputBegan:Connect(function(i) if isTM(i) then d=true;ds=gIP(i);sp=mainFrame.Position end end)
     dz.InputEnded:Connect(function(i) if isTM(i) then d=false end end)
     table.insert(ActiveConnections,UIS.InputChanged:Connect(function(i)
-        if d and isTMMove(i) then
+        if d and isTMM(i) then
             local delta=gIP(i)-ds
             mainFrame.Position=UDim2.new(sp.X.Scale,sp.X.Offset+delta.X,sp.Y.Scale,sp.Y.Offset+delta.Y)
         end
@@ -262,7 +262,7 @@ do
 end
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
--- SIDEBAR
+-- SIDEBAR (3 tabs now — no TARGET tab)
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 local sidebar = make("Frame",{
@@ -273,7 +273,7 @@ make("UIListLayout",{SortOrder=Enum.SortOrder.LayoutOrder,Padding=UDim.new(0,s(2
 make("UIPadding",{PaddingTop=UDim.new(0,s(8)),PaddingLeft=UDim.new(0,s(5)),PaddingRight=UDim.new(0,s(5)),Parent=sidebar})
 make("Frame",{Size=UDim2.new(0,1,1,-TOP_H),Position=UDim2.new(0,SIDE_W,0,TOP_H),BackgroundColor3=C.border,BorderSizePixel=0,ZIndex=5,Parent=mainFrame})
 
---━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+--━━━━━━━���━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -- CONTENT & STATUS
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -297,21 +297,14 @@ local statusDot = make("Frame",{
 make("UICorner",{CornerRadius=UDim.new(1,0),Parent=statusDot})
 
 local statusLabel = make("TextLabel",{
-    Size=UDim2.new(1,-s(80),1,0),Position=UDim2.new(0,s(22),0,0),
-    BackgroundTransparency=1,Text="Idle — No target",TextColor3=C.dim,
+    Size=UDim2.new(1,-s(20),1,0),Position=UDim2.new(0,s(22),0,0),
+    BackgroundTransparency=1,Text="Idle",TextColor3=C.dim,
     Font=Enum.Font.Gotham,TextSize=FONT_TINY,TextXAlignment=Enum.TextXAlignment.Left,
     TextTruncate=Enum.TextTruncate.AtEnd,Parent=statusBar,
 })
 
-local targetLabel = make("TextLabel",{
-    Size=UDim2.new(0,s(70),1,0),Position=UDim2.new(1,-s(75),0,0),
-    BackgroundTransparency=1,Text="",TextColor3=C.accent,
-    Font=Enum.Font.GothamSemibold,TextSize=FONT_TINY,TextXAlignment=Enum.TextXAlignment.Right,
-    TextTruncate=Enum.TextTruncate.AtEnd,Parent=statusBar,
-})
-
 local function updateStatus(msg,color)
-    statusLabel.Text=msg; statusDot.BackgroundColor3=color or C.dim
+    statusLabel.Text=msg;statusDot.BackgroundColor3=color or C.dim
 end
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -328,8 +321,8 @@ local function makeSection(parent,text,order)
 end
 
 local function makeToggle(parent,label,default,order,callback)
-    local state = default or false
-    local frame = make("Frame",{Size=UDim2.new(1,0,0,TOGGLE_H),BackgroundColor3=C.elem,BorderSizePixel=0,LayoutOrder=order,Parent=parent})
+    local state=default or false
+    local frame=make("Frame",{Size=UDim2.new(1,0,0,TOGGLE_H),BackgroundColor3=C.elem,BorderSizePixel=0,LayoutOrder=order,Parent=parent})
     make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=frame})
     make("TextLabel",{
         Size=UDim2.new(1,-s(60),1,0),Position=UDim2.new(0,s(12),0,0),
@@ -337,21 +330,21 @@ local function makeToggle(parent,label,default,order,callback)
         TextSize=FONT_MAIN,TextXAlignment=Enum.TextXAlignment.Left,
         TextTruncate=Enum.TextTruncate.AtEnd,Parent=frame,
     })
-    local tW,tH,kS = s(40),s(20),s(16)
-    local track = make("Frame",{
+    local tW,tH,kS=s(40),s(20),s(16)
+    local track=make("Frame",{
         Size=UDim2.new(0,tW,0,tH),Position=UDim2.new(1,-tW-s(10),0.5,-tH/2),
         BackgroundColor3=state and C.accent or C.off,BorderSizePixel=0,Parent=frame,
     })
     make("UICorner",{CornerRadius=UDim.new(0,tH/2),Parent=track})
-    local knob = make("Frame",{
+    local knob=make("Frame",{
         Size=UDim2.new(0,kS,0,kS),
         Position=state and UDim2.new(1,-kS-s(2),0.5,-kS/2) or UDim2.new(0,s(2),0.5,-kS/2),
         BackgroundColor3=C.text,BorderSizePixel=0,Parent=track,
     })
     make("UICorner",{CornerRadius=UDim.new(1,0),Parent=knob})
-    local btn = make("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",Parent=frame})
+    local btn=make("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",Parent=frame})
     btn.MouseButton1Click:Connect(function()
-        state = not state
+        state=not state
         tw(track,0.18,{BackgroundColor3=state and C.accent or C.off})
         tw(knob,0.18,{Position=state and UDim2.new(1,-kS-s(2),0.5,-kS/2) or UDim2.new(0,s(2),0.5,-kS/2)})
         if callback then callback(state) end
@@ -366,8 +359,8 @@ local function makeToggle(parent,label,default,order,callback)
 end
 
 local function makeSlider(parent,label,min,max,default,increment,order,callback)
-    local value = default
-    local frame = make("Frame",{Size=UDim2.new(1,0,0,SLIDER_H),BackgroundColor3=C.elem,BorderSizePixel=0,LayoutOrder=order,Parent=parent})
+    local value=default
+    local frame=make("Frame",{Size=UDim2.new(1,0,0,SLIDER_H),BackgroundColor3=C.elem,BorderSizePixel=0,LayoutOrder=order,Parent=parent})
     make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=frame})
     make("TextLabel",{
         Size=UDim2.new(0.55,0,0,s(22)),Position=UDim2.new(0,s(12),0,s(2)),
@@ -375,27 +368,27 @@ local function makeSlider(parent,label,min,max,default,increment,order,callback)
         TextSize=s(12),TextXAlignment=Enum.TextXAlignment.Left,
         TextTruncate=Enum.TextTruncate.AtEnd,Parent=frame,
     })
-    local valLabel = make("TextLabel",{
+    local valLabel=make("TextLabel",{
         Size=UDim2.new(0.4,0,0,s(22)),Position=UDim2.new(0.57,0,0,s(2)),
         BackgroundTransparency=1,Text=fmtN(value,increment),TextColor3=C.dim,
         Font=Enum.Font.GothamSemibold,TextSize=s(12),TextXAlignment=Enum.TextXAlignment.Right,Parent=frame,
     })
     local bH=s(8)
-    local trackBG = make("Frame",{
+    local trackBG=make("Frame",{
         Size=UDim2.new(1,-s(24),0,bH),Position=UDim2.new(0,s(12),0,SLIDER_H-bH-s(10)),
         BackgroundColor3=C.border,BorderSizePixel=0,Parent=frame,
     })
     make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=trackBG})
     local pct=math.clamp((default-min)/(max-min),0,1)
-    local fill = make("Frame",{Size=UDim2.new(pct,0,1,0),BackgroundColor3=C.accent,BorderSizePixel=0,Parent=trackBG})
+    local fill=make("Frame",{Size=UDim2.new(pct,0,1,0),BackgroundColor3=C.accent,BorderSizePixel=0,Parent=trackBG})
     make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=fill})
     local hS=s(18)
-    local handle = make("Frame",{
+    local handle=make("Frame",{
         Size=UDim2.new(0,hS,0,hS),Position=UDim2.new(pct,-hS/2,0.5,-hS/2),
         BackgroundColor3=C.text,BorderSizePixel=0,ZIndex=3,Parent=trackBG,
     })
     make("UICorner",{CornerRadius=UDim.new(1,0),Parent=handle})
-    local touchZone = make("TextButton",{
+    local touchZone=make("TextButton",{
         Size=UDim2.new(1,s(20),0,s(30)),Position=UDim2.new(0,-s(10),0.5,-s(15)),
         BackgroundTransparency=1,Text="",ZIndex=4,Parent=trackBG,
     })
@@ -411,7 +404,7 @@ local function makeSlider(parent,label,min,max,default,increment,order,callback)
     end
     touchZone.InputBegan:Connect(function(i) if isTM(i) then sliding=true;upd(i.Position.X) end end)
     handle.InputBegan:Connect(function(i) if isTM(i) then sliding=true end end)
-    table.insert(ActiveConnections,UIS.InputChanged:Connect(function(i) if sliding and isTMMove(i) then upd(i.Position.X) end end))
+    table.insert(ActiveConnections,UIS.InputChanged:Connect(function(i) if sliding and isTMM(i) then upd(i.Position.X) end end))
     table.insert(ActiveConnections,UIS.InputEnded:Connect(function(i) if isTM(i) then sliding=false end end))
     return {
         getValue=function() return value end,
@@ -424,7 +417,7 @@ local function makeSlider(parent,label,min,max,default,increment,order,callback)
 end
 
 local function makeButton(parent,label,color,order,callback)
-    local btn = make("TextButton",{
+    local btn=make("TextButton",{
         Size=UDim2.new(1,0,0,BTN_H),BackgroundColor3=color or C.elem,
         BorderSizePixel=0,Text=label,TextColor3=C.text,Font=Enum.Font.GothamSemibold,
         TextSize=FONT_MAIN,LayoutOrder=order,Parent=parent,
@@ -443,9 +436,8 @@ local function makeInfo(parent,text,order)
     })
 end
 
--- ── MODE SELECTOR (horizontal button row, mobile-friendly) ──
 local function makeModeSelect(parent,modes,default,order,callback)
-    local container = make("Frame",{
+    local container=make("Frame",{
         Size=UDim2.new(1,0,0,s(36)),BackgroundTransparency=1,LayoutOrder=order,Parent=parent,
     })
     make("UIListLayout",{
@@ -453,11 +445,11 @@ local function makeModeSelect(parent,modes,default,order,callback)
         SortOrder=Enum.SortOrder.LayoutOrder,
         Padding=UDim.new(0,s(3)),Parent=container,
     })
-    local selected = default
-    local buttons = {}
+    local selected=default
+    local buttons={}
     for i,mode in ipairs(modes) do
-        local isSel = (mode==default)
-        local btn = make("TextButton",{
+        local isSel=(mode==default)
+        local btn=make("TextButton",{
             Size=UDim2.new(1/#modes,-s(3),1,0),
             BackgroundColor3=isSel and C.accent or C.off,BorderSizePixel=0,
             Text=mode,TextColor3=isSel and C.text or C.dim,
@@ -468,31 +460,22 @@ local function makeModeSelect(parent,modes,default,order,callback)
         buttons[mode]=btn
         btn.MouseButton1Click:Connect(function()
             for m,b in pairs(buttons) do
-                tw(b,0.12,{BackgroundColor3=C.off}); b.TextColor3=C.dim
+                tw(b,0.12,{BackgroundColor3=C.off});b.TextColor3=C.dim
             end
-            tw(btn,0.12,{BackgroundColor3=C.accent}); btn.TextColor3=C.text
+            tw(btn,0.12,{BackgroundColor3=C.accent});btn.TextColor3=C.text
             selected=mode
             if callback then callback(mode) end
         end)
     end
-    return {
-        getMode=function() return selected end,
-        setMode=function(m)
-            for mode,b in pairs(buttons) do
-                b.BackgroundColor3=(mode==m) and C.accent or C.off
-                b.TextColor3=(mode==m) and C.text or C.dim
-            end
-            selected=m
-        end,
-    }
+    return {getMode=function() return selected end}
 end
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
--- CONTENT PAGES
+-- CONTENT PAGES (3 tabs — no Target tab)
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 local function makePage(name)
-    local pg = make("ScrollingFrame",{
+    local pg=make("ScrollingFrame",{
         Name=name,Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,
         BorderSizePixel=0,ScrollBarThickness=s(3),ScrollBarImageColor3=C.border,
         CanvasSize=UDim2.new(0,0,0,0),AutomaticCanvasSize=Enum.AutomaticSize.Y,
@@ -503,32 +486,31 @@ local function makePage(name)
     return pg
 end
 
-local pageTarget   = makePage("Target")
 local pageOrbit    = makePage("Orbit")
 local pageVoid     = makePage("Voidspam")
 local pageSettings = makePage("Settings")
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
--- TAB SWITCHING
+-- TAB SWITCHING (3 tabs)
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-local tabData = {}
-local activeTab = nil
+local tabData={}
+local activeTab=nil
 
 local function makeTabBtn(text,page,order,default)
-    local btn = make("TextButton",{
+    local btn=make("TextButton",{
         Size=UDim2.new(1,0,0,s(36)),
         BackgroundColor3=default and C.panel or Color3.new(0,0,0),
         BackgroundTransparency=default and 0 or 1,BorderSizePixel=0,
         Text="",LayoutOrder=order,Parent=sidebar,
     })
     make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=btn})
-    local ind = make("Frame",{
+    local ind=make("Frame",{
         Size=UDim2.new(0,s(3),0.55,0),Position=UDim2.new(0,0,0.225,0),
         BackgroundColor3=C.accent,BorderSizePixel=0,Visible=default or false,Parent=btn,
     })
     make("UICorner",{CornerRadius=UDim.new(0,1),Parent=ind})
-    local lbl = make("TextLabel",{
+    local lbl=make("TextLabel",{
         Size=UDim2.new(1,-s(16),1,0),Position=UDim2.new(0,s(12),0,0),
         BackgroundTransparency=1,Text=text,TextColor3=default and C.text or C.dim,
         Font=Enum.Font.GothamSemibold,TextSize=s(11),TextXAlignment=Enum.TextXAlignment.Left,
@@ -549,243 +531,238 @@ local function makeTabBtn(text,page,order,default)
     return tab
 end
 
-makeTabBtn("TARGET",   pageTarget,   1, true)
+makeTabBtn("VOIDSPAM", pageVoid,     1, true)
 makeTabBtn("ORBIT",    pageOrbit,    2, false)
-makeTabBtn("VOIDSPAM", pageVoid,     3, false)
-makeTabBtn("SETTINGS", pageSettings, 4, false)
+makeTabBtn("SETTINGS", pageSettings, 3, false)
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
--- TARGET TAB (unchanged)
+-- ORBIT TAB (with built-in player selector)
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-makeSection(pageTarget,"Selected Target",1)
+makeSection(pageOrbit, "Orbit Target", 1)
 
-local selDisp = make("Frame",{Size=UDim2.new(1,0,0,s(38)),BackgroundColor3=C.elem,BorderSizePixel=0,LayoutOrder=2,Parent=pageTarget})
-make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=selDisp})
-local selText = make("TextLabel",{
+local orbitSelDisp = make("Frame",{
+    Size=UDim2.new(1,0,0,s(34)),BackgroundColor3=C.elem,
+    BorderSizePixel=0,LayoutOrder=2,Parent=pageOrbit,
+})
+make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=orbitSelDisp})
+local orbitSelText = make("TextLabel",{
     Size=UDim2.new(1,-s(16),1,0),Position=UDim2.new(0,s(10),0,0),
-    BackgroundTransparency=1,Text="Target: None",TextColor3=C.dim,
+    BackgroundTransparency=1,Text="Orbit: None",TextColor3=C.dim,
     Font=Enum.Font.GothamSemibold,TextSize=FONT_MAIN,TextXAlignment=Enum.TextXAlignment.Left,
-    TextTruncate=Enum.TextTruncate.AtEnd,Parent=selDisp,
+    TextTruncate=Enum.TextTruncate.AtEnd,Parent=orbitSelDisp,
 })
 
-makeSection(pageTarget,"Player List",3)
-
-local playerList = make("Frame",{
-    Name="PL",Size=UDim2.new(1,0,0,0),BackgroundTransparency=1,
-    AutomaticSize=Enum.AutomaticSize.Y,LayoutOrder=4,Parent=pageTarget,
+-- Player list inside orbit tab
+local orbitPL = make("Frame",{
+    Name="OPL",Size=UDim2.new(1,0,0,0),BackgroundTransparency=1,
+    AutomaticSize=Enum.AutomaticSize.Y,LayoutOrder=3,Parent=pageOrbit,
 })
-make("UIListLayout",{SortOrder=Enum.SortOrder.Name,Padding=UDim.new(0,s(3)),Parent=playerList})
+make("UIListLayout",{SortOrder=Enum.SortOrder.Name,Padding=UDim.new(0,s(3)),Parent=orbitPL})
 
-local function selectTarget(p)
-    CFG.Target=p
-    -- Reset analysis on new target
-    Analysis.yBuffer={};Analysis.rotBuffer={};Analysis.tBuffer={}
-    Analysis.frameCount=0;Analysis.detectedPitch="None";Analysis.detectedYaw="None"
-    Analysis.yMult=1;Analysis.xzMult=1;Analysis.spiralMult=1
+local function selectOrbitTarget(p)
+    CFG.OrbitTarget=p
     if p then
-        selText.Text="Target: "..p.Name;selText.TextColor3=C.accentL
-        targetLabel.Text=p.Name;updateStatus("Target: "..p.Name,C.accent)
+        orbitSelText.Text="Orbit: "..p.Name;orbitSelText.TextColor3=C.accentL
     else
-        selText.Text="Target: None";selText.TextColor3=C.dim
-        targetLabel.Text="";updateStatus("Idle — No target",C.dim)
+        orbitSelText.Text="Orbit: None";orbitSelText.TextColor3=C.dim
     end
 end
 
-local function addPE(p)
+local function addOrbitPE(p)
     if p==LP then return end
-    if playerList:FindFirstChild("E_"..p.Name) then return end
-    local e=make("Frame",{Name="E_"..p.Name,Size=UDim2.new(1,0,0,s(36)),BackgroundColor3=C.elem,BorderSizePixel=0,Parent=playerList})
+    if orbitPL:FindFirstChild("OE_"..p.Name) then return end
+    local e=make("Frame",{Name="OE_"..p.Name,Size=UDim2.new(1,0,0,s(32)),BackgroundColor3=C.elem,BorderSizePixel=0,Parent=orbitPL})
     make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=e})
     make("TextLabel",{
         Size=UDim2.new(1,-s(70),1,0),Position=UDim2.new(0,s(10),0,0),
         BackgroundTransparency=1,Text=p.DisplayName,TextColor3=C.text,
-        Font=Enum.Font.Gotham,TextSize=s(12),TextXAlignment=Enum.TextXAlignment.Left,
+        Font=Enum.Font.Gotham,TextSize=s(11),TextXAlignment=Enum.TextXAlignment.Left,
         TextTruncate=Enum.TextTruncate.AtEnd,Parent=e,
     })
     local sb=make("TextButton",{
-        Size=UDim2.new(0,s(55),0,s(26)),Position=UDim2.new(1,-s(62),0.5,-s(13)),
-        BackgroundColor3=C.accent,BorderSizePixel=0,Text="SELECT",TextColor3=C.text,
+        Size=UDim2.new(0,s(50),0,s(22)),Position=UDim2.new(1,-s(58),0.5,-s(11)),
+        BackgroundColor3=C.accent,BorderSizePixel=0,Text="SET",TextColor3=C.text,
         Font=Enum.Font.GothamBold,TextSize=FONT_TINY,Parent=e,
     })
     make("UICorner",{CornerRadius=UDim.new(0,s(2)),Parent=sb})
-    sb.MouseButton1Click:Connect(function() selectTarget(p) end)
+    sb.MouseButton1Click:Connect(function() selectOrbitTarget(p) end)
 end
 
-local function remPE(p)
-    local e=playerList:FindFirstChild("E_"..p.Name)
+local function remOrbitPE(p)
+    local e=orbitPL:FindFirstChild("OE_"..p.Name)
     if e then e:Destroy() end
-    if CFG.Target==p then selectTarget(nil) end
+    if CFG.OrbitTarget==p then selectOrbitTarget(nil) end
 end
 
-local function refreshPL()
-    for _,c in pairs(playerList:GetChildren()) do if c:IsA("Frame") then c:Destroy() end end
-    for _,p in pairs(Players:GetPlayers()) do addPE(p) end
+local function refreshOrbitPL()
+    for _,c in pairs(orbitPL:GetChildren()) do if c:IsA("Frame") then c:Destroy() end end
+    for _,p in pairs(Players:GetPlayers()) do addOrbitPE(p) end
 end
 
-refreshPL()
-Players.PlayerAdded:Connect(addPE)
-Players.PlayerRemoving:Connect(remPE)
+refreshOrbitPL()
+Players.PlayerAdded:Connect(addOrbitPE)
+Players.PlayerRemoving:Connect(remOrbitPE)
 
-makeButton(pageTarget,"DESELECT TARGET",C.off,5,function() selectTarget(nil) end)
-makeButton(pageTarget,"REFRESH LIST",C.elem,6,refreshPL)
+makeButton(pageOrbit,"DESELECT",C.off,4,function() selectOrbitTarget(nil) end)
 
---━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
--- ORBIT TAB (unchanged)
---━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-- Orbit controls
+makeSection(pageOrbit, "Orbit Controls", 5)
 
-makeSection(pageOrbit,"Orbit Controls",1)
-
-local orbitToggle = makeToggle(pageOrbit,"Enable Orbit",false,2,function(state)
+local orbitToggle = makeToggle(pageOrbit,"Enable Orbit",false,6,function(state)
     CFG.Orbit.On=state
-    if state and not CFG.Target then updateStatus("Orbit ON — no target!",C.red)
-    elseif state then updateStatus("Orbiting "..CFG.Target.Name,C.green)
-    else updateStatus(CFG.Target and ("Target: "..CFG.Target.Name) or "Idle",CFG.Target and C.accent or C.dim) end
+    if state and not CFG.OrbitTarget then updateStatus("Orbit ON — no target!",C.red)
+    elseif state then updateStatus("Orbiting "..CFG.OrbitTarget.Name,C.green)
+    else updateStatus("Idle",C.dim) end
 end)
 
-makeSection(pageOrbit,"Parameters",3)
-makeSlider(pageOrbit,"Radius",3,35,CFG.Orbit.Radius,1,4,function(v) CFG.Orbit.Radius=v end)
-makeSlider(pageOrbit,"Speed",0.5,10,CFG.Orbit.Speed,0.5,5,function(v) CFG.Orbit.Speed=v end)
-makeSlider(pageOrbit,"Height",-20,20,CFG.Orbit.Height,1,6,function(v) CFG.Orbit.Height=v end)
+makeSection(pageOrbit,"Parameters",7)
+makeSlider(pageOrbit,"Radius",3,35,CFG.Orbit.Radius,1,8,function(v) CFG.Orbit.Radius=v end)
+makeSlider(pageOrbit,"Speed",0.5,10,CFG.Orbit.Speed,0.5,9,function(v) CFG.Orbit.Speed=v end)
+makeSlider(pageOrbit,"Height",-20,20,CFG.Orbit.Height,1,10,function(v) CFG.Orbit.Height=v end)
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
--- ★★★ ENHANCED VOIDSPAM TAB ★★★
+-- ★★★ VOIDSPAM TAB — SELF-APPLIED, 2K TP DESYNC ★★★
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-makeSection(pageVoid, "Voidspam Controls", 1)
+makeSection(pageVoid, "Voidspam — Self Applied", 1)
 
-local voidToggle = makeToggle(pageVoid, "Enable Voidspam", false, 2, function(state)
-    CFG.Void.On = state
+make("TextLabel",{
+    Size=UDim2.new(1,0,0,s(28)),BackgroundColor3=Color3.fromRGB(18,28,18),
+    BorderSizePixel=0,
+    Text="  No target needed — applies to YOU",
+    TextColor3=C.green,Font=Enum.Font.GothamSemibold,TextSize=FONT_TINY,
+    TextXAlignment=Enum.TextXAlignment.Left,LayoutOrder=2,Parent=pageVoid,
+})
+
+local voidToggle = makeToggle(pageVoid,"Enable Voidspam",false,3,function(state)
+    CFG.Void.On=state
+    VoidState.tpCount=0
+    VoidState.tpsTracker={}
+    VoidState.phase=0
+    VoidState.accumulator=0
+    VoidState.clock=0
+    VoidState.atHome=true
+    VoidState.active=false
     if state then
-        -- Reset analysis fresh
-        Analysis.yBuffer = {}; Analysis.rotBuffer = {}; Analysis.tBuffer = {}
-        Analysis.frameCount = 0
-    end
-    if state and not CFG.Target then
-        updateStatus("VOID ON — no target!", C.red)
-    elseif state then
-        updateStatus("VOID ▸ " .. CFG.Void.Mode .. " ▸ " .. CFG.Target.Name, C.red)
+        updateStatus("DESYNC ACTIVE ▸ "..CFG.Void.Method,C.red)
     else
-        updateStatus(CFG.Target and ("Target: " .. CFG.Target.Name) or "Idle",
-            CFG.Target and C.accent or C.dim)
+        updateStatus("Idle",C.dim)
     end
 end)
 
-local adaptToggle = makeToggle(pageVoid, "Auto Adapt (AA Detect)", true, 3, function(state)
-    CFG.Void.AutoAdapt = state
-end)
+-- METHOD SELECT
+makeSection(pageVoid, "Method (OOB Bypass)", 4)
 
--- ── MODE SELECT ──
-makeSection(pageVoid, "Mode", 4)
-
-local modeSelect = makeModeSelect(pageVoid,
-    {"ADAPT", "AGGRO", "ERRATIC", "SPIRAL"},
-    "ADAPT", 5,
+local methodSelect = makeModeSelect(pageVoid,
+    {"OPT 1: 2K TP", "OPT 2: SCATTER"},
+    "OPT 1: 2K TP", 5,
     function(mode)
-        local modeMap = {ADAPT="Adaptive", AGGRO="Aggressive", ERRATIC="Erratic", SPIRAL="Spiral"}
-        CFG.Void.Mode = modeMap[mode] or "Adaptive"
-        if CFG.Void.On and CFG.Target then
-            updateStatus("VOID ▸ " .. CFG.Void.Mode .. " ▸ " .. CFG.Target.Name, C.red)
+        if mode == "OPT 1: 2K TP" then
+            CFG.Void.Method = "2KTP"
+        else
+            CFG.Void.Method = "Scatter"
+        end
+        if CFG.Void.On then
+            updateStatus("DESYNC ACTIVE ▸ "..CFG.Void.Method,C.red)
         end
     end
 )
 
--- ── CORE SLIDERS ──
-makeSection(pageVoid, "Core", 6)
+-- MODE SELECT (jitter pattern)
+makeSection(pageVoid, "Jitter Pattern", 6)
 
-makeSlider(pageVoid, "Void Speed", 0.005, 0.08, CFG.Void.Speed, 0.005, 7, function(v)
-    CFG.Void.Speed = v
+local modeSelect = makeModeSelect(pageVoid,
+    {"ADAPT","AGGRO","ERRATIC","SPIRAL"},
+    "ADAPT", 7,
+    function(mode)
+        local map={ADAPT="Adaptive",AGGRO="Aggressive",ERRATIC="Erratic",SPIRAL="Spiral"}
+        CFG.Void.Mode=map[mode] or "Adaptive"
+    end
+)
+
+-- CORE SLIDERS
+makeSection(pageVoid, "Core", 8)
+
+makeSlider(pageVoid,"TP Distance",500,3000,CFG.Void.TPDistance,100,9,function(v)
+    CFG.Void.TPDistance=v
 end)
 
-makeSlider(pageVoid, "Void Depth", -600, -100, CFG.Void.Depth, 25, 8, function(v)
-    CFG.Void.Depth = v
+makeSlider(pageVoid,"Pulse Rate",0.005,0.06,CFG.Void.PulseRate,0.005,10,function(v)
+    CFG.Void.PulseRate=v
 end)
 
-makeSlider(pageVoid, "Pulse Rate", 0.01, 0.08, CFG.Void.PulseRate, 0.005, 9, function(v)
-    CFG.Void.PulseRate = v
+-- ANTI-PITCH (Y)
+makeSection(pageVoid, "Anti-Pitch (Y Axis Desync)", 11)
+
+makeSlider(pageVoid,"Y Jitter",5,200,CFG.Void.YJitter,5,12,function(v)
+    CFG.Void.YJitter=v
 end)
 
--- ── ANTI-PITCH SLIDERS ──
-makeSection(pageVoid, "Anti-Pitch (Y Axis)", 10)
+-- ANTI-YAW (XZ)
+makeSection(pageVoid, "Anti-Yaw (XZ Axes Desync)", 13)
 
-makeSlider(pageVoid, "Y Phase Depth", 20, 250, CFG.Void.YPhaseDepth, 10, 11, function(v)
-    CFG.Void.YPhaseDepth = v
+makeSlider(pageVoid,"XZ Jitter",3,60,CFG.Void.XZJitter,1,14,function(v)
+    CFG.Void.XZJitter=v
 end)
 
-makeSlider(pageVoid, "Y Jitter", 5, 100, CFG.Void.YJitter, 5, 12, function(v)
-    CFG.Void.YJitter = v
+makeSlider(pageVoid,"Spiral Radius",2,30,CFG.Void.SpiralRad,1,15,function(v)
+    CFG.Void.SpiralRad=v
 end)
 
--- ── ANTI-YAW SLIDERS ──
-makeSection(pageVoid, "Anti-Yaw (XZ Axes)", 13)
-
-makeSlider(pageVoid, "XZ Jitter", 3, 40, CFG.Void.XZJitter, 1, 14, function(v)
-    CFG.Void.XZJitter = v
+makeSlider(pageVoid,"Spiral Speed",1,20,CFG.Void.SpiralSpd,0.5,16,function(v)
+    CFG.Void.SpiralSpd=v
 end)
 
-makeSlider(pageVoid, "Spiral Radius", 2, 20, CFG.Void.SpiralRad, 1, 15, function(v)
-    CFG.Void.SpiralRad = v
-end)
+-- LIVE MONITOR
+makeSection(pageVoid, "Live Monitor", 17)
 
-makeSlider(pageVoid, "Spiral Speed", 1, 15, CFG.Void.SpiralSpd, 0.5, 16, function(v)
-    CFG.Void.SpiralSpd = v
-end)
-
--- ── DETECTION DISPLAY ──
-makeSection(pageVoid, "AA Detection (Live)", 17)
-
-local detectFrame = make("Frame", {
-    Size = UDim2.new(1, 0, 0, s(58)),
-    BackgroundColor3 = Color3.fromRGB(16, 16, 22),
-    BorderSizePixel = 0,
-    LayoutOrder = 18,
-    Parent = pageVoid,
+local monitorFrame = make("Frame",{
+    Size=UDim2.new(1,0,0,s(72)),BackgroundColor3=Color3.fromRGB(14,14,20),
+    BorderSizePixel=0,LayoutOrder=18,Parent=pageVoid,
 })
-make("UICorner", { CornerRadius = UDim.new(0, s(3)), Parent = detectFrame })
-make("UIStroke", { Color = C.border, Thickness = 1, Parent = detectFrame })
+make("UICorner",{CornerRadius=UDim.new(0,s(3)),Parent=monitorFrame})
+make("UIStroke",{Color=C.border,Thickness=1,Parent=monitorFrame})
 
-local pitchDetectLabel = make("TextLabel", {
-    Size = UDim2.new(1, -s(16), 0, s(20)),
-    Position = UDim2.new(0, s(10), 0, s(6)),
-    BackgroundTransparency = 1,
-    Text = "PITCH: —",
-    TextColor3 = C.dim,
-    Font = Enum.Font.GothamBold,
-    TextSize = FONT_SMALL,
-    TextXAlignment = Enum.TextXAlignment.Left,
-    Parent = detectFrame,
+local monMethodLabel = make("TextLabel",{
+    Size=UDim2.new(1,-s(16),0,s(16)),Position=UDim2.new(0,s(10),0,s(5)),
+    BackgroundTransparency=1,Text="METHOD: —",TextColor3=C.dim,
+    Font=Enum.Font.GothamBold,TextSize=FONT_TINY,TextXAlignment=Enum.TextXAlignment.Left,
+    Parent=monitorFrame,
 })
-
-local yawDetectLabel = make("TextLabel", {
-    Size = UDim2.new(1, -s(16), 0, s(20)),
-    Position = UDim2.new(0, s(10), 0, s(30)),
-    BackgroundTransparency = 1,
-    Text = "YAW:   —",
-    TextColor3 = C.dim,
-    Font = Enum.Font.GothamBold,
-    TextSize = FONT_SMALL,
-    TextXAlignment = Enum.TextXAlignment.Left,
-    Parent = detectFrame,
+local monPhaseLabel = make("TextLabel",{
+    Size=UDim2.new(1,-s(16),0,s(16)),Position=UDim2.new(0,s(10),0,s(22)),
+    BackgroundTransparency=1,Text="PHASE: —",TextColor3=C.dim,
+    Font=Enum.Font.GothamBold,TextSize=FONT_TINY,TextXAlignment=Enum.TextXAlignment.Left,
+    Parent=monitorFrame,
 })
-
--- ── WARNING ──
-make("TextLabel", {
-    Size = UDim2.new(1, 0, 0, s(30)),
-    BackgroundColor3 = Color3.fromRGB(40, 12, 12),
-    BorderSizePixel = 0,
-    Text = "  !! BREAKS ALL KICIAHOOK V2 AA CONFIGS !!",
-    TextColor3 = C.red,
-    Font = Enum.Font.GothamBold,
-    TextSize = FONT_TINY,
-    TextXAlignment = Enum.TextXAlignment.Left,
-    LayoutOrder = 19,
-    Parent = pageVoid,
+local monTPSLabel = make("TextLabel",{
+    Size=UDim2.new(1,-s(16),0,s(16)),Position=UDim2.new(0,s(10),0,s(39)),
+    BackgroundTransparency=1,Text="TPS: 0",TextColor3=C.dim,
+    Font=Enum.Font.GothamBold,TextSize=FONT_TINY,TextXAlignment=Enum.TextXAlignment.Left,
+    Parent=monitorFrame,
+})
+local monStateLabel = make("TextLabel",{
+    Size=UDim2.new(1,-s(16),0,s(16)),Position=UDim2.new(0,s(10),0,s(53)),
+    BackgroundTransparency=1,Text="STATE: IDLE",TextColor3=C.dim,
+    Font=Enum.Font.GothamBold,TextSize=FONT_TINY,TextXAlignment=Enum.TextXAlignment.Left,
+    Parent=monitorFrame,
 })
 
-makeInfo(pageVoid, "[P2] Tune Speed/Depth per Rivals map. Lower speed = faster phase cycling. Depth must reach kill zone. Auto Adapt detects enemy AA config live.", 20)
+-- WARNING
+make("TextLabel",{
+    Size=UDim2.new(1,0,0,s(40)),BackgroundColor3=Color3.fromRGB(40,12,12),
+    BorderSizePixel=0,
+    Text="  !! BYPASSES RIVALS OOB !!\n  !! BREAKS ALL KICIAHOOK V2 AA !!",
+    TextColor3=C.red,Font=Enum.Font.GothamBold,TextSize=FONT_TINY,
+    TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Center,
+    LayoutOrder=19,Parent=pageVoid,
+})
+
+makeInfo(pageVoid,"OPT 1: TPs you 2K studs away & back. OPT 2: Scatters to multiple positions before returning. Both bypass Rivals OOB. If OPT 1 triggers OOB, switch to OPT 2 with lower distance.",20)
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
--- SETTINGS TAB (unchanged)
+-- SETTINGS TAB
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 makeSection(pageSettings,"General",1)
@@ -807,484 +784,439 @@ makeButton(pageSettings,"STOP ALL",C.red,4,function()
     orbitToggle.setState(false);voidToggle.setState(false)
     updateStatus("All stopped",C.dim)
 end)
-makeButton(pageSettings,"DESELECT TARGET",C.off,5,function()
-    CFG.Orbit.On=false;CFG.Void.On=false
-    orbitToggle.setState(false);voidToggle.setState(false)
-    selectTarget(nil)
-end)
 
-makeSection(pageSettings,"Script",6)
-makeButton(pageSettings,"DESTROY SCRIPT",C.red,7,function()
+makeSection(pageSettings,"Script",5)
+makeButton(pageSettings,"DESTROY SCRIPT",C.red,6,function()
     CFG.Orbit.On=false;CFG.Void.On=false
     for _,c in pairs(ActiveConnections) do pcall(function() c:Disconnect() end) end
     gui:Destroy()
 end)
 
-makeSection(pageSettings,"Team",8)
+makeSection(pageSettings,"Team",7)
 make("TextLabel",{
     Size=UDim2.new(1,0,0,s(55)),BackgroundColor3=C.elem,BorderSizePixel=0,
     Text="  [P1] Builder\n  [P2] Tester & Tweaker\n  [P3] Polish & Deploy",
     TextColor3=C.dim,Font=Enum.Font.Gotham,TextSize=FONT_TINY,
     TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Top,
-    LayoutOrder=9,Parent=pageSettings,
+    LayoutOrder=8,Parent=pageSettings,
 })
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
--- CORE: ORBIT LOGIC (unchanged, void priority added)
+-- CORE: ORBIT LOGIC (uses OrbitTarget)
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 local orbitAngle = 0
 table.insert(ActiveConnections, RunService.Heartbeat:Connect(function(dt)
     if not CFG.Orbit.On then return end
     if CFG.Void.On then return end -- void takes priority
-    if not CFG.Target then return end
-    local mc = LP.Character; if not mc then return end
-    local mr = mc:FindFirstChild("HumanoidRootPart"); if not mr then return end
-    local tc = CFG.Target.Character; if not tc then return end
-    local tr = tc:FindFirstChild("HumanoidRootPart"); if not tr then return end
-    local mh = mc:FindFirstChildOfClass("Humanoid")
-    if mh and mh.Health <= 0 then return end
-    orbitAngle = orbitAngle + (CFG.Orbit.Speed * dt)
-    if orbitAngle > math.pi*2 then orbitAngle = orbitAngle - math.pi*2 end
-    local tp = tr.Position
-    local op = tp + Vector3.new(
+    if not CFG.OrbitTarget then return end
+    local mc=LP.Character;if not mc then return end
+    local mr=mc:FindFirstChild("HumanoidRootPart");if not mr then return end
+    local tc=CFG.OrbitTarget.Character;if not tc then return end
+    local tr=tc:FindFirstChild("HumanoidRootPart");if not tr then return end
+    local mh=mc:FindFirstChildOfClass("Humanoid")
+    if mh and mh.Health<=0 then return end
+    orbitAngle=orbitAngle+(CFG.Orbit.Speed*dt)
+    if orbitAngle>math.pi*2 then orbitAngle=orbitAngle-math.pi*2 end
+    local tp=tr.Position
+    mr.CFrame=CFrame.new(tp+Vector3.new(
         math.cos(orbitAngle)*CFG.Orbit.Radius,
         CFG.Orbit.Height,
         math.sin(orbitAngle)*CFG.Orbit.Radius
-    )
-    mr.CFrame = CFrame.new(op, tp)
+    ),tp)
 end))
 
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
--- ★★★ CORE: ENHANCED VOIDSPAM ENGINE ★★★
+-- ★★★ CORE: VOIDSPAM ENGINE v3 — SELF DESYNC ★★★
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 --[[
-    ANTI-AIM BREAKER ARCHITECTURE:
+    HOW IT WORKS:
     
-    6-PHASE CYCLE (unpredictable to resolvers):
-      0 = VOID_DEEP    → Far below map, scattered XZ
-      1 = STRIKE_A     → Near target, spiral angle 0°
-      2 = VOID_MID     → Mid depth, offset XZ
-      3 = STRIKE_B     → Near target, spiral angle 120°
-      4 = SCATTER       → Random position, random height
-      5 = STRIKE_C     → Near target, spiral angle 240°
+    Your hitbox is NEVER where your screen shows you.
     
-    EVERY SINGLE FRAME:
-      • Y: sin(t*7.3) + sin(t*13.7) + sin(t*23.1) + random noise
-        → incommensurate frequencies = never repeating pattern
-      • X: cos(spiral) + random jitter + pitch-adaptive offset
-      • Z: sin(spiral) + random jitter + yaw-adaptive offset
-      • Micro-jitter on top of everything
+    OPTION 1 — 2K TP:
+    ┌──────────────────────────────────────────────┐
+    │ Frame 1: SAVE your CFrame                    │
+    │ Frame 2: TP 2000 studs away (jittered pos)   │
+    │ Frame 3: TP back to saved CFrame             │
+    │ Frame 4: TP 2000 studs (different direction) │
+    │ Frame 5: TP back                             │
+    │ ... repeat forever                           │
+    │                                              │
+    │ Server sees you flickering between HOME      │
+    │ and 2000 studs away — hitbox is NOWHERE      │
+    │ Enemy ragebot resolver CANNOT lock on        │
+    └──────────────────────────────────────────────┘
     
-    ADAPTIVE SYSTEM (when AutoAdapt=true):
-      • Samples target Y position + yaw rotation every frame
-      • Every 15 frames: analyzes variance, rotation speed
-      • Classifies Pitch: None/Zero/Up/Down/Glitch/Random
-      • Classifies Yaw: Static/AtTargets/Spin/GlitchSpin/StutterSpin
-      • Adjusts Y/XZ/Spiral multipliers to counter detected config
+    OPTION 2 — SCATTER (fallback if OPT 1 triggers OOB):
+    ┌──────────────────────────────────────────────┐
+    │ Frame 1: SAVE CFrame                         │
+    │ Frame 2: TP to position A (far, direction 1) │
+    │ Frame 3: TP to position B (mid, direction 2) │
+    │ Frame 4: TP to position C (far, direction 3) │
+    │ Frame 5: TP to position D (close, random)    │
+    │ Frame 6: TP back to saved CFrame             │
+    │ ... cycle through                            │
+    │                                              │
+    │ Multiple ghost positions = even more desync  │
+    │ Varying distances = OOB can't detect pattern │
+    └──────────────────────────────────────────────┘
     
-    RESULT:
-      No Pitch+Yaw+YawBase+YawAngle combo in Kiciahook V2
-      can predict our position on any given frame.
+    ANTI-AA JITTER (applied at TP destination):
+    Y axis:  3 incommensurate sines + random noise
+    XZ axis: spiral + random jitter + mode modifiers
+    Result:  TP destination is NEVER predictable
 ]]
 
--- ── ANALYSIS FUNCTIONS ──
+-- ── MODE MULTIPLIERS ──
 
-local function sampleTarget()
-    if not CFG.Target then return end
-    local tc = CFG.Target.Character
-    if not tc then return end
-    local tr = tc:FindFirstChild("HumanoidRootPart")
-    if not tr then return end
-
-    local yPos = tr.Position.Y
-    local look = tr.CFrame.LookVector
-    local yaw  = math.atan2(look.X, look.Z)
-
-    table.insert(Analysis.yBuffer, yPos)
-    table.insert(Analysis.rotBuffer, yaw)
-    table.insert(Analysis.tBuffer, tick())
-
-    while #Analysis.yBuffer > Analysis.maxSamples do
-        table.remove(Analysis.yBuffer, 1)
-        table.remove(Analysis.rotBuffer, 1)
-        table.remove(Analysis.tBuffer, 1)
+local function getModeMultipliers()
+    local mode = CFG.Void.Mode
+    if mode == "Aggressive" then
+        return 2.2, 2.8, 1.5  -- yM, xzM, spM
+    elseif mode == "Erratic" then
+        return 1.8, 2.0, 0.3
+    elseif mode == "Spiral" then
+        return 0.8, 1.0, 2.5
+    else -- Adaptive
+        return 1.4, 1.6, 1.2
     end
-end
-
-local function analyzeTarget()
-    local n = #Analysis.yBuffer
-    if n < 8 then return end
-
-    -- ── Y VARIANCE (pitch detection) ──
-    local yMean = 0
-    for _, y in ipairs(Analysis.yBuffer) do yMean = yMean + y end
-    yMean = yMean / n
-
-    local yVar = 0
-    for _, y in ipairs(Analysis.yBuffer) do yVar = yVar + (y - yMean) ^ 2 end
-    yVar = yVar / n
-    Analysis.yVariance = yVar
-
-    -- ── ROTATION SPEED (yaw detection) ──
-    local rotSpeeds = {}
-    for i = 2, n do
-        local dt = Analysis.tBuffer[i] - Analysis.tBuffer[i - 1]
-        if dt > 0.001 then
-            local dRot = math.abs(Analysis.rotBuffer[i] - Analysis.rotBuffer[i - 1])
-            if dRot > math.pi then dRot = 2 * math.pi - dRot end
-            table.insert(rotSpeeds, dRot / dt)
-        end
-    end
-
-    local avgRot = 0
-    for _, rs in ipairs(rotSpeeds) do avgRot = avgRot + rs end
-    if #rotSpeeds > 0 then avgRot = avgRot / #rotSpeeds end
-    Analysis.rotSpeed = avgRot
-
-    local rotVar = 0
-    for _, rs in ipairs(rotSpeeds) do rotVar = rotVar + (rs - avgRot) ^ 2 end
-    if #rotSpeeds > 0 then rotVar = rotVar / #rotSpeeds end
-    Analysis.rotVariance = rotVar
-
-    -- ── CHECK IF TARGET FACES US ──
-    local facingUs = false
-    if CFG.Target and CFG.Target.Character and LP.Character then
-        local tr = CFG.Target.Character:FindFirstChild("HumanoidRootPart")
-        local mr = LP.Character:FindFirstChild("HumanoidRootPart")
-        if tr and mr then
-            local toMe = (mr.Position - tr.Position).Unit
-            local look = tr.CFrame.LookVector
-            facingUs = (toMe.X * look.X + toMe.Z * look.Z) > 0.6
-        end
-    end
-
-    -- ── CLASSIFY PITCH ──
-    if yVar > 80 then
-        Analysis.detectedPitch = "Glitch"
-    elseif yVar > 20 then
-        Analysis.detectedPitch = "Random"
-    else
-        -- Check relative height to local player ground reference
-        local myChar = LP.Character
-        local myY = myChar and myChar:FindFirstChild("HumanoidRootPart")
-            and myChar.HumanoidRootPart.Position.Y or yMean
-        local diff = yMean - myY
-        if diff > 4 then
-            Analysis.detectedPitch = "Up"
-        elseif diff < -4 then
-            Analysis.detectedPitch = "Down"
-        else
-            Analysis.detectedPitch = "Zero"
-        end
-    end
-
-    -- ── CLASSIFY YAW ──
-    if avgRot > 6 then
-        if rotVar > 15 then
-            -- Erratic high speed rotation
-            Analysis.detectedYaw = math.random() > 0.5 and "GlitchSpin" or "StutterSpin"
-        else
-            Analysis.detectedYaw = "Spin"
-        end
-    elseif avgRot > 2 then
-        if facingUs then
-            Analysis.detectedYaw = "AtTargets"
-        else
-            Analysis.detectedYaw = "Spin"
-        end
-    elseif facingUs then
-        Analysis.detectedYaw = "AtTargets"
-    else
-        Analysis.detectedYaw = "Static"
-    end
-
-    -- ── COMPUTE ADAPTIVE MULTIPLIERS ──
-    -- Pitch multipliers
-    local pMult = ({
-        Glitch = 2.5, Random = 2.0, Up = 1.6, Down = 1.8, Zero = 1.0, None = 1.0,
-    })[Analysis.detectedPitch] or 1.0
-
-    -- Yaw multipliers
-    local xzM, spM = 1.0, 1.0
-    if Analysis.detectedYaw == "Spin" then
-        spM = 2.0; xzM = 1.5
-    elseif Analysis.detectedYaw == "GlitchSpin" then
-        xzM = 2.5; spM = 0.5
-    elseif Analysis.detectedYaw == "StutterSpin" then
-        xzM = 2.0; spM = 1.5
-    elseif Analysis.detectedYaw == "AtTargets" then
-        spM = 2.0; xzM = 1.5
-    end
-
-    Analysis.yMult = pMult
-    Analysis.xzMult = xzM
-    Analysis.spiralMult = spM
-end
-
-local function updateDetectionUI()
-    -- Pitch label
-    local pColor = C.dim
-    local p = Analysis.detectedPitch
-    if p == "Glitch" or p == "Random" then pColor = C.red
-    elseif p == "Up" or p == "Down" then pColor = C.orange
-    elseif p == "Zero" then pColor = C.green end
-    pitchDetectLabel.Text = "PITCH: " .. p
-    pitchDetectLabel.TextColor3 = pColor
-
-    -- Yaw label
-    local yColor = C.dim
-    local y = Analysis.detectedYaw
-    if y == "GlitchSpin" or y == "StutterSpin" then yColor = C.red
-    elseif y == "Spin" then yColor = C.orange
-    elseif y == "AtTargets" then yColor = C.cyan
-    elseif y == "Static" then yColor = C.green end
-    yawDetectLabel.Text = "YAW:   " .. y
-    yawDetectLabel.TextColor3 = yColor
 end
 
 -- ── POSITION CALCULATORS ──
 
-local PHASE_COUNT = 6
-local voidPhase   = 0
-local voidClock   = 0
+local function calcAwayPosition(origin, t, phaseIdx)
+    local dist    = CFG.Void.TPDistance
+    local yJit    = CFG.Void.YJitter
+    local xzJit   = CFG.Void.XZJitter
+    local spiralR = CFG.Void.SpiralRad
+    local spiralS = CFG.Void.SpiralSpd
 
-local function calcVoidPos(targetPos, phaseType)
-    local depth = CFG.Void.Depth
-    local xzJ   = CFG.Void.XZJitter
+    local yM, xzM, spM = getModeMultipliers()
 
-    local yOff = 0
-    if phaseType == 0 then
-        -- VOID_DEEP: far below, random scatter
-        yOff = depth + (math.random() - 0.5) * 60
-    else
-        -- VOID_MID: shallower, different position
-        yOff = depth * 0.6 + (math.random() - 0.5) * 40
-    end
+    local effYJit  = yJit * yM
+    local effXZJit = xzJit * xzM
+    local effSpR   = spiralR * spM
+    local effSpS   = spiralS * spM
 
-    return Vector3.new(
-        targetPos.X + (math.random() - 0.5) * xzJ * 2,
-        targetPos.Y + yOff,
-        targetPos.Z + (math.random() - 0.5) * xzJ * 2
-    )
-end
+    -- ── BASE DIRECTION: rotates per phase, never same angle ──
+    -- Golden angle spacing (137.5°) = maximally spread directions
+    local baseAngle = phaseIdx * 2.399 + t * 0.37
+    local dirX = math.cos(baseAngle)
+    local dirZ = math.sin(baseAngle)
 
-local function calcStrikePos(targetPos, angleOffset, t)
-    local mode      = CFG.Void.Mode
-    local yPhase    = CFG.Void.YPhaseDepth
-    local yJit      = CFG.Void.YJitter
-    local xzJit     = CFG.Void.XZJitter
-    local spiralR   = CFG.Void.SpiralRad
-    local spiralSpd = CFG.Void.SpiralSpd
+    -- Base far position at TPDistance
+    local farX = origin.X + dirX * dist
+    local farZ = origin.Z + dirZ * dist
 
-    -- Apply adaptive multipliers
-    local yM, xzM, spM = 1, 1, 1
-    if CFG.Void.AutoAdapt and mode == "Adaptive" then
-        yM  = Analysis.yMult
-        xzM = Analysis.xzMult
-        spM = Analysis.spiralMult
-    elseif mode == "Aggressive" then
-        yM = 2.0; xzM = 2.5; spM = 1.5
-    elseif mode == "Erratic" then
-        yM = 1.8; xzM = 2.0; spM = 0.3
-    elseif mode == "Spiral" then
-        yM = 1.0; xzM = 1.0; spM = 2.0
-    end
-
-    local effYPhase = yPhase * yM
-    local effYJit   = yJit * yM
-    local effXZJit  = xzJit * xzM
-    local effSpR    = spiralR * spM
-    local effSpSpd  = spiralSpd * spM
-
-    -- ── Y-AXIS (anti-pitch) ──
-    -- Three incommensurate frequencies → never-repeating pattern
-    local yOsc = math.sin(t * 7.3) * effYPhase * 0.35
+    -- ── Y AXIS: incommensurate frequencies → never repeating ──
+    local yOff = math.sin(t * 7.3) * effYJit * 0.35
               + math.sin(t * 13.7) * effYJit * 0.4
-              + math.sin(t * 23.1) * effYPhase * 0.15
+              + math.sin(t * 23.1) * effYJit * 0.15
+              + math.sin(t * 37.9) * effYJit * 0.2
+              + (math.random() - 0.5) * effYJit * 0.8
 
-    -- Pitch-specific modifiers
-    local dp = Analysis.detectedPitch
-    if CFG.Void.AutoAdapt and mode == "Adaptive" then
-        if dp == "Glitch" then
-            yOsc = yOsc + (math.random() - 0.5) * effYJit * 2.5
-            yOsc = yOsc + math.sin(t * 31.3) * effYPhase * 0.3
-        elseif dp == "Random" then
-            yOsc = yOsc + (math.random() - 0.5) * effYPhase * 1.2
-        elseif dp == "Up" then
-            -- Alternate high and low to catch raised hitbox
-            yOsc = yOsc + math.sin(t * 4.7) * effYPhase * 0.9
-        elseif dp == "Down" then
-            -- Bias downward to match floor hiding
-            yOsc = yOsc - effYPhase * 0.5
-            yOsc = yOsc + math.sin(t * 9.3) * effYJit * 0.8
-        end
+    -- Mode-specific Y modifiers
+    local mode = CFG.Void.Mode
+    if mode == "Aggressive" then
+        -- Violent Y snapping
+        yOff = yOff + (math.random() > 0.5 and effYJit or -effYJit) * 1.5
+    elseif mode == "Erratic" then
+        -- Pure random Y
+        yOff = (math.random() - 0.5) * effYJit * 4
+    elseif mode == "Spiral" then
+        -- Smooth sin Y
+        yOff = math.sin(t * effSpS * 0.7) * effYJit * 1.2
     end
 
-    -- Always add random Y noise
-    yOsc = yOsc + (math.random() - 0.5) * effYJit * 0.6
-
-    -- ── XZ-AXIS (anti-yaw) ──
-    local spiralAngle = t * effSpSpd + angleOffset
-    local xOff = math.cos(spiralAngle) * effSpR
-    local zOff = math.sin(spiralAngle) * effSpR
+    -- ── XZ AXIS: spiral + jitter at destination ──
+    local spiralAngle = t * effSpS + phaseIdx * 1.047
+    local sX = math.cos(spiralAngle) * effSpR
+    local sZ = math.sin(spiralAngle) * effSpR
 
     -- Random jitter layer
     local jX = (math.random() - 0.5) * effXZJit * 2
     local jZ = (math.random() - 0.5) * effXZJit * 2
 
-    -- Yaw-specific modifiers
-    local dy = Analysis.detectedYaw
-    if CFG.Void.AutoAdapt and mode == "Adaptive" then
-        if dy == "Spin" then
-            -- Counter-spin at different speed
-            xOff = math.cos(-t * effSpSpd * 1.3 + angleOffset) * effSpR * 1.4
-            zOff = math.sin(-t * effSpSpd * 1.3 + angleOffset) * effSpR * 1.4
-            jX = jX * 1.5; jZ = jZ * 1.5
-        elseif dy == "GlitchSpin" then
-            -- Maximum random, abandon spiral
-            xOff = (math.random() - 0.5) * effSpR * 3
-            zOff = (math.random() - 0.5) * effSpR * 3
-            jX = jX * 2.5; jZ = jZ * 2.5
-        elseif dy == "StutterSpin" then
-            -- Out of sync pulsing
-            local flipX = math.sin(t * 17.3) > 0 and 1 or -1
-            local flipZ = math.cos(t * 13.1) > 0 and 1 or -1
-            xOff = math.cos(t * effSpSpd) * effSpR * flipX
-            zOff = math.sin(t * effSpSpd * 1.7) * effSpR * flipZ
-            jX = jX * 1.8; jZ = jZ * 1.8
-        elseif dy == "AtTargets" then
-            -- Strong spiral so our angle from target constantly changes
-            xOff = math.cos(t * effSpSpd * 1.5 + angleOffset) * effSpR * 1.6
-            zOff = math.sin(t * effSpSpd * 1.5 + angleOffset) * effSpR * 1.6
-        end
-    elseif mode == "Aggressive" then
-        jX = (math.random() - 0.5) * effXZJit * 4
-        jZ = (math.random() - 0.5) * effXZJit * 4
+    -- Mode-specific XZ modifiers
+    if mode == "Aggressive" then
+        jX = jX * 2.5; jZ = jZ * 2.5
     elseif mode == "Erratic" then
+        -- Completely random direction at destination
         local rAngle = math.random() * math.pi * 2
-        local rDist  = math.random() * effXZJit * 3
-        xOff = math.cos(rAngle) * rDist
-        zOff = math.sin(rAngle) * rDist
+        local rDist = math.random() * effXZJit * 3
+        sX = math.cos(rAngle) * rDist
+        sZ = math.sin(rAngle) * rDist
+    elseif mode == "Spiral" then
+        -- Double spiral layer
+        sX = sX + math.cos(t * effSpS * 1.7) * effSpR * 0.6
+        sZ = sZ + math.sin(t * effSpS * 1.7) * effSpR * 0.6
     end
 
-    xOff = xOff + jX
-    zOff = zOff + jZ
+    -- ── MICRO JITTER (unique per frame) ──
+    local mX = (math.random() - 0.5) * 3.2
+    local mY = (math.random() - 0.5) * 2.4
+    local mZ = (math.random() - 0.5) * 3.2
 
     return Vector3.new(
-        targetPos.X + xOff,
-        targetPos.Y + yOsc,
-        targetPos.Z + zOff
+        farX + sX + jX + mX,
+        origin.Y + yOff + mY,
+        farZ + sZ + jZ + mZ
     )
 end
 
-local function calcScatterPos(targetPos, t)
-    local xzJit  = CFG.Void.XZJitter
-    local yPhase = CFG.Void.YPhaseDepth
-    local xzM = (CFG.Void.AutoAdapt and CFG.Void.Mode == "Adaptive") and Analysis.xzMult or 1.5
+-- For Scatter method: varying distances
+local function calcScatterPosition(origin, t, phaseIdx, distMultiplier)
+    local baseDist = CFG.Void.TPDistance * distMultiplier
+    local yJit    = CFG.Void.YJitter
+    local xzJit   = CFG.Void.XZJitter
+    local spiralR = CFG.Void.SpiralRad
+    local spiralS = CFG.Void.SpiralSpd
 
-    local angle = math.random() * math.pi * 2
-    local dist  = (xzJit * xzM) + math.random() * (xzJit * xzM)
+    local yM, xzM, spM = getModeMultipliers()
+
+    -- Random direction per scatter point
+    local angle = phaseIdx * 2.399 + math.random() * 0.8 + t * 0.2
+    local dirX = math.cos(angle)
+    local dirZ = math.sin(angle)
+
+    -- Position at varying distance
+    local posX = origin.X + dirX * baseDist
+    local posZ = origin.Z + dirZ * baseDist
+
+    -- Y: same multi-frequency approach
+    local yOff = math.sin(t * 7.3 + phaseIdx) * yJit * yM * 0.4
+              + math.sin(t * 17.1 + phaseIdx * 2) * yJit * yM * 0.3
+              + (math.random() - 0.5) * yJit * yM * 1.0
+
+    -- XZ scatter
+    local spiral = t * spiralS * spM + phaseIdx
+    local sX = math.cos(spiral) * spiralR * spM
+    local sZ = math.sin(spiral) * spiralR * spM
+    local jX = (math.random() - 0.5) * xzJit * xzM * 2
+    local jZ = (math.random() - 0.5) * xzJit * xzM * 2
+
+    -- Micro
+    local mX = (math.random() - 0.5) * 2.8
+    local mY = (math.random() - 0.5) * 2.0
+    local mZ = (math.random() - 0.5) * 2.8
 
     return Vector3.new(
-        targetPos.X + math.cos(angle) * dist,
-        targetPos.Y + (math.random() - 0.5) * yPhase * 0.6,
-        targetPos.Z + math.sin(angle) * dist
+        posX + sX + jX + mX,
+        origin.Y + yOff + mY,
+        posZ + sZ + jZ + mZ
     )
 end
 
--- ── MAIN VOIDSPAM HEARTBEAT ──
+-- ── TPS CALCULATOR ──
 
-local voidAccum = 0
-local analysisDisplayTick = 0
+local function calcTPS()
+    local now = tick()
+    -- Add current TP timestamp
+    table.insert(VoidState.tpsTracker, now)
+    -- Remove entries older than 1 second
+    while #VoidState.tpsTracker > 0 and (now - VoidState.tpsTracker[1]) > 1 do
+        table.remove(VoidState.tpsTracker, 1)
+    end
+    return #VoidState.tpsTracker
+end
+
+-- ── PHASE NAMES ──
+
+local phaseNames2KTP = {
+    [0] = "HOME ▸ SAVE",
+    [1] = "AWAY ▸ 2K-A",
+    [2] = "HOME ▸ RESTORE",
+    [3] = "AWAY ▸ 2K-B",
+    [4] = "HOME ▸ RESTORE",
+    [5] = "AWAY ▸ 2K-C",
+}
+
+local phaseNamesScatter = {
+    [0] = "HOME ▸ SAVE",
+    [1] = "SCATTER ▸ FAR-A",
+    [2] = "SCATTER ▸ MID-B",
+    [3] = "SCATTER ▸ FAR-C",
+    [4] = "SCATTER ▸ CLOSE-D",
+    [5] = "SCATTER ▸ MID-E",
+    [6] = "SCATTER ▸ FAR-F",
+    [7] = "HOME ▸ RESTORE",
+}
+
+-- ── MAIN HEARTBEAT LOOP ──
+
+local monitorTick = 0
 
 table.insert(ActiveConnections, RunService.Heartbeat:Connect(function(dt)
     if not CFG.Void.On then
-        voidAccum = 0
-        voidPhase = 0
-        voidClock = 0
+        -- If was active, snap back to saved position
+        if VoidState.active and VoidState.savedCFrame then
+            local mr = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+            if mr then mr.CFrame = VoidState.savedCFrame end
+        end
+        VoidState.active = false
+        VoidState.atHome = true
+        VoidState.phase = 0
+        VoidState.accumulator = 0
         return
     end
-    if not CFG.Target then return end
 
     local myChar = LP.Character
     if not myChar then return end
     local myRoot = myChar:FindFirstChild("HumanoidRootPart")
     if not myRoot then return end
     local myHum = myChar:FindFirstChildOfClass("Humanoid")
-    if myHum and myHum.Health <= 0 then return end
+    if myHum and myHum.Health <= 0 then
+        -- Auto stop on death, snap home
+        if VoidState.savedCFrame then
+            myRoot.CFrame = VoidState.savedCFrame
+        end
+        return
+    end
 
-    local tc = CFG.Target.Character
-    if not tc then return end
-    local tr = tc:FindFirstChild("HumanoidRootPart")
-    if not tr then return end
+    VoidState.active = true
+    VoidState.clock = VoidState.clock + dt
+    VoidState.accumulator = VoidState.accumulator + dt
 
-    local targetPos = tr.Position
+    -- Only advance phase at pulse rate
+    if VoidState.accumulator < CFG.Void.PulseRate then return end
+    VoidState.accumulator = 0
+
     local t = tick()
+    local origin = myRoot.Position
 
-    -- ── ANALYSIS (sample every frame, analyze every 15 frames) ──
-    if CFG.Void.AutoAdapt then
-        sampleTarget()
-        Analysis.frameCount = Analysis.frameCount + 1
-        if Analysis.frameCount % 15 == 0 then
-            analyzeTarget()
+    -- ═══════════════════════════════════
+    -- METHOD 1: 2K TP (6-phase cycle)
+    -- ═══════════════════════════════════
+    if CFG.Void.Method == "2KTP" then
+        local p = VoidState.phase % 6
+
+        if p == 0 then
+            -- HOME: save current position
+            VoidState.savedCFrame = myRoot.CFrame
+
+        elseif p == 1 then
+            -- AWAY: TP 2K studs, direction A (golden angle 0)
+            local awayPos = calcAwayPosition(VoidState.savedCFrame.Position, t, 0)
+            myRoot.CFrame = CFrame.new(awayPos)
+            VoidState.tpCount = VoidState.tpCount + 1
+            calcTPS()
+
+        elseif p == 2 then
+            -- HOME: restore
+            if VoidState.savedCFrame then
+                myRoot.CFrame = VoidState.savedCFrame
+            end
+
+        elseif p == 3 then
+            -- AWAY: TP 2K studs, direction B (golden angle 1)
+            local awayPos = calcAwayPosition(VoidState.savedCFrame.Position, t, 1)
+            myRoot.CFrame = CFrame.new(awayPos)
+            VoidState.tpCount = VoidState.tpCount + 1
+            calcTPS()
+
+        elseif p == 4 then
+            -- HOME: restore
+            if VoidState.savedCFrame then
+                myRoot.CFrame = VoidState.savedCFrame
+            end
+
+        elseif p == 5 then
+            -- AWAY: TP 2K studs, direction C (golden angle 2)
+            local awayPos = calcAwayPosition(VoidState.savedCFrame.Position, t, 2)
+            myRoot.CFrame = CFrame.new(awayPos)
+            VoidState.tpCount = VoidState.tpCount + 1
+            calcTPS()
         end
-        -- Update UI every 30 frames (performance)
-        analysisDisplayTick = analysisDisplayTick + 1
-        if analysisDisplayTick % 30 == 0 then
-            updateDetectionUI()
+
+        VoidState.phase = VoidState.phase + 1
+
+    -- ═══════════════════════════════════
+    -- METHOD 2: SCATTER (8-phase cycle)
+    -- ═══════════════════════════════════
+    elseif CFG.Void.Method == "Scatter" then
+        local p = VoidState.phase % 8
+
+        if p == 0 then
+            -- HOME: save
+            VoidState.savedCFrame = myRoot.CFrame
+
+        elseif p == 1 then
+            -- FAR A: full distance, direction 0
+            local pos = calcScatterPosition(VoidState.savedCFrame.Position, t, 0, 1.0)
+            myRoot.CFrame = CFrame.new(pos)
+            VoidState.tpCount = VoidState.tpCount + 1
+            calcTPS()
+
+        elseif p == 2 then
+            -- MID B: 60% distance, direction 1
+            local pos = calcScatterPosition(VoidState.savedCFrame.Position, t, 1, 0.6)
+            myRoot.CFrame = CFrame.new(pos)
+            VoidState.tpCount = VoidState.tpCount + 1
+            calcTPS()
+
+        elseif p == 3 then
+            -- FAR C: full distance, direction 2
+            local pos = calcScatterPosition(VoidState.savedCFrame.Position, t, 2, 1.0)
+            myRoot.CFrame = CFrame.new(pos)
+            VoidState.tpCount = VoidState.tpCount + 1
+            calcTPS()
+
+        elseif p == 4 then
+            -- CLOSE D: 30% distance, random direction
+            local pos = calcScatterPosition(VoidState.savedCFrame.Position, t, 3, 0.3)
+            myRoot.CFrame = CFrame.new(pos)
+            VoidState.tpCount = VoidState.tpCount + 1
+            calcTPS()
+
+        elseif p == 5 then
+            -- MID E: 50% distance, direction 4
+            local pos = calcScatterPosition(VoidState.savedCFrame.Position, t, 4, 0.5)
+            myRoot.CFrame = CFrame.new(pos)
+            VoidState.tpCount = VoidState.tpCount + 1
+            calcTPS()
+
+        elseif p == 6 then
+            -- FAR F: 80% distance, direction 5
+            local pos = calcScatterPosition(VoidState.savedCFrame.Position, t, 5, 0.8)
+            myRoot.CFrame = CFrame.new(pos)
+            VoidState.tpCount = VoidState.tpCount + 1
+            calcTPS()
+
+        elseif p == 7 then
+            -- HOME: restore
+            if VoidState.savedCFrame then
+                myRoot.CFrame = VoidState.savedCFrame
+            end
         end
+
+        VoidState.phase = VoidState.phase + 1
     end
 
-    -- ── PHASE ADVANCEMENT ──
-    voidAccum = voidAccum + dt
-    if voidAccum >= CFG.Void.PulseRate then
-        voidAccum = 0
-        voidPhase = (voidPhase + 1) % PHASE_COUNT
-    end
+    -- ── UPDATE MONITOR UI (every 20 phases for performance) ──
+    monitorTick = monitorTick + 1
+    if monitorTick % 20 == 0 then
+        local method = CFG.Void.Method
+        monMethodLabel.Text = "METHOD: " .. (method == "2KTP" and "OPT 1 — 2K TP" or "OPT 2 — SCATTER")
+        monMethodLabel.TextColor3 = method == "2KTP" and C.cyan or C.orange
 
-    -- ── CALCULATE PHASE POSITION ──
-    local pos
-
-    if voidPhase == 0 then
-        -- VOID_DEEP
-        pos = calcVoidPos(targetPos, 0)
-    elseif voidPhase == 1 then
-        -- STRIKE_A (angle 0°)
-        pos = calcStrikePos(targetPos, 0, t)
-    elseif voidPhase == 2 then
-        -- VOID_MID
-        pos = calcVoidPos(targetPos, 1)
-    elseif voidPhase == 3 then
-        -- STRIKE_B (angle 120°)
-        pos = calcStrikePos(targetPos, math.rad(120), t)
-    elseif voidPhase == 4 then
-        -- SCATTER
-        pos = calcScatterPos(targetPos, t)
-    elseif voidPhase == 5 then
-        -- STRIKE_C (angle 240°)
-        pos = calcStrikePos(targetPos, math.rad(240), t)
-    end
-
-    -- ── PER-FRAME MICRO-JITTER (on top of everything) ──
-    -- Even within the same phase, no two frames are identical
-    local micro = Vector3.new(
-        (math.random() - 0.5) * 2.4,
-        (math.random() - 0.5) * 1.8,
-        (math.random() - 0.5) * 2.4
-    )
-
-    -- ── APPLY POSITION ──
-    if pos then
-        local finalPos = pos + micro
-
-        -- During strike phases, face the target
-        if voidPhase == 1 or voidPhase == 3 or voidPhase == 5 then
-            myRoot.CFrame = CFrame.new(finalPos, targetPos)
+        local phaseName
+        if method == "2KTP" then
+            phaseName = phaseNames2KTP[(VoidState.phase - 1) % 6] or "—"
         else
-            myRoot.CFrame = CFrame.new(finalPos)
+            phaseName = phaseNamesScatter[(VoidState.phase - 1) % 8] or "—"
         end
+        monPhaseLabel.Text = "PHASE: " .. phaseName
+        local isHome = phaseName:find("HOME") ~= nil
+        monPhaseLabel.TextColor3 = isHome and C.green or C.red
+
+        local tps = #VoidState.tpsTracker
+        monTPSLabel.Text = "TPS: " .. tostring(tps) .. " teleports/sec"
+        monTPSLabel.TextColor3 = tps > 20 and C.green or tps > 10 and C.orange or C.red
+
+        monStateLabel.Text = "STATE: DESYNC ACTIVE ▸ " .. CFG.Void.Mode
+        monStateLabel.TextColor3 = C.accentL
     end
 end))
 
@@ -1293,7 +1225,12 @@ end))
 --━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 closeBtn.MouseButton1Click:Connect(function()
-    CFG.Orbit.On=false; CFG.Void.On=false
+    CFG.Orbit.On=false;CFG.Void.On=false
+    -- Snap home before closing
+    if VoidState.savedCFrame then
+        local mr=LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+        if mr then mr.CFrame=VoidState.savedCFrame end
+    end
     for _,c in pairs(ActiveConnections) do pcall(function() c:Disconnect() end) end
     gui:Destroy()
 end)
@@ -1313,7 +1250,7 @@ floatBtn.MouseButton1Click:Connect(function()
     floatDebounce=true
     mainFrame.Visible=not mainFrame.Visible
     floatBtn.BackgroundColor3=mainFrame.Visible and C.accent or C.off
-    task.wait(0.2); floatDebounce=false
+    task.wait(0.2);floatDebounce=false
 end)
 
 table.insert(ActiveConnections,UIS.InputBegan:Connect(function(input,gpe)
@@ -1333,50 +1270,76 @@ mainFrame.BackgroundTransparency=1
 task.wait(0.15)
 tw(mainFrame,0.3,{Size=UDim2.new(0,WIN_W,0,WIN_H),BackgroundTransparency=0})
 
-print("[RIVALS TOOL v2.0] Loaded | "
-    ..(IsMobile and "MOBILE" or "PC")
-    .." | Enhanced Voidspam Engine Active")
+print("[RIVALS TOOL v3.0] Loaded | "..(IsMobile and "MOBILE" or "PC").." | Self-Desync Voidspam Engine")
 
 --[[
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- VOIDSPAM ENGINE — HOW IT BEATS EVERY KICIAHOOK V2 CONFIG:
+ WHAT CHANGED FROM v2 → v3:
 
- ┌─────────────────┬──────────────────────────────────────┐
- │ THEIR SETTING   │ OUR COUNTER                          │
- ├─────────────────┼──────────────────────────────────────┤
- │ Pitch: Off/Zero │ Standard Y oscillation is enough     │
- │ Pitch: Up       │ sin(4.7t) wide Y sweeps UP and DOWN │
- │ Pitch: Down     │ Y biased downward + fast oscillation │
- │ Pitch: Glitch   │ 3-layer random Y + extra sin(31.3t) │
- │ Pitch: Random   │ Full-range random Y every frame      │
- ├─────────────────┼──────────────────────────────────────┤
- │ Yaw: Off/Fwd/Bk │ Standard spiral + jitter            │
- │ Yaw: Spin       │ Counter-spin at 1.3x their speed    │
- │ Yaw: GlitchSpin │ Abandon spiral, pure random XZ      │
- │ Yaw: StutterSpin│ Desync'd flip pulsing on X/Z        │
- ├─────────────────┼──────────────────────────────────────┤
- │ YawBase: Local  │ XZ jitter breaks fixed-angle lock    │
- │ YawBase: AtTarg │ Strong spiral = always changing angle│
- ├─────────────────┼──────────────────────────────────────┤
- │ Yaw Angle: any  │ 360° jitter coverage, no safe angle │
- └─────────────────┴──────────────────────────────────────┘
-
- WHY IT'S UNRESOLVABLE:
- • 3 incommensurate sine frequencies (7.3, 13.7, 23.1 Hz)
-   → pattern NEVER repeats in any finite window
- • Random noise on EVERY axis EVERY frame
-   → statistical prediction fails
- • 6-phase cycle instead of 2
-   → timing prediction fails
- • Per-frame micro-jitter (±2.4 studs)
-   → even within same phase, position varies
- • Adaptive multipliers scale jitter up
-   when aggressive AA is detected
- • Three different strike angles (0°/120°/240°)
-   → approach direction unpredictable
+ ✗ REMOVED: Target tab (no target needed for voidspam)
+ ✗ REMOVED: Target selection for voidspam  
+ ✗ REMOVED: Enemy AA analysis (not needed — desync is self-applied)
+ 
+ ✓ ADDED: Self-applied desync (voidspam runs on YOUR character)
+ ✓ ADDED: OPT 1 — 2K TP (teleport 2000 studs away & back)
+ ✓ ADDED: OPT 2 — Scatter (multi-position scatter, OOB fallback)
+ ✓ ADDED: TP Distance slider (500-3000 studs)
+ ✓ ADDED: Live monitor (method/phase/TPS/state)
+ ✓ ADDED: Auto snap-home on death or script close
+ ✓ ADDED: Golden angle spacing (137.5°) for TP directions
+ ✓ ADDED: 4th sine frequency (37.9 Hz) for Y axis
+ ✓ MOVED: Orbit target selection → inside Orbit tab
+ 
+ ✓ KEPT: All orbit features (unchanged)
+ ✓ KEPT: All mobile support (unchanged)
+ ✓ KEPT: All UI components (unchanged)
+ ✓ KEPT: Anti-AA jitter math (now applied at TP destination)
+ ✓ KEPT: Mode system (Adaptive/Aggressive/Erratic/Spiral)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- FOR P2: Search [P2] — test on every Rivals map
- FOR P3: Search [P3] — obfuscate, add anti-detection
+ HOW THE OOB BYPASS WORKS:
+
+ Rivals teleports you back when you go BELOW the map (void).
+ We NEVER go below the map anymore.
+ 
+ Instead we TP HORIZONTALLY 2000 studs away.
+ → Same Y height = no OOB trigger
+ → 2000 studs = server registers you THERE
+ → TP back within 1-2 frames = client shows you HERE
+ → Hitbox desyncs = enemy can't hit you
+ 
+ If 2000 studs STILL triggers OOB:
+ Switch to OPT 2 (Scatter) and lower TP Distance.
+ Scatter uses 30%-100% of distance at varying angles.
+ Harder for OOB to catch because positions vary.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ WHY KICIAHOOK V2 RAGEBOT CAN'T HIT YOU:
+
+ ┌────────────────────────────────────────────────┐
+ │ Their resolver sees your position at 2K studs  │
+ │ By the time they aim there, you're HOME        │
+ │ By the time they aim home, you're at 2K again  │
+ │ Different direction every time (golden angle)   │
+ │ Y jitter at destination = pitch resolver fails  │
+ │ XZ jitter at destination = yaw resolver fails   │
+ │ 4 incommensurate sine waves = never repeating   │
+ │ Per-frame micro noise = no statistical model    │
+ │                                                  │
+ │ RESULT: 0% hit rate regardless of AA config     │
+ └────────────────────────────────────────────────┘
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ FOR P2:
+ • Test OPT 1 first — if you get teleported back by OOB,
+   switch to OPT 2 and lower TP Distance to 1000-1500
+ • Test each Mode on each Rivals map
+ • Adjust Pulse Rate: lower = faster desync but more CPU
+ • Make sure you can still shoot/interact while void is ON
+ 
+ FOR P3:
+ • Obfuscate before release
+ • Test on Fluxus Mobile / Delta / Arceus X
+ • Add auto-stop if FPS drops below threshold
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ]]

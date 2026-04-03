@@ -1,9 +1,9 @@
 --[[
-    RIVALS TOOL v9.4 — nfpw UI Edition
-    Kiciahook-style Legitbot + Triggerbot
-    Ragebot tab, FOV circle, Target Parts
-    Gun Tab with individual toggles
-    Watermark size control per device
+    RIVALS TOOL v9.5 — nfpw UI Edition
+    + ViewportSize Hook Silent Aim
+    + Anti-Cheat Bypass (AnalyticsPipelineController)
+    + Kiciahook-style Legitbot + Triggerbot
+    + Ragebot, Gun Tab, Watermark control
 ]]
 
 -- ═══════════════════════════════════════════
@@ -20,6 +20,23 @@ local HttpService       = game:GetService("HttpService")
 local LP       = Players.LocalPlayer
 local IsMobile = UIS.TouchEnabled and not UIS.KeyboardEnabled
 local camera   = workspace.CurrentCamera
+
+-- ═══════════════════════════════════════════
+-- ANTI-CHEAT BYPASS (runs silently on load)
+-- ═══════════════════════════════════════════
+pcall(function()
+    if not game:IsLoaded() then game.Loaded:Wait() end
+    for i, v in getgc() do
+        if typeof(v) == "function" then
+            local ok, src = pcall(function() return debug.info(v, "s") end)
+            if ok and src and string.find(src, "AnalyticsPipelineController") then
+                hookfunction(v, function()
+                    return task.wait(9e9)
+                end)
+            end
+        end
+    end
+end)
 
 -- ═══════════════════════════════════════════
 -- CAMERA CONTROLLER
@@ -88,6 +105,14 @@ local GunCFG = {
     NoRecoil=false, NoSpread=false, FastShoot=false,
 }
 
+-- ViewportSize hook silent aim config
+local SAHookCFG = {
+    On          = false,
+    Distance    = 1000,
+    VisCheck    = false,
+    TeamCheck   = true,
+}
+
 local CFG = {
     Orbit       = { On=false, Radius=12, Speed=2, Height=0 },
     OrbitTarget = nil,
@@ -108,7 +133,7 @@ local CFG = {
 local ActiveConnections = {}
 
 -- ═══════════════════════════════════════════
--- GUN PATCH (controlled by tab toggles)
+-- GUN PATCH
 -- ═══════════════════════════════════════════
 local gunOriginals = {}
 
@@ -117,12 +142,9 @@ local function patchGun()
         return require(ReplicatedStorage.Modules.ItemLibrary).Items
     end)
     if not ok or not Items then return end
-
     local exceptions = { Sniper=true, Crossbow=true, Bow=true, RPG=true }
-
     for name, data in pairs(Items) do
         if typeof(data) ~= "table" or exceptions[name] then continue end
-
         if not gunOriginals[name] then
             gunOriginals[name] = {
                 ShootSpread        = data.ShootSpread,
@@ -132,7 +154,6 @@ local function patchGun()
                 ShootBurstCooldown = data.ShootBurstCooldown,
             }
         end
-
         if GunCFG.NoSpread then
             if data.ShootSpread   then data.ShootSpread   = 0 end
             if data.ShootAccuracy then data.ShootAccuracy = 0 end
@@ -140,13 +161,11 @@ local function patchGun()
             if data.ShootSpread   then data.ShootSpread   = gunOriginals[name].ShootSpread   end
             if data.ShootAccuracy then data.ShootAccuracy = gunOriginals[name].ShootAccuracy end
         end
-
         if GunCFG.NoRecoil then
             if data.ShootRecoil then data.ShootRecoil = 0 end
         else
             if data.ShootRecoil then data.ShootRecoil = gunOriginals[name].ShootRecoil end
         end
-
         if GunCFG.FastShoot then
             if data.ShootCooldown      then data.ShootCooldown      = 0.05 end
             if data.ShootBurstCooldown then data.ShootBurstCooldown = 0.05 end
@@ -155,6 +174,103 @@ local function patchGun()
             if data.ShootBurstCooldown then data.ShootBurstCooldown = gunOriginals[name].ShootBurstCooldown end
         end
     end
+end
+
+-- ═══════════════════════════════════════════
+-- VIEWPORT HOOK SILENT AIM
+-- Uses hookmetamethod to intercept ViewportSize
+-- reads on the camera, redirecting shots to target
+-- ═══════════════════════════════════════════
+local saHookTarget    = nil
+local saHookConn      = nil
+local saHookApplied   = false
+local saHookIdx       = nil
+
+local function saHookByte(attr) return string.byte(attr or "\0") end
+
+local function saHookVisible(head, camPos)
+    if not SAHookCFG.VisCheck then return true end
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = {
+        LP.Character, head.Parent, workspace:FindFirstChild("Debris")
+    }
+    local dir    = head.Position - camPos
+    local result = workspace:Raycast(camPos, dir.Unit * SAHookCFG.Distance, params)
+    return result == nil or result.Instance:IsDescendantOf(head.Parent)
+end
+
+local function saHookValid(plr, camPos)
+    local char = plr.Character
+    if not char then return false end
+    local hum  = char:FindFirstChildOfClass("Humanoid")
+    local head = char:FindFirstChild("Head")
+    if not (hum and head and hum.Health > 0) then return false end
+    if (head.Position - camPos).Magnitude > SAHookCFG.Distance then return false end
+
+    -- EnvironmentID check (same map instance)
+    local myEnv    = LP:GetAttribute("EnvironmentID")
+    local theirEnv = plr:GetAttribute("EnvironmentID")
+    if myEnv and theirEnv and saHookByte(myEnv) ~= saHookByte(theirEnv) then return false end
+
+    -- TeamID check
+    if SAHookCFG.TeamCheck then
+        local myTeam    = LP:GetAttribute("TeamID")
+        local theirTeam = plr:GetAttribute("TeamID")
+        if myTeam and theirTeam and saHookByte(myTeam) == saHookByte(theirTeam) then return false end
+    end
+
+    return saHookVisible(head, camPos)
+end
+
+local function startSAHook()
+    -- Apply hook once (hookmetamethod persists across calls)
+    if not saHookApplied then
+        local ok = pcall(function()
+            saHookIdx = hookmetamethod(game, "__index", newcclosure(function(self, idx, ...)
+                if saHookTarget
+                    and not checkcaller()
+                    and idx == "ViewportSize"
+                    and self == workspace.CurrentCamera
+                then
+                    local pos, on = workspace.CurrentCamera:WorldToViewportPoint(saHookTarget)
+                    if on then
+                        return Vector2.new(pos.X * 2, pos.Y * 2)
+                    end
+                end
+                return saHookIdx(self, idx, ...)
+            end))
+        end)
+        if ok then saHookApplied = true end
+    end
+
+    -- Target-finding heartbeat loop
+    if saHookConn then saHookConn:Disconnect() end
+    saHookConn = RunService.Heartbeat:Connect(function()
+        if not SAHookCFG.On then saHookTarget = nil; return end
+        local cam      = workspace.CurrentCamera
+        local camPos   = cam.CFrame.Position
+        local center   = cam.ViewportSize / 2
+        local best, bd = nil, math.huge
+
+        for _, plr in Players:GetPlayers() do
+            if plr ~= LP and saHookValid(plr, camPos) then
+                local pos, on = cam:WorldToViewportPoint(plr.Character.Head.Position)
+                if on then
+                    local d = (Vector2.new(pos.X, pos.Y) - center).Magnitude
+                    if d < bd then bd = d; best = plr end
+                end
+            end
+        end
+        saHookTarget = best and best.Character.Head.Position or nil
+    end)
+end
+
+local function stopSAHook()
+    SAHookCFG.On = false
+    saHookTarget  = nil
+    if saHookConn then saHookConn:Disconnect(); saHookConn = nil end
+    -- Hook stays registered but saHookTarget = nil so it returns normally
 end
 
 -- ═══════════════════════════════════════════
@@ -223,7 +339,7 @@ gui_config = {
 -- ═══════════════════════════════════════════
 local library     = loadstring(game:HttpGet("https://raw.githubusercontent.com/nfpw/XXSCRIPT/refs/heads/main/Library/Module.lua"))()
 local window      = library:CreateWindow(gui_config, gethui())
-local window_name = library:SetWindowName("Rivals Tool v9.4")
+local window_name = library:SetWindowName("Rivals Tool v9.5")
 
 -- ═══════════════════════════════════════════
 -- TABS
@@ -386,36 +502,29 @@ local function getTriggerTarget()
     local fl = {}
     if LP.Character then table.insert(fl, LP.Character) end
     params.FilterDescendantsInstances = fl
-
     local hit = workspace:Raycast(origin, direction, params)
     if not hit or not hit.Instance then return nil end
-
     local hitChar, inst = nil, hit.Instance
     while inst do
         if inst:FindFirstChildOfClass("Humanoid") then hitChar = inst; break end
         inst = inst.Parent
     end
     if not hitChar then return nil end
-
     local hum = hitChar:FindFirstChildOfClass("Humanoid")
     if not hum or hum.Health <= 0 then return nil end
-
     local tp = Players:GetPlayerFromCharacter(hitChar)
     if not tp or tp == LP then return nil end
     if TrigCFG.TeamCheck and isSameTeamRivals(tp) then return nil end
-
     local validNames = TARGET_PARTS[TrigCFG.TargetPart] or {"Head","UpperTorso","LowerTorso"}
     local partMatch  = false
     for _, pn in ipairs(validNames) do
         if hit.Instance.Name == pn then partMatch = true; break end
     end
     if not partMatch then return nil end
-
     if TrigCFG.VisibleCheck then
         local checkPart = hitChar:FindFirstChild("Head") or hit.Instance
         if not isAimbotVisible(checkPart) then return nil end
     end
-
     return hitChar
 end
 
@@ -760,20 +869,16 @@ local function applyMaterial()
     end
 end
 
--- ═══════════════════════════════════════════════════════════
--- ██╗   ██╗██╗    ████████╗ █████╗ ██████╗ ███████╗
--- ██║   ██║██║    ╚══██╔══╝██╔══██╗██╔══██╗██╔════╝
--- ██║   ██║██║       ██║   ███████║██████╔╝███████╗
--- ██║   ██║██║       ██║   ██╔══██║██╔══██╗╚════██║
--- ╚██████╔╝██║       ██║   ██║  ██║██████╔╝███████║
---  ╚═════╝ ╚═╝       ╚═╝   ╚═╝  ╚═╝╚═════╝ ╚══════╝
--- ═══════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════
+-- UI SECTIONS
+-- ═══════════════════════════════════════════════════════
 
 -- ═══════════════════════════════════════════
 -- UI: TAB 1 — LEGITBOT
 -- ═══════════════════════════════════════════
-local s_lb_main = tabs.legitbot:CreateSection("Main Settings")
-local s_lb_fov  = tabs.legitbot:CreateSection("FOV Settings")
+local s_lb_main  = tabs.legitbot:CreateSection("Main Settings")
+local s_lb_fov   = tabs.legitbot:CreateSection("FOV Settings")
+local s_lb_sahook= tabs.legitbot:CreateSection("Silent Aim (Hook Method)")
 
 s_lb_main:CreateLabel("CameraController: "..(CameraController and "Connected ✓" or "Not Found ✗"))
 s_lb_main:CreateToggle("Enabled", false, function(v)
@@ -801,6 +906,22 @@ s_lb_fov:CreateToggle("Draw FOV", false, function(v)
 end)
 s_lb_fov:CreateToggle("Dynamic FOV", false, function(v) AimbotCFG.DynamicFOV = v end)
 
+-- Silent Aim Hook section inside Legitbot
+s_lb_sahook:CreateLabel("Hooks ViewportSize — redirects your shots to target")
+s_lb_sahook:CreateLabel("Requires hookmetamethod executor support")
+s_lb_sahook:CreateLabel("Hook Status: "..(hookmetamethod and "Supported ✓" or "NOT SUPPORTED ✗"))
+s_lb_sahook:CreateToggle("Enable Silent Aim (Hook)", false, function(v)
+    SAHookCFG.On = v
+    if v then startSAHook() else stopSAHook() end
+end)
+s_lb_sahook:CreateSlider("Max Distance (studs)", 100, 2000, 1000, true, function(v)
+    SAHookCFG.Distance = v
+end)
+s_lb_sahook:CreateToggle("Team Check", true, function(v) SAHookCFG.TeamCheck = v end)
+s_lb_sahook:CreateToggle("Visible Check", false, function(v) SAHookCFG.VisCheck = v end)
+s_lb_sahook:CreateLabel("Visible OFF = hits through walls")
+s_lb_sahook:CreateLabel("Visible ON = only hits on clear line of sight")
+
 -- ═══════════════════════════════════════════
 -- UI: TAB 2 — RAGEBOT
 -- ═══════════════════════════════════════════
@@ -810,7 +931,7 @@ local s_rb_filter = tabs.ragebot:CreateSection("Filters")
 
 local saModsOk = util_mod and enums_mod and fighter_mod
 s_rb_status:CreateLabel("Modules: "..(saModsOk and "Loaded ✓" or "FAILED ✗"))
-s_rb_status:CreateLabel("Method: Remote Manipulation (server-side)")
+s_rb_status:CreateLabel("Method: Fires UseItem remote directly to server")
 
 s_rb_main:CreateToggle("Enabled", false, function(v)
     silentActive = v
@@ -963,7 +1084,6 @@ local spoofStatusLabel = s_sp_main:CreateLabel("Spoofed: None")
 s_sp_main:CreateDropdown("Select Device", {"VR","Touch","Gamepad","MouseKeyboard"}, function(v)
     CFG.Spoofer.Device = v
 end, "VR", false)
-
 s_sp_main:CreateButton("⚡ Spoof Now", function()
     if CFG.Spoofer.Device == "None" then return end
     spoofStatusLabel:UpdateText("Spoofing → "..CFG.Spoofer.Device.."...")
@@ -977,7 +1097,6 @@ s_sp_main:CreateButton("Reset Spoof", function()
     pcall(function() SetControlsRemote:FireServer("MouseKeyboard") end)
     CFG.Spoofer.Device = "None"; spoofStatusLabel:UpdateText("Spoofed: None")
 end)
-
 s_sp_auto:CreateToggle("Auto Re-Spoof Loop", false, function(v)
     CFG.Spoofer.AutoSpoof = v
     if v and CFG.Spoofer.Device ~= "None" then startAutoSpoof() else stopAutoSpoof() end
@@ -1052,7 +1171,6 @@ s_sk_skin:CreateTextBox("Type Skin Name Exactly", "e.g. AK-47", false, function(
         end
     end
 end)
-
 s_sk_skin:CreateButton("List All Skins (Console F9)", function()
     if not selectedWeapon then window:Notify("Error","Select a weapon first",3); return end
     local skins = weaponSkins[selectedWeapon]
@@ -1061,7 +1179,6 @@ s_sk_skin:CreateButton("List All Skins (Console F9)", function()
     for _, sk in ipairs(skins) do print(sk) end
     window:Notify("Check Console", "All skins printed (F9)", 5)
 end)
-
 s_sk_skin:CreateButton("Reset This Weapon Skin", function()
     if not selectedWeapon then return end
     applyViewmodelSkin(selectedWeapon, nil)
@@ -1132,7 +1249,6 @@ end)
 local s_gun_main = tabs.gun:CreateSection("Gun Modifiers")
 s_gun_main:CreateLabel("Applies to all guns except Sniper, Bow, RPG, Crossbow")
 s_gun_main:CreateLabel("Toggle off to restore original values instantly")
-
 s_gun_main:CreateToggle("No Recoil", false, function(v)
     GunCFG.NoRecoil = v; patchGun()
 end)
@@ -1154,14 +1270,15 @@ end)
 -- UI: TAB 14 — SETTINGS
 -- ═══════════════════════════════════════════
 local s_set_main = tabs.settings:CreateSection("General")
-local s_set_act  = tabs.settings:CreateSection("Quick Actions")
 local s_set_wm   = tabs.settings:CreateSection("Watermark")
+local s_set_act  = tabs.settings:CreateSection("Quick Actions")
 
 s_set_main:CreateLabel("Device: "..(IsMobile and "MOBILE" or "PC")..(screenSize and (" ("..screenSize..")") or ""))
+s_set_main:CreateLabel("Anti-Cheat Bypass: Applied on load ✓")
 s_set_main:CreateLabel("Toggle UI: Insert key (PC) | library button (Mobile)")
 s_set_main:CreateDropdown("Change Font", stored_fonts, function(v) window:SetFont(v) end, "", false)
 
--- Watermark config
+-- Watermark config (size default by device)
 local WatermarkCFG = {
     Size       = screenSize == "phone" and 10 or (screenSize == "tablet" and 12 or 14),
     ShowTime   = true,
@@ -1169,20 +1286,20 @@ local WatermarkCFG = {
 }
 
 s_set_wm:CreateLabel(
-    screenSize == "phone"   and "Device: Phone — default size 10" or
-    screenSize == "tablet"  and "Device: Tablet — default size 12" or
+    screenSize == "phone"  and "Device: Phone — default size 10"   or
+    screenSize == "tablet" and "Device: Tablet — default size 12"  or
     "Device: PC — default size 14"
 )
 s_set_wm:CreateToggle("Show Time", true, function(v) WatermarkCFG.ShowTime = v end)
 s_set_wm:CreateToggle("Show Active Features", true, function(v) WatermarkCFG.ShowActive = v end)
 s_set_wm:CreateSlider("Text Size", 8, 24,
     screenSize == "phone" and 10 or (screenSize == "tablet" and 12 or 14),
-    true, function(v)
-    WatermarkCFG.Size = v
-end)
+    true, function(v) WatermarkCFG.Size = v end
+)
 
 s_set_act:CreateButton("⛔ Stop All Features", function()
     AimbotCFG.On = false; lockedTarget = nil; lockTimer = 0
+    SAHookCFG.On = false; stopSAHook()
     silentActive = false; stopSilentAim()
     TrigCFG.On = false; TrigState.waiting=false; TrigState.timer=0; TrigState.grace=0
     CFG.Orbit.On = false
@@ -1196,7 +1313,7 @@ s_set_act:CreateButton("⛔ Stop All Features", function()
     CFG.Sky.On = false; removeSky()
     CFG.Crosshair.On = false; crosshairImg.ImageTransparency = 1; UIS.MouseIconEnabled = true
     CFG.WeaponStatus.On = false; removeWeaponStatus()
-    GunCFG.NoRecoil = false; GunCFG.NoSpread = false; GunCFG.FastShoot = false; patchGun()
+    GunCFG.NoRecoil=false; GunCFG.NoSpread=false; GunCFG.FastShoot=false; patchGun()
     if fovCircle then fovCircle.Visible = false end
     window:Notify("Stopped", "All features disabled", 3)
 end)
@@ -1204,12 +1321,12 @@ end)
 local config_manager = loadstring(game:HttpGet("https://raw.githubusercontent.com/nfpw/XXSCRIPT/refs/heads/main/Library/ConfigManager.lua"))()
 config_manager:SetLibrary(library)
 config_manager:SetWindow(window)
-config_manager:SetFolder("RivalsTool_v94")
+config_manager:SetFolder("RivalsTool_v95")
 config_manager:BuildConfigSection(tabs.settings)
 config_manager:LoadAutoloadConfig()
 
 -- ═══════════════════════════════════════════
--- CORE: DESYNC (bind before render)
+-- CORE: DESYNC
 -- ═══════════════════════════════════════════
 RunService:BindToRenderStep("RivalsDesync", Enum.RenderPriority.Camera.Value - 1, function()
     if not Desync.active or not Desync.realCFrame then return end
@@ -1242,7 +1359,6 @@ table.insert(ActiveConnections, RunService.RenderStepped:Connect(function(dt)
             reactionTimer = reactionTimer - dt
             if reactionTimer <= 0 then isInReaction = false end
         end
-
         if not isInReaction then
             local tp = getAimbotTarget()
             if tp ~= lockedTarget then
@@ -1313,20 +1429,19 @@ table.insert(ActiveConnections, RunService.RenderStepped:Connect(function(dt)
     end
 
     -- ═══ WATERMARK ═══
-    local parts = {"Rivals Tool v9.4"}
+    local parts = {"Rivals Tool v9.5"}
     if WatermarkCFG.ShowTime then
         table.insert(parts, os.date("%H:%M:%S"))
     end
     if WatermarkCFG.ShowActive then
         local active = {}
-        if AimbotCFG.On  then table.insert(active, "AIM")   end
-        if silentActive   then table.insert(active, "RAGE")  end
-        if TrigCFG.On     then table.insert(active, "TRIG")  end
-        if CFG.Void.On    then table.insert(active, "VOID")  end
-        if CFG.Orbit.On   then table.insert(active, "ORBIT") end
-        if GunCFG.NoRecoil or GunCFG.NoSpread or GunCFG.FastShoot then
-            table.insert(active, "GUN")
-        end
+        if AimbotCFG.On                                     then table.insert(active, "AIM")   end
+        if SAHookCFG.On                                     then table.insert(active, "HOOK")  end
+        if silentActive                                     then table.insert(active, "RAGE")  end
+        if TrigCFG.On                                       then table.insert(active, "TRIG")  end
+        if CFG.Void.On                                      then table.insert(active, "VOID")  end
+        if CFG.Orbit.On                                     then table.insert(active, "ORBIT") end
+        if GunCFG.NoRecoil or GunCFG.NoSpread or GunCFG.FastShoot then table.insert(active, "GUN") end
         if #active > 0 then
             table.insert(parts, "["..table.concat(active, " ").."]")
         end
@@ -1392,10 +1507,8 @@ table.insert(ActiveConnections, RunService.Heartbeat:Connect(function(dt)
         if Desync.realCFrame then humanoidRootPart.CFrame = Desync.realCFrame end
         Desync.active=false; Desync.phase="idle"; Desync.currentDepth=0; return
     end
-
     Desync.realCFrame = humanoidRootPart.CFrame
     Desync.phaseTimer = Desync.phaseTimer + dt
-
     if Desync.phase == "hide" then
         Desync.currentDepth = math.min(Desync.currentDepth + CFG.Void.StepSpeed, CFG.Void.VoidDepth)
         if Desync.phaseTimer >= CFG.Void.HideTime then
@@ -1420,7 +1533,6 @@ table.insert(ActiveConnections, RunService.Heartbeat:Connect(function(dt)
             Desync.phase="hide"; Desync.phaseTimer=0; Desync.totalCycles=Desync.totalCycles+1
         end
     end
-
     if Desync.currentDepth > 0 then
         local rp  = Desync.realCFrame.Position
         local rot = Desync.realCFrame - rp
@@ -1438,5 +1550,5 @@ end))
 -- ═══════════════════════════════════════════
 -- NOTIFY ON LOAD
 -- ═══════════════════════════════════════════
-window:Notify("Rivals Tool v9.4", "Loaded | Gun Tab added | Insert = toggle UI", 5)
-print("[RIVALS TOOL v9.4] "..(IsMobile and "MOBILE" or "PC")..(screenSize and " | "..screenSize or ""))
+window:Notify("Rivals Tool v9.5", "AC Bypass applied | Hook SA in Legitbot tab | Insert = UI", 6)
+print("[RIVALS TOOL v9.5] "..(IsMobile and "MOBILE" or "PC")..(screenSize and " | "..screenSize or ""))

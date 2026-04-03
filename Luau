@@ -1,8 +1,9 @@
 --[[
-    RIVALS TOOL v9.3 — nfpw UI Edition
+    RIVALS TOOL v9.4 — nfpw UI Edition
     Kiciahook-style Legitbot + Triggerbot
     Ragebot tab, FOV circle, Target Parts
-    Gun: No Recoil / No Spread on load
+    Gun Tab with individual toggles
+    Watermark size control per device
 ]]
 
 -- ═══════════════════════════════════════════
@@ -61,58 +62,44 @@ local Desync = {
 }
 
 LP.CharacterAdded:Connect(function(nc)
-    character      = nc
+    character        = nc
     humanoidRootPart = nc:WaitForChild("HumanoidRootPart")
-    humanoid       = nc:WaitForChild("Humanoid")
-    Desync.active  = false; Desync.realCFrame = nil
+    humanoid         = nc:WaitForChild("Humanoid")
+    Desync.active    = false; Desync.realCFrame = nil
     Desync.currentDepth = 0; Desync.phase = "idle"
 end)
 
 -- ═══════════════════════════════════════════
 -- CONFIGS
 -- ═══════════════════════════════════════════
--- Kiciahook-style aimbot config
 local AimbotCFG = {
-    On            = false,
-    Speed         = 1.9,
-    SpeedInAttack = 1.0,
-    SpeedScaleFOV = 70,
-    MaxLockTime   = 3,
-    ReactionTime  = 100,
-    TeamCheck     = false,
-    VisibleCheck  = false,
-    TargetPart    = "Head",
-    MaxFOV        = 150,
-    DrawFOV       = false,
-    DynamicFOV    = false,
+    On=false, Speed=1.9, SpeedInAttack=1.0, SpeedScaleFOV=70,
+    MaxLockTime=3, ReactionTime=100, TeamCheck=false, VisibleCheck=false,
+    TargetPart="Head", MaxFOV=150, DrawFOV=false, DynamicFOV=false,
 }
 
--- Kiciahook-style triggerbot config
 local TrigCFG = {
-    On          = false,
-    Delay       = 100,
-    Grace       = 100,
-    RandomDelay = false,
-    MinDelay    = 50,
-    MaxDelay    = 300,
-    VisibleCheck= false,
-    TargetPart  = "Head, Body",
-    TeamCheck   = false,
+    On=false, Delay=100, Grace=100, RandomDelay=false,
+    MinDelay=50, MaxDelay=300, VisibleCheck=false,
+    TargetPart="Head, Body", TeamCheck=false,
 }
 
--- General config (all other features)
+local GunCFG = {
+    NoRecoil=false, NoSpread=false, FastShoot=false,
+}
+
 local CFG = {
-    Orbit   = { On=false, Radius=12, Speed=2, Height=0 },
+    Orbit       = { On=false, Radius=12, Speed=2, Height=0 },
     OrbitTarget = nil,
-    Void    = {
+    Void        = {
         On=false, HideTime=0.3, AttackTime=0.15, ShootAttempt=1,
         AutoFire=false, VoidDepth=200, StepSpeed=30,
         ProjectileMimic=false, DetectionRange=80,
     },
-    Emote   = { On=false, AnimID="", Speed=1, Loop=true },
-    Spoofer = { On=false, Device="None", AutoSpoof=false, Interval=5 },
-    Collect = { Health=true, Ammo=true },
-    Sky     = { On=false },
+    Emote       = { On=false, AnimID="", Speed=1, Loop=true },
+    Spoofer     = { On=false, Device="None", AutoSpoof=false, Interval=5 },
+    Collect     = { Health=true, Ammo=true },
+    Sky         = { On=false },
     Resolution  = 0.65,
     Crosshair   = { On=false, Size=24, Image="rbxassetid://97119437608195" },
     WeaponStatus= { On=false },
@@ -121,21 +108,54 @@ local CFG = {
 local ActiveConnections = {}
 
 -- ═══════════════════════════════════════════
--- GUN: NO RECOIL / NO SPREAD (runs silently)
+-- GUN PATCH (controlled by tab toggles)
 -- ═══════════════════════════════════════════
-pcall(function()
-    local Items = require(ReplicatedStorage.Modules.ItemLibrary).Items
+local gunOriginals = {}
+
+local function patchGun()
+    local ok, Items = pcall(function()
+        return require(ReplicatedStorage.Modules.ItemLibrary).Items
+    end)
+    if not ok or not Items then return end
+
     local exceptions = { Sniper=true, Crossbow=true, Bow=true, RPG=true }
+
     for name, data in pairs(Items) do
-        if typeof(data) == "table" and not exceptions[name] then
-            if data.ShootSpread      then data.ShootSpread      = 0    end
-            if data.ShootAccuracy    then data.ShootAccuracy    = 0    end
-            if data.ShootRecoil      then data.ShootRecoil      = 0    end
-            if data.ShootCooldown    then data.ShootCooldown    = 0.05 end
+        if typeof(data) ~= "table" or exceptions[name] then continue end
+
+        if not gunOriginals[name] then
+            gunOriginals[name] = {
+                ShootSpread        = data.ShootSpread,
+                ShootAccuracy      = data.ShootAccuracy,
+                ShootRecoil        = data.ShootRecoil,
+                ShootCooldown      = data.ShootCooldown,
+                ShootBurstCooldown = data.ShootBurstCooldown,
+            }
+        end
+
+        if GunCFG.NoSpread then
+            if data.ShootSpread   then data.ShootSpread   = 0 end
+            if data.ShootAccuracy then data.ShootAccuracy = 0 end
+        else
+            if data.ShootSpread   then data.ShootSpread   = gunOriginals[name].ShootSpread   end
+            if data.ShootAccuracy then data.ShootAccuracy = gunOriginals[name].ShootAccuracy end
+        end
+
+        if GunCFG.NoRecoil then
+            if data.ShootRecoil then data.ShootRecoil = 0 end
+        else
+            if data.ShootRecoil then data.ShootRecoil = gunOriginals[name].ShootRecoil end
+        end
+
+        if GunCFG.FastShoot then
+            if data.ShootCooldown      then data.ShootCooldown      = 0.05 end
             if data.ShootBurstCooldown then data.ShootBurstCooldown = 0.05 end
+        else
+            if data.ShootCooldown      then data.ShootCooldown      = gunOriginals[name].ShootCooldown      end
+            if data.ShootBurstCooldown then data.ShootBurstCooldown = gunOriginals[name].ShootBurstCooldown end
         end
     end
-end)
+end
 
 -- ═══════════════════════════════════════════
 -- MOBILE SCREEN SIZE PROMPT
@@ -181,21 +201,21 @@ if IsMobile then
     note.BackgroundTransparency = 1; note.Text = "Adjusts UI size for your screen"
     note.TextColor3 = Color3.fromRGB(110,110,130); note.Font = Enum.Font.Gotham; note.TextSize = 10
 
-    phoneBtn.MouseButton1Click:Connect(function() screenSize = "phone"; promptDone = true end)
+    phoneBtn.MouseButton1Click:Connect(function() screenSize = "phone";  promptDone = true end)
     tabletBtn.MouseButton1Click:Connect(function() screenSize = "tablet"; promptDone = true end)
     while not promptDone do task.wait(0.1) end
     sizeGui:Destroy()
 end
 
 gui_config = {
-    Color        = Color3.fromRGB(120,80,255),
-    Keybind      = Enum.KeyCode.Insert,
-    MinHeight    = 100,
-    MaxHeight    = screenSize == "phone" and 480 or 700,
-    InitialHeight= screenSize == "phone" and 360 or 520,
-    MinWidth     = screenSize == "phone" and 260 or 300,
-    MaxWidth     = screenSize == "phone" and 420 or 800,
-    InitialWidth = screenSize == "phone" and 300 or 560,
+    Color         = Color3.fromRGB(120,80,255),
+    Keybind       = Enum.KeyCode.Insert,
+    MinHeight     = 100,
+    MaxHeight     = screenSize == "phone" and 480 or 700,
+    InitialHeight = screenSize == "phone" and 360 or 520,
+    MinWidth      = screenSize == "phone" and 260 or 300,
+    MaxWidth      = screenSize == "phone" and 420 or 800,
+    InitialWidth  = screenSize == "phone" and 300 or 560,
 }
 
 -- ═══════════════════════════════════════════
@@ -203,14 +223,14 @@ gui_config = {
 -- ═══════════════════════════════════════════
 local library     = loadstring(game:HttpGet("https://raw.githubusercontent.com/nfpw/XXSCRIPT/refs/heads/main/Library/Module.lua"))()
 local window      = library:CreateWindow(gui_config, gethui())
-local window_name = library:SetWindowName("Rivals Tool v9.3")
+local window_name = library:SetWindowName("Rivals Tool v9.4")
 
 -- ═══════════════════════════════════════════
 -- TABS
 -- ═══════════════════════════════════════════
 local tabs = {
     legitbot     = window:CreateTab("Legitbot"),
-    ragebot      = window:CreateTab("Ragebot"),       -- was Silent Aim
+    ragebot      = window:CreateTab("Ragebot"),
     trigger      = window:CreateTab("Triggerbot"),
     rage         = window:CreateTab("Rage"),
     emotes       = window:CreateTab("Emotes"),
@@ -221,6 +241,7 @@ local tabs = {
     crosshair    = window:CreateTab("Crosshair"),
     resolution   = window:CreateTab("Resolution"),
     weaponstatus = window:CreateTab("Wep Status"),
+    gun          = window:CreateTab("Gun"),
     settings     = window:CreateTab("Settings"),
 }
 
@@ -248,7 +269,6 @@ local function simClick()
     end)
 end
 
--- Rivals TeamID attribute check (most reliable)
 local function isSameTeamRivals(p)
     local same = false
     pcall(function()
@@ -266,7 +286,6 @@ local function isSameTeamRivals(p)
     return same
 end
 
--- Raycast visibility check
 local function isAimbotVisible(part)
     if not part then return false end
     local ok, r = pcall(function()
@@ -283,7 +302,6 @@ local function isAimbotVisible(part)
     return ok and r or false
 end
 
--- Target part resolver
 local TARGET_PARTS = {
     ["Head"]       = {"Head"},
     ["Body"]       = {"UpperTorso","LowerTorso","HumanoidRootPart"},
@@ -307,7 +325,7 @@ local function getEffectiveFOV()
 end
 
 -- ═══════════════════════════════════════════
--- FOV CIRCLE (drawing)
+-- FOV CIRCLE
 -- ═══════════════════════════════════════════
 local fovCircle = nil
 pcall(function()
@@ -321,12 +339,12 @@ pcall(function()
 end)
 
 -- ═══════════════════════════════════════════
--- AIMBOT LOGIC (Kiciahook style)
+-- AIMBOT LOGIC
 -- ═══════════════════════════════════════════
-local lockTimer      = 0
-local lockedTarget   = nil
-local reactionTimer  = 0
-local isInReaction   = false
+local lockTimer    = 0
+local lockedTarget = nil
+local reactionTimer= 0
+local isInReaction = false
 
 local function getAimbotTarget()
     local c  = getScreenCenter()
@@ -349,7 +367,7 @@ local function getAimbotTarget()
 end
 
 -- ═══════════════════════════════════════════
--- TRIGGERBOT LOGIC (Kiciahook style)
+-- TRIGGERBOT LOGIC
 -- ═══════════════════════════════════════════
 local TrigState = { waiting=false, timer=0, grace=0 }
 
@@ -386,7 +404,6 @@ local function getTriggerTarget()
     if not tp or tp == LP then return nil end
     if TrigCFG.TeamCheck and isSameTeamRivals(tp) then return nil end
 
-    -- Check hit part matches targeting setting
     local validNames = TARGET_PARTS[TrigCFG.TargetPart] or {"Head","UpperTorso","LowerTorso"}
     local partMatch  = false
     for _, pn in ipairs(validNames) do
@@ -403,7 +420,7 @@ local function getTriggerTarget()
 end
 
 -- ═══════════════════════════════════════════
--- RIVALS RAGEBOT (Remote Silent Aim)
+-- RAGEBOT (Remote Silent Aim)
 -- ═══════════════════════════════════════════
 local rs_sa      = cloneref(game:GetService("ReplicatedStorage"))
 local players_sa = cloneref(game:GetService("Players"))
@@ -431,7 +448,7 @@ local sa_offsets = {
 }
 
 local function sa_getClosest()
-    if not LP.Character or not LP.Character:FindFirstChild("HumanoidRootPart") then return nil,nil end
+    if not LP.Character or not LP.Character:FindFirstChild("HumanoidRootPart") then return nil, nil end
     local target, tchar, dist = nil, nil, silentFOV
     for _, v in next, players_sa:GetPlayers() do
         if v == LP then continue end
@@ -577,11 +594,13 @@ end
 -- ═══════════════════════════════════════════
 local function checkProjectiles()
     if not CFG.Void.ProjectileMimic or not Desync.realCFrame then return false end
-    local myPos = Desync.realCFrame.Position
+    local myPos  = Desync.realCFrame.Position
     local params = OverlapParams.new()
     params.FilterType = Enum.RaycastFilterType.Exclude
     params.FilterDescendantsInstances = {character}
-    local ok, parts = pcall(function() return workspace:GetPartBoundsInRadius(myPos, CFG.Void.DetectionRange, params) end)
+    local ok, parts = pcall(function()
+        return workspace:GetPartBoundsInRadius(myPos, CFG.Void.DetectionRange, params)
+    end)
     if not ok or not parts then return false end
     for _, part in ipairs(parts) do
         if not part:IsDescendantOf(character) then
@@ -624,7 +643,8 @@ local function applySky()
     customSky.SkyboxFt = "rbxassetid://159454293"; customSky.SkyboxLf = "rbxassetid://159454286"
     customSky.SkyboxRt = "rbxassetid://159454288"; customSky.SkyboxUp = "rbxassetid://159454300"
     customSky.SunAngularSize = 0; customSky.MoonAngularSize = 0
-    Lighting.Ambient = Color3.fromRGB(150,150,150); Lighting.OutdoorAmbient = Color3.fromRGB(100,100,100)
+    Lighting.Ambient = Color3.fromRGB(150,150,150)
+    Lighting.OutdoorAmbient = Color3.fromRGB(100,100,100)
 end
 local function removeSky() if customSky then customSky:Destroy(); customSky = nil end end
 
@@ -647,7 +667,9 @@ local function applyWeaponStatus()
         background.BackgroundColor3 = Color3.fromRGB(100,0,200)
         if stroke then stroke.Color = Color3.fromRGB(170,0,255); stroke.Thickness = 2 end
         local parent = background.Parent
-        if parent and parent:FindFirstChild("Icon") then parent.Icon.Picture.ImageTransparency = 0.1 end
+        if parent and parent:FindFirstChild("Icon") then
+            parent.Icon.Picture.ImageTransparency = 0.1
+        end
         return oldWeaponFunc(self, background, stroke, "Banned")
     end
     weaponStatusApplied = true
@@ -668,7 +690,10 @@ end
 -- SKIN CHANGER
 -- ═══════════════════════════════════════════
 local al         = LP.PlayerScripts.Assets.ViewModels
-local skinConfig = { ActiveSkins={}, CurrentMaterial="SmoothPlastic", MaterialEnabled=false, Transparency=0 }
+local skinConfig = {
+    ActiveSkins={}, CurrentMaterial="SmoothPlastic",
+    MaterialEnabled=false, Transparency=0,
+}
 
 local weaponSkins = {
     ["Assault Rifle"]={"AK-47","AUG","Tommy Gun","Phoenix Rifle","Boneclaw Rifle","10B Visits","AKEY-47","Gingerbread AUG","Glorious Assault Rifle"},
@@ -735,20 +760,28 @@ local function applyMaterial()
     end
 end
 
+-- ═══════════════════════════════════════════════════════════
+-- ██╗   ██╗██╗    ████████╗ █████╗ ██████╗ ███████╗
+-- ██║   ██║██║    ╚══██╔══╝██╔══██╗██╔══██╗██╔════╝
+-- ██║   ██║██║       ██║   ███████║██████╔╝███████╗
+-- ██║   ██║██║       ██║   ██╔══██║██╔══██╗╚════██║
+-- ╚██████╔╝██║       ██║   ██║  ██║██████╔╝███████║
+--  ╚═════╝ ╚═╝       ╚═╝   ╚═╝  ╚═╝╚═════╝ ╚══════╝
+-- ═══════════════════════════════════════════════════════════
+
 -- ═══════════════════════════════════════════
--- UI: TAB 1 — LEGITBOT (Kiciahook style)
+-- UI: TAB 1 — LEGITBOT
 -- ═══════════════════════════════════════════
 local s_lb_main = tabs.legitbot:CreateSection("Main Settings")
 local s_lb_fov  = tabs.legitbot:CreateSection("FOV Settings")
 
-s_lb_main:CreateLabel("CameraController: " .. (CameraController and "Connected ✓" or "Not Found ✗"))
-s_lb_main:CreateLabel("No Recoil/Spread: Applied on load ✓")
+s_lb_main:CreateLabel("CameraController: "..(CameraController and "Connected ✓" or "Not Found ✗"))
 s_lb_main:CreateToggle("Enabled", false, function(v)
     AimbotCFG.On = v
     if not v then lockedTarget = nil; lockTimer = 0 end
 end)
-s_lb_main:CreateSlider("Speed", 1, 50, 19, false, function(v) AimbotCFG.Speed = v / 10 end)
-s_lb_main:CreateSlider("Speed (in attack)", 1, 50, 10, false, function(v) AimbotCFG.SpeedInAttack = v / 10 end)
+s_lb_main:CreateSlider("Speed", 1, 50, 19, false, function(v) AimbotCFG.Speed = v/10 end)
+s_lb_main:CreateSlider("Speed (in attack)", 1, 50, 10, false, function(v) AimbotCFG.SpeedInAttack = v/10 end)
 s_lb_main:CreateSlider("Speed scale - FOV", 0, 100, 70, true, function(v) AimbotCFG.SpeedScaleFOV = v end)
 s_lb_main:CreateSlider("Maximum lock-on time", 1, 10, 3, true, function(v) AimbotCFG.MaxLockTime = v end)
 s_lb_main:CreateSlider("Reaction time (ms)", 0, 500, 100, true, function(v) AimbotCFG.ReactionTime = v end)
@@ -769,14 +802,14 @@ end)
 s_lb_fov:CreateToggle("Dynamic FOV", false, function(v) AimbotCFG.DynamicFOV = v end)
 
 -- ═══════════════════════════════════════════
--- UI: TAB 2 — RAGEBOT (Remote Silent Aim)
+-- UI: TAB 2 — RAGEBOT
 -- ═══════════════════════════════════════════
 local s_rb_status = tabs.ragebot:CreateSection("Status")
 local s_rb_main   = tabs.ragebot:CreateSection("Ragebot")
 local s_rb_filter = tabs.ragebot:CreateSection("Filters")
 
 local saModsOk = util_mod and enums_mod and fighter_mod
-s_rb_status:CreateLabel("Modules: " .. (saModsOk and "Loaded ✓" or "FAILED ✗"))
+s_rb_status:CreateLabel("Modules: "..(saModsOk and "Loaded ✓" or "FAILED ✗"))
 s_rb_status:CreateLabel("Method: Remote Manipulation (server-side)")
 
 s_rb_main:CreateToggle("Enabled", false, function(v)
@@ -784,7 +817,6 @@ s_rb_main:CreateToggle("Enabled", false, function(v)
     if v then startSilentAim() else stopSilentAim() end
 end)
 s_rb_main:CreateSlider("Field Of View", 0, 360, 360, true, function(v)
-    -- Map 0-360 degrees to stud distance
     silentFOV = v == 0 and 0.001 or (v / 360) * 999
 end)
 
@@ -795,7 +827,7 @@ s_rb_filter:CreateLabel("Visible OFF = fires through walls")
 s_rb_filter:CreateLabel("Visible ON = only fires on clear shot")
 
 -- ═══════════════════════════════════════════
--- UI: TAB 3 — TRIGGERBOT (Kiciahook style)
+-- UI: TAB 3 — TRIGGERBOT
 -- ═══════════════════════════════════════════
 local s_tb_main = tabs.trigger:CreateSection("Main")
 local s_tb_adv  = tabs.trigger:CreateSection("Advanced")
@@ -803,7 +835,7 @@ local s_tb_tgt  = tabs.trigger:CreateSection("Targeting")
 
 s_tb_main:CreateToggle("Enabled", false, function(v)
     TrigCFG.On = v
-    TrigState.waiting = false; TrigState.timer = 0; TrigState.grace = 0
+    TrigState.waiting=false; TrigState.timer=0; TrigState.grace=0
 end)
 s_tb_main:CreateSlider("Delay (ms)", 0, 500, 100, true, function(v) TrigCFG.Delay = v end)
 s_tb_main:CreateSlider("Grace (ms)", 0, 500, 100, true, function(v) TrigCFG.Grace = v end)
@@ -841,9 +873,9 @@ s_rage_info:CreateToggle("Enable Voidspam", false, function(st)
     else
         Desync.active=false; Desync.phase="idle"
         if Desync.realCFrame and humanoidRootPart and humanoidRootPart.Parent then
-            humanoidRootPart.CFrame=Desync.realCFrame
+            humanoidRootPart.CFrame = Desync.realCFrame
         end
-        Desync.currentDepth=0
+        Desync.currentDepth = 0
     end
 end)
 
@@ -901,7 +933,9 @@ end)
 
 s_em_settings:CreateSlider("Speed", 1, 50, 10, false, function(v)
     CFG.Emote.Speed = v/10
-    if EmoteState.currentTrack then pcall(function() EmoteState.currentTrack:AdjustSpeed(CFG.Emote.Speed) end) end
+    if EmoteState.currentTrack then
+        pcall(function() EmoteState.currentTrack:AdjustSpeed(CFG.Emote.Speed) end)
+    end
 end)
 s_em_settings:CreateToggle("Loop Animation", true, function(v) CFG.Emote.Loop = v end)
 
@@ -1064,7 +1098,7 @@ end)
 -- ═══════════════════════════════════════════
 -- UI: TAB 11 — SCREEN RESOLUTION
 -- ═══════════════════════════════════════════
-local s_res_main      = tabs.resolution:CreateSection("Screen Resolution")
+local s_res_main       = tabs.resolution:CreateSection("Screen Resolution")
 local resolutionActive = false
 local resConn          = nil
 s_res_main:CreateLabel("Scales render resolution. Lower = better performance.")
@@ -1093,14 +1127,59 @@ s_ws_main:CreateToggle("Enable Weapon Status", false, function(v)
 end)
 
 -- ═══════════════════════════════════════════
--- UI: TAB 13 — SETTINGS
+-- UI: TAB 13 — GUN
+-- ═══════════════════════════════════════════
+local s_gun_main = tabs.gun:CreateSection("Gun Modifiers")
+s_gun_main:CreateLabel("Applies to all guns except Sniper, Bow, RPG, Crossbow")
+s_gun_main:CreateLabel("Toggle off to restore original values instantly")
+
+s_gun_main:CreateToggle("No Recoil", false, function(v)
+    GunCFG.NoRecoil = v; patchGun()
+end)
+s_gun_main:CreateToggle("No Spread", false, function(v)
+    GunCFG.NoSpread = v; patchGun()
+end)
+s_gun_main:CreateToggle("Fast Shoot (0.05s cooldown)", false, function(v)
+    GunCFG.FastShoot = v; patchGun()
+end)
+s_gun_main:CreateButton("Apply Now", function()
+    patchGun(); window:Notify("Gun", "Patch applied", 2)
+end)
+s_gun_main:CreateButton("Restore All Original Values", function()
+    GunCFG.NoRecoil = false; GunCFG.NoSpread = false; GunCFG.FastShoot = false
+    patchGun(); window:Notify("Gun", "All gun values restored", 3)
+end)
+
+-- ═══════════════════════════════════════════
+-- UI: TAB 14 — SETTINGS
 -- ═══════════════════════════════════════════
 local s_set_main = tabs.settings:CreateSection("General")
 local s_set_act  = tabs.settings:CreateSection("Quick Actions")
+local s_set_wm   = tabs.settings:CreateSection("Watermark")
 
 s_set_main:CreateLabel("Device: "..(IsMobile and "MOBILE" or "PC")..(screenSize and (" ("..screenSize..")") or ""))
 s_set_main:CreateLabel("Toggle UI: Insert key (PC) | library button (Mobile)")
 s_set_main:CreateDropdown("Change Font", stored_fonts, function(v) window:SetFont(v) end, "", false)
+
+-- Watermark config
+local WatermarkCFG = {
+    Size       = screenSize == "phone" and 10 or (screenSize == "tablet" and 12 or 14),
+    ShowTime   = true,
+    ShowActive = true,
+}
+
+s_set_wm:CreateLabel(
+    screenSize == "phone"   and "Device: Phone — default size 10" or
+    screenSize == "tablet"  and "Device: Tablet — default size 12" or
+    "Device: PC — default size 14"
+)
+s_set_wm:CreateToggle("Show Time", true, function(v) WatermarkCFG.ShowTime = v end)
+s_set_wm:CreateToggle("Show Active Features", true, function(v) WatermarkCFG.ShowActive = v end)
+s_set_wm:CreateSlider("Text Size", 8, 24,
+    screenSize == "phone" and 10 or (screenSize == "tablet" and 12 or 14),
+    true, function(v)
+    WatermarkCFG.Size = v
+end)
 
 s_set_act:CreateButton("⛔ Stop All Features", function()
     AimbotCFG.On = false; lockedTarget = nil; lockTimer = 0
@@ -1117,6 +1196,7 @@ s_set_act:CreateButton("⛔ Stop All Features", function()
     CFG.Sky.On = false; removeSky()
     CFG.Crosshair.On = false; crosshairImg.ImageTransparency = 1; UIS.MouseIconEnabled = true
     CFG.WeaponStatus.On = false; removeWeaponStatus()
+    GunCFG.NoRecoil = false; GunCFG.NoSpread = false; GunCFG.FastShoot = false; patchGun()
     if fovCircle then fovCircle.Visible = false end
     window:Notify("Stopped", "All features disabled", 3)
 end)
@@ -1124,7 +1204,7 @@ end)
 local config_manager = loadstring(game:HttpGet("https://raw.githubusercontent.com/nfpw/XXSCRIPT/refs/heads/main/Library/ConfigManager.lua"))()
 config_manager:SetLibrary(library)
 config_manager:SetWindow(window)
-config_manager:SetFolder("RivalsTool_v93")
+config_manager:SetFolder("RivalsTool_v94")
 config_manager:BuildConfigSection(tabs.settings)
 config_manager:LoadAutoloadConfig()
 
@@ -1138,8 +1218,10 @@ RunService:BindToRenderStep("RivalsDesync", Enum.RenderPriority.Camera.Value - 1
 end)
 
 -- ═══════════════════════════════════════════
--- CORE RENDER STEP (Aimbot + Triggerbot + Crosshair + FOV)
+-- CORE RENDER STEP
 -- ═══════════════════════════════════════════
+local watermark = library:Hud()
+
 table.insert(ActiveConnections, RunService.RenderStepped:Connect(function(dt)
     camera = workspace.CurrentCamera
     local center = getScreenCenter()
@@ -1156,7 +1238,6 @@ table.insert(ActiveConnections, RunService.RenderStepped:Connect(function(dt)
 
     -- ═══ AIMBOT ═══
     if AimbotCFG.On and CameraController then
-        -- Reaction time gate
         if isInReaction then
             reactionTimer = reactionTimer - dt
             if reactionTimer <= 0 then isInReaction = false end
@@ -1164,19 +1245,15 @@ table.insert(ActiveConnections, RunService.RenderStepped:Connect(function(dt)
 
         if not isInReaction then
             local tp = getAimbotTarget()
-
-            -- Reset on target change
             if tp ~= lockedTarget then
                 lockedTarget = tp; lockTimer = 0
                 if tp then isInReaction = true; reactionTimer = AimbotCFG.ReactionTime / 1000 end
             end
-
             if tp and lockedTarget then
                 lockTimer = lockTimer + dt
                 if lockTimer > AimbotCFG.MaxLockTime then
                     lockedTarget = nil; lockTimer = 0
                 else
-                    -- Speed: normal vs in-attack
                     local isAttacking = false
                     pcall(function()
                         if fighter_mod and fighter_mod.LocalFighter then
@@ -1184,18 +1261,15 @@ table.insert(ActiveConnections, RunService.RenderStepped:Connect(function(dt)
                         end
                     end)
                     local speed = isAttacking and AimbotCFG.SpeedInAttack or AimbotCFG.Speed
-
-                    -- Scale speed by FOV distance
                     local sp2, on2 = camera:WorldToScreenPoint(tp.Position)
                     if on2 then
                         local screenDist = (Vector2.new(sp2.X, sp2.Y) - center).Magnitude
                         local fovR       = getEffectiveFOV()
                         if fovR > 0 then
-                            local scaleFactor = 1 - ((screenDist / fovR) * (AimbotCFG.SpeedScaleFOV / 100))
-                            speed = speed * math.max(0.1, scaleFactor)
+                            local scale = 1 - ((screenDist / fovR) * (AimbotCFG.SpeedScaleFOV / 100))
+                            speed = speed * math.max(0.1, scale)
                         end
                     end
-
                     pcall(function()
                         local cp  = camera.CFrame.Position
                         local du  = (tp.Position - cp).Unit
@@ -1227,7 +1301,6 @@ table.insert(ActiveConnections, RunService.RenderStepped:Connect(function(dt)
                 simClick(); TrigState.waiting = false; TrigState.timer = 0
             end
         else
-            -- Grace period
             if TrigState.waiting then
                 TrigState.grace = TrigState.grace - dt
                 if TrigState.grace <= 0 then
@@ -1239,12 +1312,30 @@ table.insert(ActiveConnections, RunService.RenderStepped:Connect(function(dt)
         TrigState.waiting=false; TrigState.timer=0; TrigState.grace=0
     end
 
-    -- Watermark
-    watermark:SetText("Rivals Tool v9.3 | "..(AimbotCFG.On and "AIM " or "")..(silentActive and "RAGE " or "")..(TrigCFG.On and "TRIG" or ""))
+    -- ═══ WATERMARK ═══
+    local parts = {"Rivals Tool v9.4"}
+    if WatermarkCFG.ShowTime then
+        table.insert(parts, os.date("%H:%M:%S"))
+    end
+    if WatermarkCFG.ShowActive then
+        local active = {}
+        if AimbotCFG.On  then table.insert(active, "AIM")   end
+        if silentActive   then table.insert(active, "RAGE")  end
+        if TrigCFG.On     then table.insert(active, "TRIG")  end
+        if CFG.Void.On    then table.insert(active, "VOID")  end
+        if CFG.Orbit.On   then table.insert(active, "ORBIT") end
+        if GunCFG.NoRecoil or GunCFG.NoSpread or GunCFG.FastShoot then
+            table.insert(active, "GUN")
+        end
+        if #active > 0 then
+            table.insert(parts, "["..table.concat(active, " ").."]")
+        end
+    end
+    watermark:SetText(table.concat(parts, " | "))
 end))
 
 -- ═══════════════════════════════════════════
--- CORE HEARTBEAT (Orbit + Voidspam + AutoCollect)
+-- CORE HEARTBEAT
 -- ═══════════════════════════════════════════
 local orbitAngle = 0
 
@@ -1260,7 +1351,7 @@ table.insert(ActiveConnections, RunService.Heartbeat:Connect(function(dt)
             for _, obj in workspace:GetChildren() do
                 if obj.Name == "_drop" and obj:IsA("BasePart") then
                     if (CFG.Collect.Health and obj:FindFirstChild("Health") and needsHealth)
-                    or (CFG.Collect.Ammo and obj:FindFirstChild("Ammo")) then
+                    or (CFG.Collect.Ammo   and obj:FindFirstChild("Ammo")) then
                         pcall(function() firetouchinterest(hrp,obj,0); firetouchinterest(hrp,obj,1) end)
                     end
                 end
@@ -1282,8 +1373,11 @@ table.insert(ActiveConnections, RunService.Heartbeat:Connect(function(dt)
                     if orbitAngle > math.pi*2 then orbitAngle = orbitAngle - math.pi*2 end
                     local tp = tr.Position
                     mr.CFrame = CFrame.new(
-                        tp + Vector3.new(math.cos(orbitAngle)*CFG.Orbit.Radius, CFG.Orbit.Height, math.sin(orbitAngle)*CFG.Orbit.Radius),
-                        tp
+                        tp + Vector3.new(
+                            math.cos(orbitAngle)*CFG.Orbit.Radius,
+                            CFG.Orbit.Height,
+                            math.sin(orbitAngle)*CFG.Orbit.Radius
+                        ), tp
                     )
                 end
             end
@@ -1299,8 +1393,8 @@ table.insert(ActiveConnections, RunService.Heartbeat:Connect(function(dt)
         Desync.active=false; Desync.phase="idle"; Desync.currentDepth=0; return
     end
 
-    Desync.realCFrame  = humanoidRootPart.CFrame
-    Desync.phaseTimer  = Desync.phaseTimer + dt
+    Desync.realCFrame = humanoidRootPart.CFrame
+    Desync.phaseTimer = Desync.phaseTimer + dt
 
     if Desync.phase == "hide" then
         Desync.currentDepth = math.min(Desync.currentDepth + CFG.Void.StepSpeed, CFG.Void.VoidDepth)
@@ -1312,7 +1406,9 @@ table.insert(ActiveConnections, RunService.Heartbeat:Connect(function(dt)
         Desync.projCheckCD = Desync.projCheckCD + 1
         if Desync.projCheckCD >= 3 then
             Desync.projCheckCD = 0
-            if checkProjectiles() then Desync.phase="hide"; Desync.phaseTimer=0; Desync.totalCycles=Desync.totalCycles+1 end
+            if checkProjectiles() then
+                Desync.phase="hide"; Desync.phaseTimer=0; Desync.totalCycles=Desync.totalCycles+1
+            end
         end
         if Desync.phase=="attack" and Desync.currentDepth<=2 and CFG.Void.AutoFire then
             Desync.shotCooldown = Desync.shotCooldown - dt
@@ -1340,12 +1436,7 @@ table.insert(ActiveConnections, RunService.Heartbeat:Connect(function()
 end))
 
 -- ═══════════════════════════════════════════
--- WATERMARK HUD
--- ═══════════════════════════════════════════
-local watermark = library:Hud()
-
--- ═══════════════════════════════════════════
 -- NOTIFY ON LOAD
 -- ═══════════════════════════════════════════
-window:Notify("Rivals Tool v9.3", "Loaded | No recoil applied | Insert = toggle UI", 5)
-print("[RIVALS TOOL v9.3] "..(IsMobile and "MOBILE" or "PC")..(screenSize and " | "..screenSize or ""))
+window:Notify("Rivals Tool v9.4", "Loaded | Gun Tab added | Insert = toggle UI", 5)
+print("[RIVALS TOOL v9.4] "..(IsMobile and "MOBILE" or "PC")..(screenSize and " | "..screenSize or ""))

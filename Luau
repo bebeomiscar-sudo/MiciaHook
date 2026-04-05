@@ -56,8 +56,7 @@ local function applyBypass()
         end)
     end)
 end
-    
-    
+        
 -- ═══════════════════════════════════════════
 -- CAMERA CONTROLLER
 -- ═══════════════════════════════════════════

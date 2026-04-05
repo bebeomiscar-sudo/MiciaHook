@@ -11,6 +11,7 @@
     + Ragebot, Gun Tab, Watermark control
     + Anti-Aim (Backwards, Spin, HideHead, BelowFloor, Custom)
     + Bullet Tracers (Rainbow, Fade, Origin, Thickness)
+    + Immunity Detection (ForceField, Shield, Spawn Timer, God Mode)
 ]]
 
 -- ═══════════════════════════════════════════
@@ -58,7 +59,7 @@ local function applyBypass()
         end)
     end)
 end
-        
+
 -- ═══════════════════════════════════════════
 -- CAMERA CONTROLLER
 -- ═══════════════════════════════════════════
@@ -113,7 +114,7 @@ LP.CharacterAdded:Connect(function(nc)
     humanoid         = nc:WaitForChild("Humanoid")
     Desync.active    = false; Desync.realCFrame = nil
     Desync.currentDepth = 0; Desync.phase = "idle"
-    -- Reset anti-aim C0 on respawn so it re-grabs fresh Motor6D
+    -- Reset anti-aim on respawn
     aaOrigC0 = nil
     if AntiAimCFG.On then task.wait(1); startAntiAim() end
 end)
@@ -152,7 +153,6 @@ end
 
 local GunCFG = { NoRecoil=false, NoSpread=false, FastShoot=false }
 
--- Kiciahook-style Silent Aim hook config
 local SAHookCFG = {
     On           = false,
     Distance     = 1000,
@@ -168,19 +168,11 @@ local SAHookCFG = {
     PreferRandom = false,
 }
 
--- OOB config
-local OOBConfig = {
-    AutoOn   = false,
-    Interval = 1.0,
-}
-local oobTimer = 0
+local OOBConfig = { AutoOn=false, Interval=1.0 }
+local oobTimer  = 0
 
--- Quick Melee config
-local QMConfig = {
-    AutoOn   = false,
-    Interval = 0.3,
-}
-local qmTimer = 0
+local QMConfig = { AutoOn=false, Interval=0.3 }
+local qmTimer  = 0
 
 local CFG = {
     Orbit       = { On=false, Radius=12, Speed=2, Height=0 },
@@ -203,17 +195,17 @@ local CFG = {
 local ActiveConnections = {}
 
 -- ═══════════════════════════════════════════
--- ANTI-AIM CONFIG (NEW)
+-- ANTI-AIM CONFIG
 -- ═══════════════════════════════════════════
 local AntiAimCFG = {
-    On        = false,
-    Type      = "Backwards",  -- Backwards / Spin / HideHead / BelowFloor / Custom
-    YawAngle  = 180,
-    PitchAngle= 90,
+    On         = false,
+    Type       = "Backwards",
+    YawAngle   = 180,
+    PitchAngle = 90,
 }
 
 -- ═══════════════════════════════════════════
--- BULLET TRACER CONFIG (NEW)
+-- BULLET TRACER CONFIG
 -- ═══════════════════════════════════════════
 local TracerCFG = {
     On        = false,
@@ -222,8 +214,20 @@ local TracerCFG = {
     Duration  = 1.2,
     Fade      = true,
     Rainbow   = false,
-    Origin    = "Bottom",  -- Bottom / Middle / Top
+    Origin    = "Bottom",
 }
+
+-- ═══════════════════════════════════════════
+-- IMMUNITY DETECTION CONFIG
+-- ═══════════════════════════════════════════
+local ImmunityCFG = {
+    Enabled             = true,
+    SpawnProtectionTime = 4.0,
+}
+
+-- Per-player immunity state table
+-- Each entry: { spawnTime=tick(), forceShield=bool, lastMaxHealth=number }
+local playerImmunity = {}
 
 -- ═══════════════════════════════════════════
 -- GUN PATCH
@@ -401,7 +405,6 @@ local function startSAHook()
                     and idx == "ViewportSize"
                     and self == workspace.CurrentCamera
                 then
-                    -- Apply hit chance per shot
                     if math.random(1, 100) <= SAHookCFG.HitChance then
                         local pos, on = workspace.CurrentCamera:WorldToViewportPoint(saHookTarget)
                         if on then return Vector2.new(pos.X * 2, pos.Y * 2) end
@@ -435,7 +438,6 @@ local function startSAHook()
                     elseif SAHookCFG.Targeting == "Furthest" then
                         if d > bd or bd == math.huge then bd = d; best = targetPart end
                     elseif SAHookCFG.Targeting == "Random" then
-                        -- Pick first valid then randomly replace
                         if best == nil or math.random() < 0.5 then best = targetPart end
                     else
                         if d < bd then bd = d; best = targetPart end
@@ -532,7 +534,6 @@ local tabs = {
     resolution   = window:CreateTab("Resolution"),
     weaponstatus = window:CreateTab("Wep Status"),
     gun          = window:CreateTab("Gun"),
-    -- NEW TABS
     antiaim      = window:CreateTab("Anti-Aim"),
     tracers      = window:CreateTab("Tracers"),
     settings     = window:CreateTab("Settings"),
@@ -618,7 +619,7 @@ local function getEffectiveFOV()
 end
 
 -- ═══════════════════════════════════════════
--- FOV CIRCLES (Aimbot + Silent Aim)
+-- FOV CIRCLES
 -- ═══════════════════════════════════════════
 local fovCircle = nil
 pcall(function()
@@ -643,7 +644,7 @@ pcall(function()
 end)
 
 -- ═══════════════════════════════════════════
--- AIMBOT LOGIC (STICKY LOCK — FOV BUG FIXED)
+-- AIMBOT LOGIC (STICKY LOCK)
 -- ═══════════════════════════════════════════
 local lockTimer    = 0
 local lockedTarget = nil
@@ -754,6 +755,138 @@ local function getMobileTrigTarget()
 end
 
 -- ═══════════════════════════════════════════
+-- IMMUNITY DETECTION SYSTEM
+-- ═══════════════════════════════════════════
+
+-- Returns true if a player is currently immune
+-- Checks: ForceField class, named shield/immune/protect objects,
+--         MaxHealth god mode spike, spawn protection timer
+local function isPlayerImmune(p)
+    -- If immunity detection is disabled, never block
+    if not ImmunityCFG.Enabled then return false end
+
+    local data = playerImmunity[p]
+
+    -- Check active ForceField flag set by event hooks
+    if data and data.forceShield then return true end
+
+    -- Direct character scan (catches anything the events might have missed)
+    local char = p.Character
+    if char then
+        -- Check for Roblox ForceField class
+        if char:FindFirstChildOfClass("ForceField") then return true end
+
+        -- Scan all descendants for shield/immune/protect named objects
+        for _, obj in ipairs(char:GetDescendants()) do
+            local n = obj.Name:lower()
+            if n == "shield"
+            or n:find("immune")
+            or n:find("shield")
+            or n:find("protect") then
+                -- Only count as protective if it is a visible or effect object
+                if obj:IsA("BasePart")
+                or obj:IsA("SelectionBox")
+                or obj:IsA("ParticleEmitter")
+                or obj:IsA("SpecialMesh")
+                or obj:IsA("BillboardGui") then
+                    return true
+                end
+            end
+        end
+    end
+
+    -- Check spawn protection timer
+    if data then
+        local elapsed = tick() - data.spawnTime
+        if elapsed < ImmunityCFG.SpawnProtectionTime then
+            return true
+        end
+    end
+
+    return false
+end
+
+-- Sets up all immunity monitoring for a single player
+local function hookPlayerImmunity(p)
+    if p == LP then return end
+
+    local function onCharAdded(char)
+        -- Record spawn time and reset state
+        playerImmunity[p] = {
+            spawnTime     = tick(),
+            forceShield   = false,
+            lastMaxHealth = 0,
+        }
+
+        -- Check ForceField already present on spawn
+        if char:FindFirstChildOfClass("ForceField") then
+            playerImmunity[p].forceShield = true
+        end
+
+        -- Watch for ForceField appearing or disappearing
+        char.ChildAdded:Connect(function(child)
+            if child:IsA("ForceField") then
+                if playerImmunity[p] then
+                    playerImmunity[p].forceShield = true
+                end
+            end
+        end)
+        char.ChildRemoved:Connect(function(child)
+            if child:IsA("ForceField") then
+                if playerImmunity[p] then
+                    playerImmunity[p].forceShield = false
+                end
+            end
+        end)
+
+        -- Watch MaxHealth for god mode detection
+        -- A sudden large jump (>10000 and 5x previous value) flags the player
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then
+            playerImmunity[p].lastMaxHealth = hum.MaxHealth
+            hum:GetPropertyChangedSignal("MaxHealth"):Connect(function()
+                if not playerImmunity[p] then return end
+                local prev = playerImmunity[p].lastMaxHealth
+                local curr = hum.MaxHealth
+                if curr > 10000 and prev > 0 and curr > prev * 5 then
+                    playerImmunity[p].forceShield = true
+                end
+                playerImmunity[p].lastMaxHealth = curr
+            end)
+        end
+    end
+
+    -- Hook existing character
+    if p.Character then
+        task.spawn(function()
+            task.wait(0.1)
+            onCharAdded(p.Character)
+        end)
+    end
+
+    -- Hook future spawns
+    p.CharacterAdded:Connect(function(char)
+        task.wait(0.1)
+        onCharAdded(char)
+    end)
+end
+
+-- Start immunity hooks for all current players
+for _, p in ipairs(Players:GetPlayers()) do
+    hookPlayerImmunity(p)
+end
+
+-- Hook new players joining
+Players.PlayerAdded:Connect(function(p)
+    hookPlayerImmunity(p)
+end)
+
+-- Clean up when a player leaves
+Players.PlayerRemoving:Connect(function(p)
+    playerImmunity[p] = nil
+end)
+
+-- ═══════════════════════════════════════════
 -- RAGEBOT (Remote Silent Aim + Auto Reload)
 -- ═══════════════════════════════════════════
 local rs_sa      = cloneref(game:GetService("ReplicatedStorage"))
@@ -783,6 +916,7 @@ local sa_offsets = {
     Vector3.new(0,36,0), Vector3.new(0,40,0),
 }
 
+-- sa_getClosest now skips immune players
 local function sa_getClosest()
     if not LP.Character or not LP.Character:FindFirstChild("HumanoidRootPart") then return nil, nil end
     local target, tchar, dist = nil, nil, silentFOV
@@ -792,6 +926,11 @@ local function sa_getClosest()
         if not v.Character or not v.Character:FindFirstChild("Head") then continue end
         local hum = v.Character:FindFirstChildOfClass("Humanoid")
         if not hum or hum.Health <= 0 then continue end
+
+        -- ═══ IMMUNITY CHECK ═══
+        -- Skip this player entirely if they are immune
+        if isPlayerImmune(v) then continue end
+
         local mag = (LP.Character.HumanoidRootPart.Position - v.Character.Head.Position).Magnitude
         if mag < dist then dist=mag; target=v.Character.Head; tchar=v.Character end
     end
@@ -1114,7 +1253,7 @@ local function applyMaterial()
 end
 
 -- ═══════════════════════════════════════════
--- ANTI-AIM SYSTEM (NEW)
+-- ANTI-AIM SYSTEM
 -- ═══════════════════════════════════════════
 local aaConn   = nil
 local aaOrigC0 = nil
@@ -1139,7 +1278,6 @@ local function startAntiAim()
         local char = LP.Character; if not char then return end
         local hrp  = char:FindFirstChild("HumanoidRootPart"); if not hrp then return end
         local rj   = hrp:FindFirstChild("RootJoint"); if not rj then return end
-        -- Store the original C0 once so we can restore it later
         if not aaOrigC0 then aaOrigC0 = rj.C0 end
         local yaw, pitch = 0, 0
         local typ = AntiAimCFG.Type
@@ -1168,7 +1306,7 @@ local function stopAntiAim()
 end
 
 -- ═══════════════════════════════════════════
--- BULLET TRACER SYSTEM (NEW)
+-- BULLET TRACER SYSTEM
 -- ═══════════════════════════════════════════
 local TracerGui = Instance.new("ScreenGui")
 TracerGui.Name           = "RivalsTracers"
@@ -1185,7 +1323,6 @@ local function getTracerOrigin()
     local vp = camera.ViewportSize
     if TracerCFG.Origin == "Top"    then return Vector2.new(vp.X/2, 0)      end
     if TracerCFG.Origin == "Middle" then return Vector2.new(vp.X/2, vp.Y/2) end
-    -- Default: Bottom
     return Vector2.new(vp.X/2, vp.Y)
 end
 
@@ -1205,7 +1342,6 @@ local function fireTracer()
         local delta = sTo - sFrom
         local len   = delta.Magnitude
         if len < 2 then return end
-        -- Pick color (rainbow replaces solid color)
         local col = TracerCFG.Rainbow
             and Color3.fromHSV(tracerRainbowHue, 1, 1)
             or  TracerCFG.Color
@@ -1225,7 +1361,6 @@ local function fireTracer()
     end)
 end
 
--- Hook M1 (and mobile touch) to spawn a tracer on every shot
 UIS.InputBegan:Connect(function(i, g)
     if g then return end
     if i.UserInputType == Enum.UserInputType.MouseButton1
@@ -1272,7 +1407,7 @@ end)
 s_lb_fov:CreateToggle("Dynamic FOV", false, function(v) AimbotCFG.DynamicFOV=v end)
 
 -- ═══════════════════════════════════════════
--- UI: TAB 2 — SILENT AIM (Kiciahook style)
+-- UI: TAB 2 — SILENT AIM
 -- ═══════════════════════════════════════════
 local s_sa_main   = tabs.silenthook:CreateSection("Main")
 local s_sa_fov    = tabs.silenthook:CreateSection("FOV Settings")
@@ -1318,10 +1453,13 @@ local s_rb_status = tabs.ragebot:CreateSection("Status")
 local s_rb_main   = tabs.ragebot:CreateSection("Ragebot")
 local s_rb_filter = tabs.ragebot:CreateSection("Filters")
 local s_rb_reload = tabs.ragebot:CreateSection("Auto Reload")
+-- Immunity lives inside the existing Ragebot tab
+local s_rb_immune = tabs.ragebot:CreateSection("Immunity Detection")
 
 local saModsOk = util_mod and enums_mod and fighter_mod
 s_rb_status:CreateLabel("Modules: "..(saModsOk and "Loaded ✓" or "FAILED ✗"))
 s_rb_status:CreateLabel("Method: Fires UseItem remote to server")
+s_rb_status:CreateLabel("Immunity: ForceField + Shield + Spawn Timer + God Mode ✓")
 
 s_rb_main:CreateToggle("Enabled", false, function(v)
     silentActive=v
@@ -1344,6 +1482,62 @@ s_rb_reload:CreateButton("Force Reload Now", function()
     local item = fighter_mod.LocalFighter.EquippedItem
     if item then tryRagebotReload(item) end
     window:Notify("Reload","Reload fired",2)
+end)
+
+-- ── Immunity Detection UI (inside Ragebot tab) ──
+s_rb_immune:CreateLabel("Skips immune players automatically every shot")
+s_rb_immune:CreateLabel("Detects: ForceField | Shield Parts | God Mode | Spawn Timer")
+s_rb_immune:CreateToggle("Enable Immunity Detection", true, function(v)
+    ImmunityCFG.Enabled = v
+end)
+s_rb_immune:CreateSlider("Spawn Protection Time (sec)", 0, 10, 4, true, function(v)
+    ImmunityCFG.SpawnProtectionTime = v
+end)
+s_rb_immune:CreateButton("Check All Players Now", function()
+    local lines = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p == LP then continue end
+        local immune  = isPlayerImmune(p)
+        local data    = playerImmunity[p]
+        local elapsed = data and math.floor(tick() - data.spawnTime) or -1
+        local reason  = ""
+        -- Build reason string
+        if data and data.forceShield then
+            reason = reason .. " [ForceField/GodMode]"
+        end
+        if data and elapsed >= 0 and elapsed < ImmunityCFG.SpawnProtectionTime then
+            reason = reason .. " [Spawn "..elapsed.."s/"..ImmunityCFG.SpawnProtectionTime.."s]"
+        end
+        local char = p.Character
+        if char then
+            for _, obj in ipairs(char:GetDescendants()) do
+                local n = obj.Name:lower()
+                if (n == "shield" or n:find("immune") or n:find("protect")) then
+                    if obj:IsA("BasePart") or obj:IsA("ParticleEmitter") or obj:IsA("SelectionBox") then
+                        reason = reason .. " [ShieldObj:"..obj.Name.."]"
+                        break
+                    end
+                end
+            end
+        end
+        if reason == "" and immune then reason = " [Unknown]" end
+        table.insert(lines, p.Name..": "..(immune and "IMMUNE"..reason or "Targetable"))
+    end
+    if #lines == 0 then
+        window:Notify("Immunity Check","No other players in server",3)
+        return
+    end
+    for _, line in ipairs(lines) do
+        window:Notify("Immunity", line, 5)
+    end
+end)
+s_rb_immune:CreateButton("Reset Immunity Data", function()
+    -- Re-hook everyone — useful if immunity got stuck
+    for _, p in ipairs(Players:GetPlayers()) do
+        playerImmunity[p] = nil
+        hookPlayerImmunity(p)
+    end
+    window:Notify("Immunity","All immunity data reset and re-hooked",3)
 end)
 
 -- ═══════════════════════════════════════════
@@ -1731,54 +1925,41 @@ s_gun_main:CreateButton("Restore All Original Values", function()
 end)
 
 -- ═══════════════════════════════════════════
--- UI: TAB 17 — ANTI-AIM (NEW)
+-- UI: TAB 17 — ANTI-AIM
 -- ═══════════════════════════════════════════
-local s_aa_main    = tabs.antiaim:CreateSection("Anti-Aim")
-local s_aa_custom  = tabs.antiaim:CreateSection("Custom Angles")
+local s_aa_main   = tabs.antiaim:CreateSection("Anti-Aim")
+local s_aa_custom = tabs.antiaim:CreateSection("Custom Angles")
 
-s_aa_main:CreateLabel("Manipulates your RootJoint C0 to confuse hitboxes")
+s_aa_main:CreateLabel("Manipulates RootJoint C0 to confuse hitboxes")
 s_aa_main:CreateLabel("Backwards = face away | Spin = rotate | HideHead = pitch up")
 s_aa_main:CreateToggle("Enabled", false, function(v)
     AntiAimCFG.On = v
-    if v then
-        startAntiAim()
-    else
-        stopAntiAim()
-    end
+    if v then startAntiAim() else stopAntiAim() end
 end)
 s_aa_main:CreateDropdown("Type", {
-    "Backwards",
-    "Spin",
-    "HideHead",
-    "BelowFloor",
-    "Custom",
+    "Backwards","Spin","HideHead","BelowFloor","Custom",
 }, function(v)
     AntiAimCFG.Type = v
 end, "Backwards", false)
-
-s_aa_custom:CreateLabel("Only used when Type = Custom")
-s_aa_custom:CreateSlider("Yaw Angle", 0, 360, 180, true, function(v)
-    AntiAimCFG.YawAngle = v
-end)
-s_aa_custom:CreateSlider("Pitch Angle", 0, 180, 90, true, function(v)
-    AntiAimCFG.PitchAngle = v
-end)
 s_aa_main:CreateButton("Stop Anti-Aim", function()
     stopAntiAim()
-    window:Notify("Anti-Aim", "Stopped and restored", 2)
+    window:Notify("Anti-Aim","Stopped and restored",2)
 end)
 
+s_aa_custom:CreateLabel("Only used when Type = Custom")
+s_aa_custom:CreateSlider("Yaw Angle",   0, 360, 180, true, function(v) AntiAimCFG.YawAngle=v end)
+s_aa_custom:CreateSlider("Pitch Angle", 0, 180, 90,  true, function(v) AntiAimCFG.PitchAngle=v end)
+
 -- ═══════════════════════════════════════════
--- UI: TAB 18 — BULLET TRACERS (NEW)
+-- UI: TAB 18 — TRACERS
 -- ═══════════════════════════════════════════
-local s_tr_main = tabs.tracers:CreateSection("Bullet Tracers")
+local s_tr_main  = tabs.tracers:CreateSection("Bullet Tracers")
 local s_tr_style = tabs.tracers:CreateSection("Style")
 
 s_tr_main:CreateLabel("Draws a line from screen edge to where your shot lands")
-s_tr_main:CreateLabel("Works on every M1 click (or touch on mobile)")
+s_tr_main:CreateLabel("Fires on every M1 click or mobile touch")
 s_tr_main:CreateToggle("Enabled", false, function(v)
     TracerCFG.On = v
-    -- Clear any leftover tracers when disabling
     if not v then
         for _, t in ipairs(activeTracers) do
             pcall(function() if t.Line then t.Line:Destroy() end end)
@@ -1786,28 +1967,20 @@ s_tr_main:CreateToggle("Enabled", false, function(v)
         activeTracers = {}
     end
 end)
-s_tr_main:CreateToggle("Rainbow", false, function(v)
-    TracerCFG.Rainbow = v
-end)
-s_tr_main:CreateToggle("Fade Out", true, function(v)
-    TracerCFG.Fade = v
-end)
-s_tr_main:CreateSlider("Duration (x0.1s)", 1, 30, 12, true, function(v)
-    TracerCFG.Duration = v / 10
-end)
+s_tr_main:CreateToggle("Rainbow", false, function(v) TracerCFG.Rainbow=v end)
+s_tr_main:CreateToggle("Fade Out", true, function(v) TracerCFG.Fade=v end)
+s_tr_main:CreateSlider("Duration (x0.1s)", 1, 30, 12, true, function(v) TracerCFG.Duration=v/10 end)
 
-s_tr_style:CreateSlider("Thickness (px)", 1, 10, 2, true, function(v)
-    TracerCFG.Thickness = v
-end)
+s_tr_style:CreateSlider("Thickness (px)", 1, 10, 2, true, function(v) TracerCFG.Thickness=v end)
 s_tr_style:CreateDropdown("Origin", {"Bottom","Middle","Top"}, function(v)
-    TracerCFG.Origin = v
+    TracerCFG.Origin=v
 end, "Bottom", false)
 s_tr_style:CreateButton("Clear All Tracers", function()
     for _, t in ipairs(activeTracers) do
         pcall(function() if t.Line then t.Line:Destroy() end end)
     end
-    activeTracers = {}
-    window:Notify("Tracers", "All cleared", 2)
+    activeTracers={}
+    window:Notify("Tracers","All cleared",2)
 end)
 
 -- ═══════════════════════════════════════════
@@ -1859,9 +2032,7 @@ s_set_act:CreateButton("⛔ Stop All Features", function()
     CFG.Crosshair.On=false; crosshairImg.ImageTransparency=1; UIS.MouseIconEnabled=true
     CFG.WeaponStatus.On=false; removeWeaponStatus()
     GunCFG.NoRecoil=false; GunCFG.NoSpread=false; GunCFG.FastShoot=false; patchGun()
-    -- Stop anti-aim
     stopAntiAim()
-    -- Clear tracers
     TracerCFG.On=false
     for _, t in ipairs(activeTracers) do
         pcall(function() if t.Line then t.Line:Destroy() end end)
@@ -1897,35 +2068,30 @@ table.insert(ActiveConnections, RunService.RenderStepped:Connect(function(dt)
     camera = workspace.CurrentCamera
     local center = getScreenCenter()
 
-    -- Crosshair
     if CFG.Crosshair.On then crosshairImg.Position=UDim2.new(0.5,0,0.5,0) end
 
-    -- Aimbot FOV circle
     if fovCircle then
         fovCircle.Position = center
         fovCircle.Radius   = AimbotCFG.MaxFOV
         fovCircle.Visible  = AimbotCFG.DrawFOV and AimbotCFG.On
     end
 
-    -- Silent Aim FOV circle
     if saFovCircle then
         saFovCircle.Position = center
         saFovCircle.Radius   = SAHookCFG.IgnoreFOV and 0 or saGetEffectiveFOV()
         saFovCircle.Visible  = SAHookCFG.DrawFOV and SAHookCFG.On and not SAHookCFG.IgnoreFOV
     end
 
-    -- ═══ AIMBOT (STICKY LOCK) ═══
+    -- AIMBOT
     if AimbotCFG.On and CameraController then
         if isInReaction then
             reactionTimer=reactionTimer-dt
             if reactionTimer<=0 then isInReaction=false end
         end
-
         if not isInReaction then
             if lockedTarget and not isTargetStillValid(lockedTarget) then
                 lockedTarget=nil; lockTimer=0
             end
-
             if not lockedTarget then
                 local newTarget = findNewAimbotTarget()
                 if newTarget then
@@ -1933,7 +2099,6 @@ table.insert(ActiveConnections, RunService.RenderStepped:Connect(function(dt)
                     isInReaction=true; reactionTimer=AimbotCFG.ReactionTime/1000
                 end
             end
-
             if lockedTarget then
                 lockTimer=lockTimer+dt
                 if lockTimer>AimbotCFG.MaxLockTime then
@@ -1972,7 +2137,7 @@ table.insert(ActiveConnections, RunService.RenderStepped:Connect(function(dt)
         end
     end
 
-    -- ═══ PC TRIGGERBOT ═══
+    -- PC TRIGGERBOT
     if TrigCFG.On then
         local tgt=getTriggerTarget()
         if tgt then
@@ -1991,7 +2156,7 @@ table.insert(ActiveConnections, RunService.RenderStepped:Connect(function(dt)
         TrigState.waiting=false; TrigState.timer=0; TrigState.grace=0
     end
 
-    -- ═══ MOBILE TRIGGERBOT ═══
+    -- MOBILE TRIGGERBOT
     if IsMobile and MobileTrigCFG.On then
         local shouldFire=MobileTrigCFG.AutoFire or (MobileTrigCFG.HoldToShoot and MobileTrigState.touching)
         if shouldFire then
@@ -2015,15 +2180,13 @@ table.insert(ActiveConnections, RunService.RenderStepped:Connect(function(dt)
         end
     end
 
-    -- ═══ BULLET TRACER UPDATE (NEW) ═══
-    -- Each frame: update tracer positions, fade, and remove expired ones
+    -- BULLET TRACER UPDATE
     local now  = tick()
     local life = TracerCFG.Duration
     local keep = {}
     for _, t in ipairs(activeTracers) do
         local age = now - t.Born
         if age < life and t.Line and t.Line.Parent then
-            -- Recalculate end point in case camera moved
             local hsp, hon = camera:WorldToViewportPoint(t.HitPos)
             if hon and hsp.Z > 0 then
                 local sFrom = getTracerOrigin()
@@ -2035,12 +2198,9 @@ table.insert(ActiveConnections, RunService.RenderStepped:Connect(function(dt)
                     t.Line.Position = UDim2.new(0, sFrom.X, 0, sFrom.Y)
                     t.Line.Rotation = math.deg(math.atan2(delta.Y, delta.X))
                 end
-                -- Fade: transparency goes from 0 → 1 over lifetime
-                if TracerCFG.Fade then
-                    t.Line.BackgroundTransparency = math.clamp(age / life, 0, 0.95)
-                else
-                    t.Line.BackgroundTransparency = 0
-                end
+                t.Line.BackgroundTransparency = TracerCFG.Fade
+                    and math.clamp(age / life, 0, 0.95)
+                    or 0
                 t.Line.Visible = true
             else
                 t.Line.Visible = false
@@ -2052,7 +2212,7 @@ table.insert(ActiveConnections, RunService.RenderStepped:Connect(function(dt)
     end
     activeTracers = keep
 
-    -- ═══ WATERMARK ═══
+    -- WATERMARK
     local parts={"Rivals Tool v9.7"}
     if WatermarkCFG.ShowTime then table.insert(parts, os.date("%H:%M:%S")) end
     if WatermarkCFG.ShowActive then
@@ -2069,6 +2229,7 @@ table.insert(ActiveConnections, RunService.RenderStepped:Connect(function(dt)
         if GunCFG.NoRecoil or GunCFG.NoSpread or GunCFG.FastShoot then table.insert(active,"GUN") end
         if AntiAimCFG.On  then table.insert(active,"AA")   end
         if TracerCFG.On   then table.insert(active,"TRACE") end
+        if ImmunityCFG.Enabled then table.insert(active,"IMM") end
         if #active>0 then table.insert(parts,"["..table.concat(active," ").."]") end
     end
     watermark:SetText(table.concat(parts," | "))
@@ -2102,17 +2263,13 @@ table.insert(ActiveConnections, RunService.Heartbeat:Connect(function(dt)
     -- Auto OOB
     if OOBConfig.AutoOn then
         oobTimer=oobTimer+dt
-        if oobTimer>=OOBConfig.Interval then
-            oobTimer=0; fireOOB()
-        end
+        if oobTimer>=OOBConfig.Interval then oobTimer=0; fireOOB() end
     end
 
     -- Auto Quick Melee
     if QMConfig.AutoOn then
         qmTimer=qmTimer+dt
-        if qmTimer>=QMConfig.Interval then
-            qmTimer=0; fireQuickAttack()
-        end
+        if qmTimer>=QMConfig.Interval then qmTimer=0; fireQuickAttack() end
     end
 
     -- Orbit
@@ -2185,5 +2342,5 @@ end))
 -- ═══════════════════════════════════════════
 -- NOTIFY ON LOAD
 -- ═══════════════════════════════════════════
-window:Notify("Rivals Tool v9.7", "OOB + Quick Melee + SA fix + FOV fix + Anti-Aim + Tracers | Insert = UI", 6)
+window:Notify("Rivals Tool v9.7", "Anti-Aim + Tracers + Immunity Detection | Insert = UI", 6)
 print("[RIVALS TOOL v9.7] "..(IsMobile and "MOBILE" or "PC")..(screenSize and " | "..screenSize or ""))

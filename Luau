@@ -3037,3 +3037,4 @@ print(
     .. (IsMobile and "MOBILE" or "PC")
     .. (screenSize and " | " .. screenSize or "")
 )
+end

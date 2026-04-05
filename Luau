@@ -2617,11 +2617,7 @@ table.insert(ActiveConnections, RunService.Heartbeat:Connect(function(dt)
 end))
 
 -- ═══════════════════════════════════════════
--- NOTIFY ON LOAD
+-- LOAD COMPLETE
 -- ═══════════════════════════════════════════
-window:Notify(
-    "Rivals Tool v9.7",
-    "Unlock All Skin Changer + AC Bypass | Insert = UI",
-    6
-)
-print("[RIVALS TOOL v9.7] "..(IsMobile and "MOBILE" or "PC")..(screenSize and " | "..screenSize or ""))
+window:Notify("Rivals Tool v9.8","Combat | Visual | Misc | Unlock All in Skins tab",6)
+print("[RIVALS TOOL v9.8] "..(IsMobile and "MOBILE" or "PC")..(screenSize and " | "..screenSize or ""))

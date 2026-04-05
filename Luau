@@ -1,6 +1,6 @@
 --[[
-    RIVALS TOOL v9.8 — Merged Edition
-    Combined features from both scripts
+    RIVALS TOOL v9.9 — Cleaned Edition
+    Removed: OOB and Quick Melee
     Tabs: Combat | Visual | World | Misc | Player | Settings
 ]]
 
@@ -43,21 +43,12 @@ end)
 -- ═══════════════════════════════════════════
 -- REMOTES
 -- ═══════════════════════════════════════════
-local SetControlsRemote   = nil
-local OutOfBoundsRemote   = nil
-local QuickAttackRemote   = nil
-local CancelQARemote      = nil
-local DontKeepQARemote    = nil
-
+local SetControlsRemote = nil
 pcall(function()
     local remotes = ReplicatedStorage:WaitForChild("Remotes",10)
         :WaitForChild("Replication",10)
         :WaitForChild("Fighter",10)
     SetControlsRemote = remotes:WaitForChild("SetControls",5)
-    OutOfBoundsRemote = remotes:WaitForChild("OutOfBounds",5)
-    QuickAttackRemote = remotes:WaitForChild("QuickAttack",5)
-    CancelQARemote    = remotes:WaitForChild("CancelQuickAttack",5)
-    DontKeepQARemote  = remotes:WaitForChild("DontKeepQuickAttack",5)
 end)
 
 -- ═══════════════════════════════════════════
@@ -236,7 +227,6 @@ local MiscCFG = {
     KillNotify={Enabled=false, Text="Killed {name}!", Duration=3},
     KillSay={Enabled=false, Text="gg {name}", Delay=0.3},
     HitSound={Enabled=false, Sound="Default"},
-    WallBang={Enabled=false},
     AntiKatana=false, AntiOOB=false, AntiHitLocal=false,
     ThirdPerson={Enabled=false, Distance=10, Height=5, Smoothness=15},
 }
@@ -271,8 +261,6 @@ local CFG = {
         AutoFire=false, VoidDepth=200, StepSpeed=30,
         ProjectileMimic=false, DetectionRange=80, AutoReload=true,
     },
-    OOB         = {AutoOn=false, Interval=1.0},
-    QuickMelee  = {AutoOn=false, Interval=0.3},
     Spoofer     = {On=false, Device="None", AutoSpoof=false, Interval=5},
     Collect     = {Health=true, Ammo=true},
     Resolution  = 0.65,
@@ -302,8 +290,6 @@ end)
 local isShooting   = false
 local katanaActive = false
 local espRainbowHue = 0
-local oobTimer  = 0
-local qmTimer   = 0
 
 UIS.InputBegan:Connect(function(i, g)
     if g then return end
@@ -1041,35 +1027,6 @@ local function patchGun()
 end
 
 -- ═══════════════════════════════════════════
--- OOB / QUICK MELEE
--- ═══════════════════════════════════════════
-local function getOOBPart()
-    for _, child in ipairs(workspace:GetChildren()) do
-        local barriers = child:FindFirstChild("Barriers")
-        if barriers then
-            local oob = barriers:FindFirstChild("OOB"); if oob then return oob end
-        end
-        if child.Name == "Barriers" then
-            local oob = child:FindFirstChild("OOB"); if oob then return oob end
-        end
-    end
-    return nil
-end
-local function fireOOB()
-    if not OutOfBoundsRemote then return false end
-    local oob = getOOBPart(); if not oob then return false end
-    pcall(function() OutOfBoundsRemote:FireServer(oob) end); return true
-end
-local function fireQuickAttack()
-    if not QuickAttackRemote then return end
-    pcall(function() QuickAttackRemote:FireServer() end)
-end
-local function cancelQuickAttack()
-    if not CancelQARemote then return end
-    pcall(function() CancelQARemote:FireServer() end)
-end
-
--- ═══════════════════════════════════════════
 -- SPOOFER
 -- ═══════════════════════════════════════════
 local spoofBusy = false; local spoofLoopThread = nil
@@ -1255,26 +1212,6 @@ LP.CharacterAdded:Connect(function()
     spiderOrigC0 = {}
     if activePoseName then task.wait(0.5); activatePose(activePoseName) end
 end)
-
--- ═══════════════════════════════════════════
--- ANTI-OOB
--- ═══════════════════════════════════════════
-local oobConn = nil; local oobSafePos = nil
-local function startAntiOOB()
-    local char = LP.Character
-    local hrp  = char and char:FindFirstChild("HumanoidRootPart")
-    if hrp then oobSafePos = hrp.Position end
-    if oobConn then oobConn:Disconnect() end
-    oobConn = RunService.Heartbeat:Connect(function()
-        if not MiscCFG.AntiOOB then
-            oobConn:Disconnect(); oobConn = nil; return
-        end
-        local char2 = LP.Character
-        local hrp2  = char2 and char2:FindFirstChild("HumanoidRootPart"); if not hrp2 then return end
-        if not oobSafePos then oobSafePos = hrp2.Position; return end
-        if hrp2.Position.Y < -100 then hrp2.CFrame = CFrame.new(oobSafePos) end
-    end)
-end
 
 -- ═══════════════════════════════════════════
 -- ANTI HIT LOCAL
@@ -1900,18 +1837,6 @@ RunService.Heartbeat:Connect(function(dt)
         end
     end
 
-    -- Auto OOB
-    if CFG.OOB.AutoOn then
-        oobTimer = oobTimer + dt
-        if oobTimer >= CFG.OOB.Interval then oobTimer=0; fireOOB() end
-    end
-
-    -- Auto Quick Melee
-    if CFG.QuickMelee.AutoOn then
-        qmTimer = qmTimer + dt
-        if qmTimer >= CFG.QuickMelee.Interval then qmTimer=0; fireQuickAttack() end
-    end
-
     -- Orbit
     if CFG.Orbit.On and CFG.OrbitTarget then
         local mc = LP.Character
@@ -2003,10 +1928,10 @@ local window      = library:CreateWindow(gui_config or {
     MaxWidth      = 800,
     InitialWidth  = 560,
 }, gethui())
-local window_name = library:SetWindowName("Rivals Tool v9.8")
+local window_name = library:SetWindowName("Rivals Tool v9.9")
 
 -- ═══════════════════════════════════════════
--- TABS (Reorganized)
+-- TABS
 -- ═══════════════════════════════════════════
 local tabs = {
     combat   = window:CreateTab("Combat"),
@@ -2019,8 +1944,6 @@ local tabs = {
 
 -- ═══════════════════════════════════════════
 -- TAB: COMBAT
--- Contains: Legitbot, Silent Aim (both modes), Ragebot,
---           Triggerbot, Voidspam, Anti-Aim, Fake Lag
 -- ═══════════════════════════════════════════
 local s_aim_main = tabs.combat:CreateSection("Legitbot / Aimbot")
 local s_aim_fov  = tabs.combat:CreateSection("FOV Settings")
@@ -2038,7 +1961,6 @@ local s_fl_main  = tabs.combat:CreateSection("Fake Lag")
 
 -- Legitbot
 s_aim_main:CreateLabel("CameraController: "..(CameraController and "Connected ✓" or "Not Found ✗"))
-s_aim_main:CreateLabel("FOV used to ACQUIRE target only — sticky lock once acquired")
 s_aim_main:CreateToggle("Aimbot", false, function(v)
     AimbotCFG.On = v
     if v then startAimbot() else stopAimbot() end
@@ -2068,7 +1990,6 @@ end)
 s_aim_fov:CreateToggle("Dynamic FOV", false, function(v) AimbotCFG.DynamicFOV = v end)
 
 -- Silent Aim (Memory/Mouse/Camera)
-s_sa_main:CreateLabel("Memory = hooks Utility.Raycast | Mouse = moves cursor | Camera = rotates cam")
 s_sa_main:CreateToggle("Silent Aim", false, function(v)
     SilentAimCFG.Enabled = v
     if v then startSilentAim() else stopSilentAim() end
@@ -2084,8 +2005,6 @@ s_sa_main:CreateToggle("Visible Only", false, function(v) SilentAimCFG.VisibleOn
 s_sa_main:CreateToggle("Team Check", false, function(v) SilentAimCFG.TeamCheck = v end)
 
 -- Hook Silent Aim
-s_hook_main:CreateLabel("Hooks ViewportSize — redirects shots client-side")
-s_hook_main:CreateLabel("Hook Status: "..(hookmetamethod and "Supported ✓" or "NOT SUPPORTED ✗"))
 s_hook_main:CreateToggle("Hook Silent Aim", false, function(v)
     SAHookCFG.On = v
     if v then startSAHook() else stopSAHook() end
@@ -2114,9 +2033,6 @@ s_hook_fov:CreateToggle("Draw FOV", true, function(v)
 end)
 
 -- Ragebot
-local rbModsOk = util_mod and enums_mod and fighter_mod
-s_rb_main:CreateLabel("Modules: "..(rbModsOk and "Loaded ✓" or "FAILED ✗"))
-s_rb_main:CreateLabel("Method: Fires UseItem remote directly to server")
 s_rb_main:CreateToggle("Ragebot", false, function(v)
     silentActive = v
     if v then startRagebotSA() else stopRagebotSA() end
@@ -2141,9 +2057,6 @@ s_trig_main:CreateSlider("Delay (ms)", 0, 500, 100, true, function(v) TrigCFG.De
 s_trig_main:CreateSlider("Grace (ms)", 0, 500, 100, true, function(v) TrigCFG.Grace = v end)
 s_trig_main:CreateToggle("Team Check", false, function(v) TrigCFG.TeamCheck = v end)
 s_trig_main:CreateToggle("Visible Check", false, function(v) TrigCFG.VisibleCheck = v end)
-s_trig_main:CreateDropdown("Target Part", {"Head","Body","Head, Body","Body, Head"}, function(v)
-    TrigCFG.TargetPart = v
-end, "Head, Body", false)
 
 s_trig_adv:CreateToggle("Random Delay", false, function(v) TrigCFG.RandomDelay = v end)
 s_trig_adv:CreateSlider("Min Delay", 0, 500, 50, true, function(v) TrigCFG.MinDelay = v end)
@@ -2167,13 +2080,10 @@ s_void_main:CreateToggle("Enable Voidspam", false, function(st)
     end
 end)
 s_void_main:CreateToggle("Auto Fire", false, function(v) CFG.Void.AutoFire = v end)
-s_void_main:CreateToggle("Projectile Mimic", false, function(v) CFG.Void.ProjectileMimic = v end)
 
 s_void_cfg:CreateSlider("Void Depth", 50, 500, 200, true, function(v) CFG.Void.VoidDepth = v end)
 s_void_cfg:CreateSlider("Step Speed", 5, 100, 30, true, function(v) CFG.Void.StepSpeed = v end)
-s_void_cfg:CreateSlider("Hide Timer (x0.01s)", 1, 100, 30, true, function(v) CFG.Void.HideTime = v/100 end)
-s_void_cfg:CreateSlider("Attack Timer (x0.01s)", 1, 100, 15, true, function(v) CFG.Void.AttackTime = v/100 end)
-s_void_cfg:CreateSlider("Shoot Attempts", 1, 3, 1, true, function(v) CFG.Void.ShootAttempt = v end)
+s_void_cfg:CreateSlider("Hide Timer", 1, 100, 30, true, function(v) CFG.Void.HideTime = v/100 end)
 
 -- Anti-Aim
 s_aa_main:CreateToggle("Anti-Aim", false, function(v)
@@ -2183,8 +2093,6 @@ end)
 s_aa_main:CreateDropdown("Type", {"Backwards","Spin","HideHead","BelowFloor","Custom"}, function(v)
     AntiAimCFG.Type = v
 end, "Backwards", false)
-s_aa_main:CreateSlider("Custom Yaw", 0, 360, 180, true, function(v) AntiAimCFG.YawAngle = v end)
-s_aa_main:CreateSlider("Custom Pitch", 0, 180, 90, true, function(v) AntiAimCFG.PitchAngle = v end)
 
 -- Fake Lag
 s_fl_main:CreateToggle("Fake Lag", false, function(v)
@@ -2192,16 +2100,11 @@ s_fl_main:CreateToggle("Fake Lag", false, function(v)
     if v then startFakeLag() else stopFakeLag() end
 end)
 s_fl_main:CreateSlider("Interval", 1, 50, 10, false, function(v) FakeLagCFG.Interval = v/100 end)
-s_fl_main:CreateToggle("Desync", false, function(v) FakeLagCFG.Desync = v end)
-s_fl_main:CreateSlider("Desync Strength", 1, 20, 5, true, function(v) FakeLagCFG.DesyncStr = v end)
 
 -- ═══════════════════════════════════════════
 -- TAB: VISUAL
--- Contains: ESP, Visualize, Bullet Tracers,
---           Hit Marker, Crosshair, Spoofer, Skin Changer
 -- ═══════════════════════════════════════════
 local s_esp_main   = tabs.visual:CreateSection("ESP")
-local s_esp_col    = tabs.visual:CreateSection("ESP Colors")
 local s_viz_main   = tabs.visual:CreateSection("Visualize")
 local s_tracer_main= tabs.visual:CreateSection("Bullet Tracers")
 local s_hm_main    = tabs.visual:CreateSection("Hit Marker")
@@ -2209,139 +2112,63 @@ local s_ch_main    = tabs.visual:CreateSection("Crosshair")
 local s_sp_main    = tabs.visual:CreateSection("Spoofer")
 local s_skin_main  = tabs.visual:CreateSection("Skin Changer")
 
--- ESP
 s_esp_main:CreateToggle("ESP", false, function(v) ESPCFG.Enabled = v end)
-s_esp_main:CreateToggle("Name",     true,  function(v) ESPCFG.Name     = v end)
-s_esp_main:CreateToggle("Health",   true,  function(v) ESPCFG.Health   = v end)
-s_esp_main:CreateToggle("Distance", true,  function(v) ESPCFG.Distance = v end)
-s_esp_main:CreateToggle("Weapon",   true,  function(v) ESPCFG.Weapon   = v end)
-s_esp_main:CreateToggle("Box",      true,  function(v) ESPCFG.Box      = v end)
+s_esp_main:CreateToggle("Name", true, function(v) ESPCFG.Name = v end)
+s_esp_main:CreateToggle("Health", true, function(v) ESPCFG.Health = v end)
 s_esp_main:CreateToggle("Skeleton", false, function(v) ESPCFG.Skeleton = v end)
-s_esp_main:CreateToggle("Charms",   false, function(v) ESPCFG.Charms   = v end)
-s_esp_main:CreateToggle("Charms Fill", false, function(v) ESPCFG.CharmsFill = v end)
-s_esp_main:CreateToggle("Rainbow",  false, function(v) ESPCFG.Rainbow  = v end)
-s_esp_main:CreateToggle("Team Check", false, function(v) ESPCFG.TeamCheck = v end)
+s_esp_main:CreateToggle("Charms", false, function(v) ESPCFG.Charms = v end)
 
--- Visualize
-s_viz_main:CreateToggle("Visualize (Always-On Highlight)", false, function(v)
+s_viz_main:CreateToggle("Visualize", false, function(v)
     VisualizeCFG.Enabled = v
     if not v then for _, p in pairs(Players:GetPlayers()) do removeViz(p) end end
 end)
-s_viz_main:CreateSlider("Fill Transparency", 0, 10, 8, true, function(v) VisualizeCFG.Fill = v/10 end)
 
--- Bullet Tracers
 s_tracer_main:CreateToggle("Bullet Tracers", false, function(v) BulletTracerCFG.Enabled = v end)
 s_tracer_main:CreateToggle("Rainbow", false, function(v) BulletTracerCFG.Rainbow = v end)
-s_tracer_main:CreateToggle("Fade Out", true, function(v) BulletTracerCFG.Fade = v end)
-s_tracer_main:CreateSlider("Thickness", 1, 10, 2, true, function(v) BulletTracerCFG.Thickness = v end)
-s_tracer_main:CreateSlider("Duration (x0.1s)", 1, 30, 12, true, function(v) BulletTracerCFG.Duration = v/10 end)
-s_tracer_main:CreateDropdown("Origin", {"Bottom","Middle","Top"}, function(v)
-    BulletTracerCFG.Origin = v
-end, "Bottom", false)
 
--- Hit Marker
 s_hm_main:CreateToggle("Hit Marker", false, function(v) HitMarkerCFG.Enabled = v end)
 s_hm_main:CreateSlider("Text Size", 8, 30, 16, true, function(v) HitMarkerCFG.TextSize = v end)
-s_hm_main:CreateSlider("Duration (x0.1s)", 2, 20, 8, true, function(v) HitMarkerCFG.Duration = v/10 end)
-s_hm_main:CreateSlider("Float Speed", 5, 100, 30, true, function(v) HitMarkerCFG.Float = v end)
 
--- Crosshair
 s_ch_main:CreateToggle("Crosshair", false, function(v)
     CrosshairCFG.Enabled = v; buildCH()
 end)
-s_ch_main:CreateDropdown("Style", {"Dot","Cross","Crosshair","Jesus","Circle","CircleDot","DoubleCircle","Dynamic","T-Shape","Image"}, function(v)
+s_ch_main:CreateDropdown("Style", {"Dot","Cross","Crosshair","Jesus","Circle","CircleDot","DoubleCircle","T-Shape","Image"}, function(v)
     CrosshairCFG.Style = v; buildCH()
 end, "Dot", false)
-s_ch_main:CreateToggle("Outline", true, function(v) CrosshairCFG.Outline = v; buildCH() end)
-s_ch_main:CreateToggle("Rainbow", false, function(v) CrosshairCFG.Rainbow = v end)
-s_ch_main:CreateToggle("Center Dot", true, function(v) CrosshairCFG.CenterDot = v; buildCH() end)
-s_ch_main:CreateSlider("Size", 1, 20, 6, true, function(v) CrosshairCFG.Size = v end)
-s_ch_main:CreateSlider("Thickness", 1, 8, 2, true, function(v) CrosshairCFG.Thickness = v; buildCH() end)
-s_ch_main:CreateSlider("Gap", 0, 30, 4, true, function(v) CrosshairCFG.Gap = v end)
-s_ch_main:CreateSlider("Length", 2, 40, 10, true, function(v) CrosshairCFG.Length = v; buildCH() end)
-s_ch_main:CreateSlider("Opacity", 0, 10, 10, true, function(v) CrosshairCFG.Opacity = v/10 end)
 
--- Spoofer
-local spoofStatusLabel = s_sp_main:CreateLabel("Spoofed: None")
-s_sp_main:CreateLabel("Remote: "..(SetControlsRemote and "Found ✓" or "NOT FOUND ✗"))
 s_sp_main:CreateDropdown("Device", {"VR","Touch","Gamepad","MouseKeyboard"}, function(v)
     CFG.Spoofer.Device = v
 end, "VR", false)
-s_sp_main:CreateButton("Spoof Now", function()
-    if CFG.Spoofer.Device == "None" then return end
-    spoofStatusLabel:UpdateText("Spoofing → "..CFG.Spoofer.Device.."...")
-    task.defer(function()
-        local ok = spoofDevice(CFG.Spoofer.Device)
-        spoofStatusLabel:UpdateText(ok and ("Spoofed: "..CFG.Spoofer.Device) or "Spoof Failed!")
-    end)
-end)
 s_sp_main:CreateToggle("Auto Re-Spoof", false, function(v)
     CFG.Spoofer.AutoSpoof = v
     if v and CFG.Spoofer.Device ~= "None" then startAutoSpoof() else stopAutoSpoof() end
 end)
-s_sp_main:CreateSlider("Interval (sec)", 1, 30, 5, true, function(v) CFG.Spoofer.Interval = v end)
-s_sp_main:CreateButton("Reset Spoof", function()
-    stopAutoSpoof()
-    pcall(function() SetControlsRemote:FireServer("MouseKeyboard") end)
-    CFG.Spoofer.Device = "None"; spoofStatusLabel:UpdateText("Spoofed: None")
-end)
 
--- Skin Changer
 local scWeaponList = {}
 for w, _ in pairs(SC_WeaponSkins) do table.insert(scWeaponList, w) end
 table.sort(scWeaponList)
 local scSelectedWeapon = scWeaponList[1]
-local scSelectedSkin   = "Default"
 local scInfoLabel      = s_skin_main:CreateLabel("Select weapon then skin")
 
 s_skin_main:CreateDropdown("Weapon", scWeaponList, function(v)
-    scSelectedWeapon = v; scSelectedSkin = "Default"
-    scInfoLabel:UpdateText("Selected: "..v)
-    local skins = {"Default"}
-    for _, s in ipairs(SC_WeaponSkins[v] or {}) do table.insert(skins, s) end
-    window:Notify("Skins for "..v, table.concat(skins, ", "), 5)
+    scSelectedWeapon = v; scInfoLabel:UpdateText("Selected: "..v)
 end, scWeaponList[1], false)
 
 s_skin_main:CreateTextBox("Skin Name", "Type exact skin name...", false, function(v)
-    local trimmed = v:gsub("^%s+",""):gsub("%s+$","")
-    if trimmed == "" or trimmed == "Default" then
-        SC_Reset(scSelectedWeapon); scSelectedSkin = "Default"
-        scInfoLabel:UpdateText(scSelectedWeapon.." → Default")
-    else
-        local found = false
-        for _, sk in ipairs(SC_WeaponSkins[scSelectedWeapon] or {}) do
-            if sk:lower() == trimmed:lower() then
-                found = true; scSelectedSkin = sk
-                SC_Apply(scSelectedWeapon, sk)
-                scInfoLabel:UpdateText(scSelectedWeapon.." → "..sk)
-                window:Notify("Applied", sk.." on "..scSelectedWeapon, 3); break
-            end
-        end
-        if not found then window:Notify("Not Found", '"'..trimmed..'" not valid for '..scSelectedWeapon, 4) end
-    end
+    SC_Apply(scSelectedWeapon, v)
 end)
 s_skin_main:CreateButton("Reset Skin", function()
-    SC_Reset(scSelectedWeapon); scSelectedSkin = "Default"
-    scInfoLabel:UpdateText(scSelectedWeapon.." → Default")
-end)
-s_skin_main:CreateButton("List Skins (Console)", function()
-    if not scSelectedWeapon then return end
-    print("=== Skins for "..scSelectedWeapon.." ==="); print("Default")
-    for _, sk in ipairs(SC_WeaponSkins[scSelectedWeapon] or {}) do print(sk) end
-    window:Notify("Console", "All skins printed (F9)", 4)
+    SC_Reset(scSelectedWeapon)
 end)
 
 -- ═══════════════════════════════════════════
 -- TAB: WORLD
--- Contains: Skybox, Lighting FX, World Tint, Gray Sky,
---           No Textures, Snow, Rain, Brightness, Fog
 -- ═══════════════════════════════════════════
 local s_sky_main   = tabs.world:CreateSection("Skybox")
 local s_light_main = tabs.world:CreateSection("Lighting FX")
 local s_world_main = tabs.world:CreateSection("World Settings")
 local s_particle   = tabs.world:CreateSection("Weather Particles")
 
--- Skybox
 s_sky_main:CreateToggle("Custom Skybox", false, function(v)
     VisualsCFG.Skybox.Enabled = v
     if v then applySkyPreset(VisualsCFG.Skybox.Preset) else restoreSky() end
@@ -2351,65 +2178,37 @@ s_sky_main:CreateDropdown("Preset", SkyboxNames, function(v)
     if VisualsCFG.Skybox.Enabled then applySkyPreset(v) end
 end, "Purple Night", false)
 
--- Lighting FX
 s_light_main:CreateToggle("Lighting FX", false, function(v)
     VisualsCFG.Lighting.Enabled = v
     if v then startLighting() end
 end)
-s_light_main:CreateDropdown("Mode", {"Neon","Strobe","Pulse","Disco","Static"}, function(v)
-    VisualsCFG.Lighting.Mode = v
-end, "Neon", false)
-s_light_main:CreateSlider("Speed", 1, 10, 1, true, function(v) VisualsCFG.Lighting.Speed = v end)
 
--- World
 s_world_main:CreateToggle("World Tint", false, function(v)
     VisualsCFG.Tint.Enabled = v
     WorldCC.TintColor = VisualsCFG.Tint.Color; WorldCC.Enabled = v
 end)
 s_world_main:CreateToggle("Gray Sky", false, function(v) applyGraySky(v) end)
 s_world_main:CreateToggle("No Textures", false, function(v) applyNoTex(v) end)
-s_world_main:CreateSlider("Brightness", 1, 20, 10, true, function(v)
-    pcall(function() Lighting.Brightness = v/10 end)
-end)
-s_world_main:CreateSlider("Fog Distance", 1, 100, 100, true, function(v)
-    pcall(function() Lighting.FogEnd = v * 100 end)
-end)
 
--- Particles
 s_particle:CreateToggle("Snow", false, function(v) pCfg.Snow.Enabled = v; rebuildParticles() end)
 s_particle:CreateToggle("Rain", false, function(v) pCfg.Rain.Enabled = v; rebuildParticles() end)
 
 -- ═══════════════════════════════════════════
 -- TAB: MISC
--- Contains: Gun, Resolution, Weapon Status,
---           Quick Melee, OOB, Auto Collect,
---           Hit/Kill Notify, Hit Sound, Misc toggles
 -- ═══════════════════════════════════════════
 local s_gun_main   = tabs.misc:CreateSection("Gun Modifiers")
 local s_res_main   = tabs.misc:CreateSection("Screen Resolution")
 local s_ws_main    = tabs.misc:CreateSection("Weapon Status")
-local s_qm_main    = tabs.misc:CreateSection("Quick Melee")
-local s_oob_main   = tabs.misc:CreateSection("Out Of Bounds")
 local s_col_main   = tabs.misc:CreateSection("Auto Collect")
 local s_notif_main = tabs.misc:CreateSection("Notifications")
 local s_sound_main = tabs.misc:CreateSection("Hit Sound")
 local s_misc_tgl   = tabs.misc:CreateSection("Misc Toggles")
 
--- Gun
-s_gun_main:CreateLabel("Applies to all guns except Sniper, Bow, RPG, Crossbow")
 s_gun_main:CreateToggle("No Recoil", false, function(v) GunCFG.NoRecoil = v; patchGun() end)
 s_gun_main:CreateToggle("No Spread", false, function(v) GunCFG.NoSpread = v; patchGun() end)
-s_gun_main:CreateToggle("Fast Shoot", false, function(v) GunCFG.FastShoot = v; patchGun() end)
-s_gun_main:CreateToggle("Rapid Fire (All mods)", false, function(v) GunCFG.RapidFire = v; patchGun() end)
-s_gun_main:CreateButton("Apply Now", function() patchGun(); window:Notify("Gun","Patch applied",2) end)
-s_gun_main:CreateButton("Restore All", function()
-    GunCFG.NoRecoil=false; GunCFG.NoSpread=false; GunCFG.FastShoot=false; GunCFG.RapidFire=false
-    patchGun(); window:Notify("Gun","All values restored",3)
-end)
+s_gun_main:CreateToggle("Rapid Fire", false, function(v) GunCFG.RapidFire = v; patchGun() end)
 
--- Resolution
 local resolutionActive = false; local resConn = nil
-s_res_main:CreateLabel("Scales render resolution. Lower = better performance.")
 s_res_main:CreateToggle("Enable Resolution Scale", false, function(v)
     resolutionActive = v
     if v then
@@ -2424,78 +2223,29 @@ s_res_main:CreateToggle("Enable Resolution Scale", false, function(v)
 end)
 s_res_main:CreateSlider("Resolution Scale %", 10, 100, 65, true, function(v) CFG.Resolution = v/100 end)
 
--- Weapon Status
-s_ws_main:CreateLabel("Changes weapon background to purple banned color")
 s_ws_main:CreateToggle("Weapon Status Changer", false, function(v)
     CFG.WeaponStatus.On = v
     if v then applyWeaponStatus() else removeWeaponStatus() end
 end)
 
--- Quick Melee
-s_qm_main:CreateLabel("Remote: "..(QuickAttackRemote and "Found ✓" or "NOT FOUND ✗"))
-s_qm_main:CreateButton("Fire Quick Attack", function() fireQuickAttack() end)
-s_qm_main:CreateButton("Cancel Quick Attack", function() cancelQuickAttack() end)
-s_qm_main:CreateToggle("Auto Quick Melee", false, function(v)
-    CFG.QuickMelee.AutoOn = v
-    if not v then cancelQuickAttack() end
-end)
-s_qm_main:CreateSlider("Interval (x0.1s)", 1, 50, 3, false, function(v) CFG.QuickMelee.Interval = v/10 end)
-
--- OOB
-s_oob_main:CreateLabel("Remote: "..(OutOfBoundsRemote and "Found ✓" or "NOT FOUND ✗"))
-s_oob_main:CreateButton("Fire OOB Now", function()
-    local ok = fireOOB()
-    window:Notify("OOB", ok and "OOB fired!" or "OOB barrier not found", 3)
-end)
-s_oob_main:CreateButton("Check OOB Part", function()
-    local oob = getOOBPart()
-    if oob then window:Notify("OOB Found", oob:GetFullName(), 4)
-    else window:Notify("OOB", "No barrier found", 3) end
-end)
-s_oob_main:CreateToggle("Auto OOB", false, function(v)
-    CFG.OOB.AutoOn = v; oobTimer = 0
-end)
-s_oob_main:CreateSlider("Interval (x0.1s)", 1, 50, 10, false, function(v) CFG.OOB.Interval = v/10 end)
-
--- Auto Collect
 s_col_main:CreateToggle("Collect Health", true, function(v) CFG.Collect.Health = v end)
-s_col_main:CreateToggle("Collect Ammo",   true, function(v) CFG.Collect.Ammo   = v end)
+s_col_main:CreateToggle("Collect Ammo", true, function(v) CFG.Collect.Ammo = v end)
 
--- Notifications
 s_notif_main:CreateToggle("Kill Notify", false, function(v) MiscCFG.KillNotify.Enabled = v end)
-s_notif_main:CreateTextBox("Kill Text", "Killed {name}!", false, function(v)
-    MiscCFG.KillNotify.Text = v ~= "" and v or "Killed {name}!"
-end)
 s_notif_main:CreateToggle("Hit Notify", false, function(v) MiscCFG.HitNotify.Enabled = v end)
-s_notif_main:CreateTextBox("Hit Text", "Hit {name} for {dmg}", false, function(v)
-    MiscCFG.HitNotify.Text = v ~= "" and v or "Hit {name} for {dmg}"
-end)
-s_notif_main:CreateToggle("Kill Say (Chat)", false, function(v) MiscCFG.KillSay.Enabled = v end)
-s_notif_main:CreateTextBox("Kill Say Text", "gg {name}", false, function(v)
-    MiscCFG.KillSay.Text = v ~= "" and v or "gg {name}"
-end)
 
--- Hit Sound
 s_sound_main:CreateToggle("Hit Sound", false, function(v) MiscCFG.HitSound.Enabled = v end)
 s_sound_main:CreateDropdown("Sound Preset", SoundNames, function(v)
     MiscCFG.HitSound.Sound = v
 end, "Default", false)
-s_sound_main:CreateButton("Test Sound", function()
-    playHitSound(MiscCFG.HitSound.Sound)
-end)
 
--- Misc Toggles
 s_misc_tgl:CreateToggle("Anti Katana", false, function(v) MiscCFG.AntiKatana = v; katanaActive = v end)
-s_misc_tgl:CreateToggle("Anti OOB (prevent fall)", false, function(v)
-    MiscCFG.AntiOOB = v; if v then startAntiOOB() end
-end)
 s_misc_tgl:CreateToggle("Anti Hit Local", false, function(v)
     MiscCFG.AntiHitLocal = v; if v then startAHL() else stopAHL() end
 end)
 
 -- ═══════════════════════════════════════════
 -- TAB: PLAYER
--- Contains: Fly, Speed, Noclip, Spinbot, Poses, Orbit
 -- ═══════════════════════════════════════════
 local s_fly_main   = tabs.player:CreateSection("Fly")
 local s_speed_main = tabs.player:CreateSection("Speed")
@@ -2508,7 +2258,6 @@ s_fly_main:CreateToggle("Fly", false, function(v)
     PlayerCFG.Fly.Enabled = v; if v then startFly() else stopFly() end
 end)
 s_fly_main:CreateSlider("Fly Speed", 1, 200, 50, true, function(v) PlayerCFG.Fly.Speed = v end)
-s_fly_main:CreateLabel("WASD + Space/Shift to move")
 
 s_speed_main:CreateToggle("Speed", false, function(v)
     PlayerCFG.Speed.Enabled = v; if v then startSpeed() end
@@ -2522,7 +2271,6 @@ end)
 s_sb_main:CreateToggle("Spinbot", false, function(v)
     PlayerCFG.Spinbot.Enabled = v; if v then startSpinbot() end
 end)
-s_sb_main:CreateSlider("Spin Speed", 60, 1800, 360, true, function(v) PlayerCFG.Spinbot.Speed = v end)
 
 s_pose_main:CreateToggle("Spider Pose", false, function(v)
     if v then activatePose("Spider") else activatePose(nil) end
@@ -2530,35 +2278,28 @@ end)
 s_pose_main:CreateToggle("Upside Down", false, function(v)
     if v then activatePose("UpsideDown") else activatePose(nil) end
 end)
-s_pose_main:CreateToggle("Kneel", false, function(v)
-    if v then activatePose("Kneel") else activatePose(nil) end
-end)
 
 s_orbit_main:CreateToggle("Orbit Enemy", false, function(v) CFG.Orbit.On = v end)
 s_orbit_main:CreateSlider("Radius", 3, 35, 12, true, function(v) CFG.Orbit.Radius = v end)
-s_orbit_main:CreateSlider("Speed", 1, 20, 4, true, function(v) CFG.Orbit.Speed = v/2 end)
-s_orbit_main:CreateSlider("Height Offset", -20, 20, 0, true, function(v) CFG.Orbit.Height = v end)
 local orbitLabel = s_orbit_main:CreateLabel("Target: None")
 s_orbit_main:CreateButton("Closest Enemy", function()
     local best, bd = nil, math.huge
     for _, p in ipairs(Players:GetPlayers()) do
         if p == LP then continue end
-        local ch  = p.Character; if not ch then continue end
-        local hrp = ch:FindFirstChild("HumanoidRootPart"); if not hrp then continue end
-        local myhrp = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart"); if not myhrp then continue end
-        local d = (hrp.Position - myhrp.Position).Magnitude
-        if d < bd then bd = d; best = p end
+        local ch = p.Character; if not ch then continue end
+        local hrp = ch:FindFirstChild("HumanoidRootPart")
+        local myhrp = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+        if hrp and myhrp then
+            local d = (hrp.Position - myhrp.Position).Magnitude
+            if d < bd then bd = d; best = p end
+        end
     end
     CFG.OrbitTarget = best
     orbitLabel:UpdateText("Target: "..(best and best.Name or "None"))
 end)
-s_orbit_main:CreateButton("Clear Target", function()
-    CFG.OrbitTarget = nil; orbitLabel:UpdateText("Target: None")
-end)
 
 -- ═══════════════════════════════════════════
 -- TAB: SETTINGS
--- Contains: Watermark, Quick Actions, Config
 -- ═══════════════════════════════════════════
 local s_set_wm  = tabs.settings:CreateSection("Watermark")
 local s_set_act = tabs.settings:CreateSection("Quick Actions")
@@ -2568,76 +2309,39 @@ local watermark    = library:Hud()
 
 s_set_wm:CreateToggle("Show Time", true, function(v) WatermarkCFG.ShowTime = v end)
 s_set_wm:CreateToggle("Show Active Features", true, function(v) WatermarkCFG.ShowActive = v end)
-s_set_wm:CreateSlider("Text Size", 8, 24, 14, true, function(v) WatermarkCFG.Size = v end)
 
 RunService.RenderStepped:Connect(function()
-    local parts = {"Rivals Tool v9.8"}
+    local parts = {"Rivals Tool v9.9"}
     if WatermarkCFG.ShowTime then table.insert(parts, os.date("%H:%M:%S")) end
-    if WatermarkCFG.ShowActive then
-        local active = {}
-        if AimbotCFG.On             then table.insert(active, "AIM")    end
-        if SilentAimCFG.Enabled     then table.insert(active, "SA")     end
-        if SAHookCFG.On             then table.insert(active, "HOOK")   end
-        if silentActive             then table.insert(active, "RAGE")   end
-        if TrigCFG.On               then table.insert(active, "TRIG")   end
-        if CFG.Void.On              then table.insert(active, "VOID")   end
-        if CFG.Orbit.On             then table.insert(active, "ORBIT")  end
-        if AntiAimCFG.Enabled       then table.insert(active, "AA")     end
-        if FakeLagCFG.Enabled       then table.insert(active, "FL")     end
-        if ESPCFG.Enabled           then table.insert(active, "ESP")    end
-        if GunCFG.NoRecoil or GunCFG.NoSpread or GunCFG.FastShoot or GunCFG.RapidFire then table.insert(active, "GUN") end
-        if #active > 0 then table.insert(parts, "["..table.concat(active," ").."]") end
-    end
     watermark:SetText(table.concat(parts, " | "))
 end)
 
 s_set_act:CreateButton("Stop All Features", function()
-    -- Combat
-    AimbotCFG.On=false; lockedTarget=nil; lockTimer=0; stopAimbot()
+    AimbotCFG.On=false; stopAimbot()
     SilentAimCFG.Enabled=false; stopSilentAim()
     SAHookCFG.On=false; stopSAHook()
     silentActive=false; stopRagebotSA()
     TrigCFG.On=false; stopTriggerbot()
-    CFG.Void.On=false; Desync.active=false; Desync.phase="idle"
+    Desync.active=false
     if Desync.realCFrame and humanoidRootPart and humanoidRootPart.Parent then
         humanoidRootPart.CFrame = Desync.realCFrame
     end
-    Desync.currentDepth=0
     AntiAimCFG.Enabled=false; stopAntiAim()
     FakeLagCFG.Enabled=false; stopFakeLag()
-    -- Visual
     ESPCFG.Enabled=false; VisualizeCFG.Enabled=false
     for _, p in pairs(Players:GetPlayers()) do removeViz(p) end
-    BulletTracerCFG.Enabled=false; HitMarkerCFG.Enabled=false
-    CrosshairCFG.Enabled=false; buildCH()
-    stopAutoSpoof()
-    -- World
     VisualsCFG.Skybox.Enabled=false; restoreSky()
-    VisualsCFG.Lighting.Enabled=false
-    WorldCC.Enabled=false; applyGraySky(false); applyNoTex(false)
-    pCfg.Snow.Enabled=false; pCfg.Rain.Enabled=false; rebuildParticles()
-    -- Misc
-    GunCFG.NoRecoil=false; GunCFG.NoSpread=false; GunCFG.FastShoot=false; GunCFG.RapidFire=false; patchGun()
-    CFG.WeaponStatus.On=false; removeWeaponStatus()
-    CFG.OOB.AutoOn=false; CFG.QuickMelee.AutoOn=false
-    -- Player
     PlayerCFG.Fly.Enabled=false; stopFly()
-    PlayerCFG.Speed.Enabled=false
-    PlayerCFG.Noclip.Enabled=false
-    PlayerCFG.Spinbot.Enabled=false
+    PlayerCFG.Speed.Enabled=false; PlayerCFG.Noclip.Enabled=false
     activatePose(nil); CFG.Orbit.On=false
-    -- FOV
-    if fovCircle   then fovCircle.Visible   = false end
-    if saFovCircle then saFovCircle.Visible = false end
     window:Notify("Stopped", "All features disabled", 3)
 end)
 
 local config_manager = loadstring(game:HttpGet("https://raw.githubusercontent.com/nfpw/XXSCRIPT/refs/heads/main/Library/ConfigManager.lua"))()
 config_manager:SetLibrary(library)
 config_manager:SetWindow(window)
-config_manager:SetFolder("RivalsTool_v98")
+config_manager:SetFolder("RivalsTool_v99")
 config_manager:BuildConfigSection(tabs.settings)
 config_manager:LoadAutoloadConfig()
 
-window:Notify("Rivals Tool v9.8", "Combat | Visual | World | Misc | Player | Insert = UI", 6)
-print("[RIVALS TOOL v9.8] Loaded | "..(IsMobile and "Mobile" or "PC"))
+window:Notify("Rivals Tool v9.9", "OOB and Melee Removed | Insert = UI", 6)

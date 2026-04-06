@@ -2664,6 +2664,5 @@ end))
 -- ═══════════════════════════════════════════
 -- LOAD COMPLETE
 -- ═══════════════════════════════════════════
-Library:Notify("Rivals Tool v9.8 loaded — "
-    ..(IsMobile and "MOBILE" or "PC"),6)
+Library:Notify("Rivals Tool v9.8 loaded — "..(IsMobile and "MOBILE" or "PC"), 6)
 print("[RIVALS TOOL v9.8] "..(IsMobile and "MOBILE" or "PC"))

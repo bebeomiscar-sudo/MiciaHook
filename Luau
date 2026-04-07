@@ -3,8 +3,8 @@
 ]]
 
 -- Auto/Silent Load Config
-local AUTO_LOAD  = false
-local SILENT_LOAD = false
+local AUTO_LOAD   = true
+local SILENT_LOAD = true
 
 -- ═══════════════════════════════════════════
 -- SERVICES
@@ -24,12 +24,13 @@ local camera   = workspace.CurrentCamera
 
 -- ═══════════════════════════════════════════
 -- AUTO LOAD CHECK
--- Only loads if player is in a Rivals match
 -- ═══════════════════════════════════════════
 if AUTO_LOAD then
-    local gameName = game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId).Name
+    local ok, info = pcall(function()
+        return game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId)
+    end)
     local isRivals = tostring(game.PlaceId):find("17625359962")
-        or (gameName and gameName:lower():find("rivals"))
+        or (ok and info and info.Name and info.Name:lower():find("rivals"))
     if not isRivals then
         warn("[Rivals Tool] Not a Rivals match — auto load cancelled")
         return
@@ -86,16 +87,16 @@ local function showConsoleMessage(text)
     if not pg then return end
     local label = Instance.new("TextLabel")
     label.BackgroundTransparency = 1
-    label.Text = "CONSOLE: " .. tostring(text)
-    label.Font = Enum.Font.Code
-    label.TextColor3 = consoleTextColor
-    label.TextSize = 16
+    label.Text                   = "CONSOLE: " .. tostring(text)
+    label.Font                   = Enum.Font.Code
+    label.TextColor3             = consoleTextColor
+    label.TextSize               = 16
     label.TextStrokeTransparency = 0.7
-    label.TextStrokeColor3 = Color3.new(0, 0, 0)
-    label.TextXAlignment = Enum.TextXAlignment.Left
-    label.Size = UDim2.new(0.9, 0, 0, 28)
-    label.Position = UDim2.new(0.05, 0, 0.08 + (#consoleLabels * 0.055), 0)
-    label.Parent = pg
+    label.TextStrokeColor3       = Color3.new(0, 0, 0)
+    label.TextXAlignment         = Enum.TextXAlignment.Left
+    label.Size                   = UDim2.new(0.9, 0, 0, 28)
+    label.Position               = UDim2.new(0.05, 0, 0.08 + (#consoleLabels * 0.055), 0)
+    label.Parent                 = pg
     table.insert(consoleLabels, label)
     label.TextTransparency = 1
     TweenService:Create(label, TweenInfo.new(0.3), {TextTransparency = 0}):Play()
@@ -139,8 +140,8 @@ if IsMobile then
     UIS.TouchEnded:Connect(function()
         MobileTrigState.touching = false
         if not MobileTrigCFG.AutoFire then
-            MobileTrigState.waiting = false
-            MobileTrigState.timer = 0
+            MobileTrigState.waiting  = false
+            MobileTrigState.timer    = 0
             MobileTrigState.cooldown = 0
         end
     end)
@@ -152,15 +153,15 @@ local SAHookCFG = {
     HitChance=100, IgnoreFOV=false, FOVSize=600, DrawFOV=true,
     DynamicFOV=false, TargetParts="Head, Body", Targeting="Closest", PreferRandom=false,
 }
-local AntiAimCFG = { On=false, Type="Backwards", YawAngle=180, PitchAngle=90 }
+local AntiAimCFG     = { On=false, Type="Backwards", YawAngle=180, PitchAngle=90 }
 local ImmunityCFG    = { Enabled=true, SpawnProtectionTime=4.0 }
 local playerImmunity = {}
 
 local CFG = {
-    Emote   = { On=false, AnimID="", Speed=1, Loop=true },
-    Spoofer = { On=false, Device="None", AutoSpoof=false, Interval=5 },
-    Collect = { Health=true, Ammo=true },
-    Crosshair   = { On=false, Size=24, Image="rbxassetid://97119437608195" },
+    Emote        = { On=false, AnimID="", Speed=1, Loop=true },
+    Spoofer      = { On=false, Device="None", AutoSpoof=false, Interval=5 },
+    Collect      = { Health=true, Ammo=true },
+    Crosshair    = { On=false, Size=24, Image="rbxassetid://97119437608195" },
     WeaponStatus = { On=false },
 }
 
@@ -325,23 +326,23 @@ local function applyFOVStyle(circle)
     if style == "Invisible" then
         circle.Visible = false
     elseif style == "Filled" then
-        circle.Filled      = true
-        circle.Thickness   = 1
+        circle.Filled       = true
+        circle.Thickness    = 1
         circle.Transparency = 0.85
-        circle.Visible     = AimbotCFG.DrawFOV and AimbotCFG.On
+        circle.Visible      = AimbotCFG.DrawFOV and AimbotCFG.On
     else
-        circle.Filled      = false
-        circle.Thickness   = 1.5
+        circle.Filled       = false
+        circle.Thickness    = 1.5
         circle.Transparency = 0.7
-        circle.Visible     = AimbotCFG.DrawFOV and AimbotCFG.On
+        circle.Visible      = AimbotCFG.DrawFOV and AimbotCFG.On
     end
 end
 
 -- ═══════════════════════════════════════════
 -- AIMBOT
 -- ═══════════════════════════════════════════
-local lockTimer    = 0
-local lockedTarget = nil
+local lockTimer     = 0
+local lockedTarget  = nil
 local reactionTimer = 0
 local isInReaction  = false
 
@@ -945,10 +946,10 @@ local hitColor    = Color3.fromRGB(255, 20, 147)
 local hitStayTime = 5
 
 local hitNumberGui = Instance.new("ScreenGui")
-hitNumberGui.Name          = "HitNumbersUI"
-hitNumberGui.ResetOnSpawn  = false
+hitNumberGui.Name           = "HitNumbersUI"
+hitNumberGui.ResetOnSpawn   = false
 hitNumberGui.IgnoreGuiInset = true
-hitNumberGui.Parent        = LP:WaitForChild("PlayerGui")
+hitNumberGui.Parent         = LP:WaitForChild("PlayerGui")
 
 local function showHit(amount)
     if not hitEnabled then return end
@@ -1034,10 +1035,10 @@ if LP.PlayerGui:FindFirstChild("CustomCrosshair") then
     LP.PlayerGui.CustomCrosshair:Destroy()
 end
 local crosshairGui = Instance.new("ScreenGui")
-crosshairGui.Name          = "CustomCrosshair"
-crosshairGui.ResetOnSpawn  = false
+crosshairGui.Name           = "CustomCrosshair"
+crosshairGui.ResetOnSpawn   = false
 crosshairGui.IgnoreGuiInset = true
-crosshairGui.Parent        = LP:WaitForChild("PlayerGui")
+crosshairGui.Parent         = LP:WaitForChild("PlayerGui")
 local crosshairImg = Instance.new("ImageLabel", crosshairGui)
 crosshairImg.BackgroundTransparency = 1
 crosshairImg.AnchorPoint            = Vector2.new(0.5, 0.5)
@@ -1054,13 +1055,14 @@ local customSky = nil
 local function applySky()
     for _, v in pairs(Lighting:GetChildren()) do if v:IsA("Sky") then v:Destroy() end end
     customSky = Instance.new("Sky", Lighting)
-    customSky.SkyboxBk = "rbxassetid://159454299"
-    customSky.SkyboxDn = "rbxassetid://159454296"
-    customSky.SkyboxFt = "rbxassetid://159454293"
-    customSky.SkyboxLf = "rbxassetid://159454286"
-    customSky.SkyboxRt = "rbxassetid://159454288"
-    customSky.SkyboxUp = "rbxassetid://159454300"
-    customSky.SunAngularSize = 0; customSky.MoonAngularSize = 0
+    customSky.SkyboxBk      = "rbxassetid://159454299"
+    customSky.SkyboxDn      = "rbxassetid://159454296"
+    customSky.SkyboxFt      = "rbxassetid://159454293"
+    customSky.SkyboxLf      = "rbxassetid://159454286"
+    customSky.SkyboxRt      = "rbxassetid://159454288"
+    customSky.SkyboxUp      = "rbxassetid://159454300"
+    customSky.SunAngularSize  = 0
+    customSky.MoonAngularSize = 0
     Lighting.Ambient        = Color3.fromRGB(150, 150, 150)
     Lighting.OutdoorAmbient = Color3.fromRGB(100, 100, 100)
 end
@@ -1144,42 +1146,71 @@ local function applyACBypass()
     end)
     setreadonly(mt, true)
 
-    -- Script blocker
-    coroutine.wrap(function()
-        xpcall(function()
-            local acKeywords = {
-                "anticheat", "ac_", "_ac", "cheatdetect",
-                "exploitdetect", "hackdetect", "bypass",
-            }
-            local function blockScript(obj)
-                if obj:IsA("LocalScript") or obj:IsA("ModuleScript") then
-                    local n = obj.Name:lower()
-                    for _, kw in pairs(acKeywords) do
-                        if n:find(kw) then
-                            xpcall(function() obj.Disabled = true end, function() end)
-                            break
-                        end
+    -- Layer 1: AC script blocker
+    -- Only specific enough keywords to avoid hitting real game scripts
+    local acKeywords = {
+        "anticheat", "antiexploit", "detectexploit",
+        "kickscript", "cheatdetector", "exploitdetector",
+        "banhandler", "clientintegrity", "integritycheck",
+        "replicationcheck", "anticheatmanager",
+    }
+
+    local function killAC(obj)
+        if obj:IsA("LocalScript") or obj:IsA("ModuleScript") then
+            local name = obj.Name:lower()
+            for _, kw in ipairs(acKeywords) do
+                if name:find(kw) then
+                    -- Only disable, never destroy
+                    -- Destroying can error and expose the executor
+                    pcall(function() obj.Disabled = true end)
+                    break
+                end
+            end
+        end
+    end
+
+    for _, obj in ipairs(game:GetDescendants()) do killAC(obj) end
+    game.DescendantAdded:Connect(killAC)
+
+    -- Layer 2: NetworkClient protection
+    pcall(function()
+        local nc = game:GetService("NetworkClient")
+        if nc then
+            nc.ChildAdded:Connect(function(child)
+                local n = child.Name:lower()
+                for _, kw in ipairs(acKeywords) do
+                    if n:find(kw) then
+                        pcall(function() child:Destroy() end)
+                        break
+                    end
+                end
+            end)
+        end
+    end)
+
+    -- Layer 3: __namecall remote block
+    -- Blocks kick/shutdown remotes WITHOUT debug.traceback
+    -- traceback on every FireServer kills FPS badly
+    pcall(function()
+        local blockedRemoteNames = {
+            "kickplayer", "banplayer", "reportplayer",
+            "punish", "flagplayer", "anticheat",
+        }
+        local oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+            local method = getnamecallmethod()
+            if method == "FireServer" or method == "InvokeServer" then
+                local name = (self and self.Name or ""):lower()
+                for _, blocked in ipairs(blockedRemoteNames) do
+                    if name:find(blocked) then
+                        return
                     end
                 end
             end
-            for _, obj in pairs(game:GetDescendants()) do blockScript(obj) end
-            game.DescendantAdded:Connect(blockScript)
-        end, function() end)
+            return oldNamecall(self, ...)
+        end))
+    end)
 
-        xpcall(function()
-            local networkClient = game:GetService("NetworkClient")
-            if networkClient then
-                networkClient.ChildAdded:Connect(function(child)
-                    local n = child.Name:lower()
-                    if n:find("kick") or n:find("ban") or n:find("detect") then
-                        xpcall(function() child:Destroy() end, function() end)
-                    end
-                end)
-            end
-        end, function() end)
-    end)()
-
-    -- GC scan
+    -- Layer 4: GC scan for loading screen kick functions
     task.spawn(function()
         local ls3 = ReplicatedFirst:WaitForChild("LocalScript3", 10)
         if ls3 then
@@ -1336,9 +1367,6 @@ RB_R:AddToggle("RBTeam", {Text="Team Check", Default=false, Callback=function(v)
 end})
 RB_R:AddToggle("RBVis", {Text="Visible Check", Default=false, Callback=function(v)
     silentVisibleCheck = v
-end})
-RB_R:AddToggle("RBReload", {Text="Auto Reload", Default=true, Callback=function(v)
-    -- stored in silentConn loop
 end})
 RB_R:AddButton({Text="Force Reload Now", Func=function()
     if not fighter_mod or not fighter_mod.LocalFighter then return end
@@ -1550,18 +1578,26 @@ WD_L:AddButton({Text="Enable Dark Sky + Snow", Func=function()
         sky[prop] = DARK_SKY_ID
     end
     local snowPart = Instance.new("Part")
-    snowPart.Name = "SimpleSnow"; snowPart.Size = Vector3.new(100, 1, 100)
-    snowPart.Transparency = 1; snowPart.CanCollide = false; snowPart.Anchored = true
-    snowPart.Parent = workspace
+    snowPart.Name        = "SimpleSnow"
+    snowPart.Size        = Vector3.new(100, 1, 100)
+    snowPart.Transparency = 1
+    snowPart.CanCollide  = false
+    snowPart.Anchored    = true
+    snowPart.Parent      = workspace
     local emitter = Instance.new("ParticleEmitter")
-    emitter.Texture = "rbxassetid://5833323391"
-    emitter.Color = ColorSequence.new(Color3.fromRGB(255, 255, 255))
-    emitter.Size = NumberSequence.new(0.6); emitter.Transparency = NumberSequence.new(0)
-    emitter.Lifetime = NumberRange.new(12, 20); emitter.Rate = 150
-    emitter.Speed = NumberRange.new(5, 10); emitter.SpreadAngle = Vector2.new(30, 30)
+    emitter.Texture      = "rbxassetid://5833323391"
+    emitter.Color        = ColorSequence.new(Color3.fromRGB(255, 255, 255))
+    emitter.Size         = NumberSequence.new(0.6)
+    emitter.Transparency = NumberSequence.new(0)
+    emitter.Lifetime     = NumberRange.new(12, 20)
+    emitter.Rate         = 150
+    emitter.Speed        = NumberRange.new(5, 10)
+    emitter.SpreadAngle  = Vector2.new(30, 30)
     emitter.Acceleration = Vector3.new(0, -7, 0)
-    emitter.Rotation = NumberRange.new(0, 360); emitter.RotSpeed = NumberRange.new(-30, 30)
-    emitter.Parent = snowPart; emitter.Enabled = true
+    emitter.Rotation     = NumberRange.new(0, 360)
+    emitter.RotSpeed     = NumberRange.new(-30, 30)
+    emitter.Parent       = snowPart
+    emitter.Enabled      = true
     RunService.RenderStepped:Connect(function()
         if camera and snowPart and snowPart.Parent then
             snowPart.Position = camera.CFrame.Position + Vector3.new(0, 35, 0)
@@ -1571,9 +1607,12 @@ WD_L:AddButton({Text="Enable Dark Sky + Snow", Func=function()
 end})
 
 local colorCorrection = Instance.new("ColorCorrectionEffect")
-colorCorrection.Parent = Lighting; colorCorrection.Saturation = 0; colorCorrection.Contrast = 0.1
+colorCorrection.Parent     = Lighting
+colorCorrection.Saturation = 0
+colorCorrection.Contrast   = 0.1
 local blurEffect = Instance.new("BlurEffect")
-blurEffect.Parent = Lighting; blurEffect.Size = 0
+blurEffect.Parent = Lighting
+blurEffect.Size   = 0
 
 WD_R:AddLabel("Screen Tint"):AddColorPicker("WorldTint", {Default=Color3.fromRGB(255, 255, 255), Callback=function(v)
     colorCorrection.TintColor = v
@@ -1628,8 +1667,10 @@ local MS_A = Tabs.Misc:AddLeftGroupbox("Arch Spoofer")
 MS_L:AddButton({Text="Apply AC Bypass", Func=function()
     applyACBypass()
 end})
-MS_L:AddLabel("Hooks WaitForChild + Kick + Shutdown")
-MS_L:AddLabel("Also blocks AC scripts and network detectors")
+MS_L:AddLabel("Layer 1: AC script keyword blocker")
+MS_L:AddLabel("Layer 2: NetworkClient protection")
+MS_L:AddLabel("Layer 3: Remote name blocker")
+MS_L:AddLabel("Layer 4: GC scan kick hook")
 
 local emoteAnimId = ""
 MS_E:AddButton({Text="Play Emote", Func=function()
@@ -1802,8 +1843,8 @@ table.insert(ActiveConnections, RunService.RenderStepped:Connect(function(dt)
             if not lockedTarget then
                 local newT = findNewAimbotTarget()
                 if newT then
-                    lockedTarget = newT; lockTimer = 0
-                    isInReaction = true
+                    lockedTarget  = newT; lockTimer = 0
+                    isInReaction  = true
                     reactionTimer = AimbotCFG.ReactionTime / 1000
                 end
             end
@@ -1908,7 +1949,6 @@ end))
 -- CORE HEARTBEAT
 -- ═══════════════════════════════════════════
 table.insert(ActiveConnections, RunService.Heartbeat:Connect(function(dt)
-    -- AUTO COLLECT
     local char = LP.Character
     if char then
         local hrp = char:FindFirstChild("HumanoidRootPart")

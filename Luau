@@ -3,8 +3,8 @@
 ]]
 
 -- Auto/Silent Load Config
-local AUTO_LOAD  = true
-local SILENT_LOAD = true
+local AUTO_LOAD  = false
+local SILENT_LOAD = false
 
 -- ═══════════════════════════════════════════
 -- SERVICES

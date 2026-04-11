@@ -1,6 +1,7 @@
 --[[
     RIVALS TOOL v9.8 — LinoriaLib Edition
     + Skin Changer v2 (Advanced Unlock All)
+    + Mechanics Controller Tab
 ]]
 
 -- ═══════════════════════════════════════════
@@ -69,6 +70,7 @@ local Tabs = {
     Visuals     = Window:AddTab("Visuals"),
     World       = Window:AddTab("World"),
     Misc        = Window:AddTab("Misc"),
+    Mechanics   = Window:AddTab("Mechanics"),
     SkinChanger = Window:AddTab("Skin Changer"),
     Settings    = Window:AddTab("Settings"),
 }
@@ -165,6 +167,23 @@ local CFG = {
     WeaponStatus = { On=false },
 }
 
+-- ═══════════════════════════════════════════
+-- MECHANICS CONFIG
+-- ═══════════════════════════════════════════
+local MechCFG = {
+    SpeedEnabled   = false,
+    WalkSpeed      = 16,
+    ForceSprintOn  = false,
+    SlideEnabled   = false,
+    HighJumpEnabled= false,
+    HighJumpPower  = 1.25,
+    AutoShootPC    = false,
+    HurtEffectOff  = false,
+    LeanLock       = false,
+    LeanValue      = 0,
+    AutoJoinArcade = false,
+}
+
 local ActiveConnections = {}
 
 -- ═══════════════════════════════════════════
@@ -218,6 +237,30 @@ pcall(function()
 end)
 
 -- ═══════════════════════════════════════════
+-- CONTROLLER LOADER
+-- ═══════════════════════════════════════════
+local LP_Scripts  = LP.PlayerScripts
+local Controllers = LP_Scripts:FindFirstChild("Controllers")
+
+local MechanicsCtrl = nil
+local EntityCtrl    = nil
+local ArcadeCtrl    = nil
+local PreloadCtrl   = nil
+
+pcall(function()
+    MechanicsCtrl = require(Controllers:WaitForChild("MechanicsController", 5))
+end)
+pcall(function()
+    EntityCtrl = require(Controllers:WaitForChild("EntityController", 5))
+end)
+pcall(function()
+    ArcadeCtrl = require(Controllers:WaitForChild("ArcadeController", 5))
+end)
+pcall(function()
+    PreloadCtrl = require(Controllers:WaitForChild("PreloadController", 5))
+end)
+
+-- ═══════════════════════════════════════════
 -- REMOTES
 -- ═══════════════════════════════════════════
 local SetControlsRemote = nil
@@ -253,9 +296,7 @@ local function isSameTeamRivals(p)
     pcall(function()
         local mi = LP:GetAttribute("TeamID")
         local ti = p:GetAttribute("TeamID")
-        if mi ~= nil and ti ~= nil then
-            same = (mi == ti)
-        end
+        if mi ~= nil and ti ~= nil then same = (mi == ti) end
     end)
     if not same then
         pcall(function()
@@ -868,6 +909,200 @@ local function stopSilentAim()
 end
 
 -- ═══════════════════════════════════════════
+-- MECHANICS HELPERS
+-- ═══════════════════════════════════════════
+
+-- Walk speed override
+local speedConn = nil
+local function startSpeedOverride()
+    if speedConn then speedConn:Disconnect() end
+    speedConn = RunService.Heartbeat:Connect(function()
+        if not MechCFG.SpeedEnabled then return end
+        if not MechanicsCtrl or not MechanicsCtrl.LocalFighter then return end
+        local entity = MechanicsCtrl.LocalFighter.Entity
+        if entity and entity.Humanoid then
+            entity.Humanoid.WalkSpeed = MechCFG.WalkSpeed
+        end
+    end)
+end
+
+local function stopSpeedOverride()
+    MechCFG.SpeedEnabled = false
+    if speedConn then speedConn:Disconnect(); speedConn = nil end
+    pcall(function()
+        if MechanicsCtrl then MechanicsCtrl:_UpdateWalkSpeed() end
+    end)
+end
+
+-- Force sprint
+local forceSprintConn = nil
+local function startForceSprint()
+    if forceSprintConn then forceSprintConn:Disconnect() end
+    forceSprintConn = RunService.Heartbeat:Connect(function()
+        if not MechCFG.ForceSprintOn then return end
+        if not MechanicsCtrl then return end
+        if not MechanicsCtrl.IsSprinting then
+            pcall(function() MechanicsCtrl:SetSprinting(true) end)
+        end
+    end)
+end
+
+local function stopForceSprint()
+    MechCFG.ForceSprintOn = false
+    if forceSprintConn then forceSprintConn:Disconnect(); forceSprintConn = nil end
+    pcall(function() if MechanicsCtrl then MechanicsCtrl:SetSprinting(false) end end)
+end
+
+-- Slide / Jump
+local function doSlide()
+    if not MechanicsCtrl then Library:Notify("MechanicsController not loaded", 3); return end
+    pcall(function() MechanicsCtrl:Slide() end)
+end
+
+local function doHighJump()
+    if not MechanicsCtrl then Library:Notify("MechanicsController not loaded", 3); return end
+    pcall(function() MechanicsCtrl:HighJump() end)
+end
+
+local function doDoubleJump()
+    if not MechanicsCtrl then return end
+    pcall(function() MechanicsCtrl:DoubleJump() end)
+end
+
+-- Auto-shoot PC patch
+local origCanAutoShoot = nil
+local function enableAutoShootPC()
+    if not MechanicsCtrl then Library:Notify("MechanicsController not loaded", 3); return end
+    pcall(function()
+        origCanAutoShoot = origCanAutoShoot or MechanicsCtrl._CanAutoShoot
+        MechanicsCtrl._CanAutoShoot = function(self)
+            return self.LocalFighter
+                and self.LocalFighter.EquippedItem
+                and not self.LocalFighter:Get("IsHiddenByCutscene")
+        end
+        MechanicsCtrl:_ToggleAutoShoot()
+        Library:Notify("Auto-Shoot forced ON", 3)
+    end)
+end
+
+local function disableAutoShootPC()
+    if not MechanicsCtrl then return end
+    pcall(function()
+        if origCanAutoShoot then
+            MechanicsCtrl._CanAutoShoot = origCanAutoShoot
+            origCanAutoShoot = nil
+        end
+        MechanicsCtrl:_ToggleAutoShoot()
+        Library:Notify("Auto-Shoot restored", 3)
+    end)
+end
+
+-- Hurt effect
+local function setHurtEffect(enabled)
+    if not EntityCtrl then return end
+    pcall(function() EntityCtrl._hurt_effect_enabled = enabled end)
+end
+
+-- Camera lean
+local function setCameraLean(value)
+    if not MechanicsCtrl then return end
+    pcall(function() MechanicsCtrl:SetCameraLean(value) end)
+end
+
+-- Auto-join arcade
+local autoJoinConn = nil
+local function startAutoJoinArcade()
+    if autoJoinConn then autoJoinConn:Disconnect() end
+    autoJoinConn = RunService.Heartbeat:Connect(function()
+        if not MechCFG.AutoJoinArcade or not ArcadeCtrl then return end
+        pcall(function()
+            if ArcadeCtrl:CanJoin() then ArcadeCtrl:Join() end
+        end)
+    end)
+end
+
+local function stopAutoJoinArcade()
+    MechCFG.AutoJoinArcade = false
+    if autoJoinConn then autoJoinConn:Disconnect(); autoJoinConn = nil end
+end
+
+-- Slide jump boost
+local slideJumpBoostEnabled = false
+local slideJumpConn         = nil
+
+local function startSlideJumpBoost()
+    if slideJumpConn then slideJumpConn:Disconnect() end
+    slideJumpConn = UIS.InputBegan:Connect(function(i, gpe)
+        if gpe or not slideJumpBoostEnabled then return end
+        if i.KeyCode == Enum.KeyCode.Space then
+            if MechanicsCtrl and MechanicsCtrl.IsSliding then
+                pcall(function() MechanicsCtrl:HighJump() end)
+            end
+        end
+    end)
+end
+
+local function stopSlideJumpBoost()
+    slideJumpBoostEnabled = false
+    if slideJumpConn then slideJumpConn:Disconnect(); slideJumpConn = nil end
+end
+
+-- Slide loop
+local slideLoopActive = false
+local slideLoopConn   = nil
+
+-- Range ESP
+local rangeESPEnabled = false
+local rangeESPLabels  = {}
+local rangeESPConn    = nil
+
+local function clearRangeESP()
+    for _, lbl in pairs(rangeESPLabels) do
+        pcall(function() lbl:Destroy() end)
+    end
+    rangeESPLabels = {}
+end
+
+local function startRangeESP()
+    if rangeESPConn then rangeESPConn:Disconnect() end
+    rangeESPConn = RunService.RenderStepped:Connect(function()
+        clearRangeESP()
+        if not rangeESPEnabled or not EntityCtrl then return end
+        if not MechanicsCtrl or not MechanicsCtrl.LocalFighter then return end
+        local localFighter = MechanicsCtrl.LocalFighter
+        local ok, points = pcall(function()
+            return EntityCtrl:GetScreenPoints(localFighter, false)
+        end)
+        if not ok or not points then return end
+        local pg = LP:FindFirstChild("PlayerGui"); if not pg then return end
+        for entity, sp in pairs(points) do
+            pcall(function()
+                local lbl = Instance.new("TextLabel")
+                lbl.BackgroundColor3       = Color3.fromRGB(20, 20, 20)
+                lbl.BackgroundTransparency = 0.4
+                lbl.BorderSizePixel        = 0
+                lbl.Text                   = entity.Name or "Entity"
+                lbl.TextColor3             = Color3.fromRGB(255, 80, 80)
+                lbl.Font                   = Enum.Font.GothamBold
+                lbl.TextSize               = 13
+                lbl.Size                   = UDim2.new(0, 80, 0, 20)
+                lbl.AnchorPoint            = Vector2.new(0.5, 0.5)
+                lbl.Position               = UDim2.new(0, sp.X, 0, sp.Y - 24)
+                lbl.ZIndex                 = 10
+                lbl.Parent                 = pg
+                table.insert(rangeESPLabels, lbl)
+            end)
+        end
+    end)
+end
+
+local function stopRangeESP()
+    rangeESPEnabled = false
+    clearRangeESP()
+    if rangeESPConn then rangeESPConn:Disconnect(); rangeESPConn = nil end
+end
+
+-- ═══════════════════════════════════════════
 -- SPOOFER / EMOTES
 -- ═══════════════════════════════════════════
 local spoofBusy        = false
@@ -1209,9 +1444,7 @@ local function SC2_getAllWeapons()
     local list = {}
     if SC2.ItemLibrary and SC2.ItemLibrary.Items then
         for name, _ in pairs(SC2.ItemLibrary.Items) do
-            if not name:find("MISSING_") then
-                table.insert(list, name)
-            end
+            if not name:find("MISSING_") then table.insert(list, name) end
         end
         table.sort(list)
     end
@@ -1348,22 +1581,18 @@ local function SC2_applyRemoteHooks()
             local weaponName, cosType, cosName = args[1], args[2], args[3]
             local options = args[4] or {}
             SC2.equipped[weaponName] = SC2.equipped[weaponName] or {}
-
             if not cosName or cosName == "None" or cosName == "" then
                 SC2.equipped[weaponName][cosType] = nil
                 if not next(SC2.equipped[weaponName]) then SC2.equipped[weaponName] = nil end
             else
                 local inv = SC2.DataController:Get("CosmeticInventory")
-                if inv and rawget(inv, cosName) then
-                    return oldNC(self, ...)
-                end
+                if inv and rawget(inv, cosName) then return oldNC(self, ...) end
                 local cloned = SC2_cloneCosmetic(cosName, cosType, {
                     inverted      = options.IsInverted,
                     favoritesOnly = options.OnlyUseFavorites,
                 })
                 if cloned then SC2.equipped[weaponName][cosType] = cloned end
             end
-
             task.spawn(function()
                 task.wait(0.1)
                 pcall(function() SC2.DataController.CurrentData:Replicate("WeaponInventory") end)
@@ -1520,25 +1749,20 @@ local function SC2_Apply()
         return
     end
     sc2ApplyBusy = true
-
     task.spawn(function()
         local ok, err = pcall(function()
             local psControllers = LP.PlayerScripts:WaitForChild("Controllers", 15)
             local rsModules     = ReplicatedStorage:WaitForChild("Modules", 15)
-
-            local cosmeticLib = SC2_waitModule(rsModules, "CosmeticLibrary", 10)
-            local itemLib     = SC2_waitModule(rsModules, "ItemLibrary", 10)
-            local dataCtrl    = SC2_waitModule(psControllers, "PlayerDataController", 10)
-            local enumLib     = rsModules:FindFirstChild("EnumLibrary")
-
+            local cosmeticLib   = SC2_waitModule(rsModules, "CosmeticLibrary", 10)
+            local itemLib       = SC2_waitModule(rsModules, "ItemLibrary", 10)
+            local dataCtrl      = SC2_waitModule(psControllers, "PlayerDataController", 10)
+            local enumLib       = rsModules:FindFirstChild("EnumLibrary")
             if not cosmeticLib or not itemLib or not dataCtrl then
                 error("Core modules not found")
             end
-
             SC2.CosmeticLibrary = require(cosmeticLib)
             SC2.ItemLibrary     = require(itemLib)
             SC2.DataController  = require(dataCtrl)
-
             if enumLib then
                 SC2.EnumLibrary = require(enumLib)
                 if SC2.EnumLibrary and SC2.EnumLibrary.WaitForEnumBuilder then
@@ -1547,23 +1771,18 @@ local function SC2_Apply()
                     end)
                 end
             end
-
             task.spawn(function()
                 local fc = psControllers:FindFirstChild("FighterController")
                 if fc then pcall(function() SC2.FighterController = require(fc) end) end
             end)
-
             SC2_applyOwnershipOverrides()
             SC2_loadConfig()
-
             task.wait(1)
             SC2_applyRemoteHooks()
             task.wait(2)
             SC2_applyViewModelHooks()
         end)
-
         sc2ApplyBusy = false
-
         if ok then
             SC2.applied = true
             Library:Notify("Skin Changer v2 applied — all cosmetics + weapons unlocked", 5)
@@ -1801,7 +2020,6 @@ end})
 if IsMobile then
     local MTB   = Tabs.Triggerbot:AddLeftGroupbox("Mobile Triggerbot")
     local MTB_S = Tabs.Triggerbot:AddRightGroupbox("Mobile Settings")
-
     MTB:AddLabel("Detects enemy at screen center")
     MTB:AddToggle("MTrigOn", {Text="Enable Mobile Triggerbot", Default=false, Callback=function(v)
         MobileTrigCFG.On = v
@@ -1947,43 +2165,36 @@ WD_L:AddButton({Text="Enable Dark Sky + Snow", Func=function()
         sky[prop] = DARK_SKY_ID
     end
     local snowPart = Instance.new("Part")
-    snowPart.Name         = "SimpleSnow"
-    snowPart.Size         = Vector3.new(100, 1, 100)
-    snowPart.Transparency = 1
-    snowPart.CanCollide   = false
-    snowPart.Anchored     = true
-    snowPart.Parent       = workspace
+    snowPart.Name = "SimpleSnow"; snowPart.Size = Vector3.new(100,1,100)
+    snowPart.Transparency = 1; snowPart.CanCollide = false
+    snowPart.Anchored = true; snowPart.Parent = workspace
     local emitter = Instance.new("ParticleEmitter")
-    emitter.Texture      = "rbxassetid://5833323391"
-    emitter.Color        = ColorSequence.new(Color3.fromRGB(255, 255, 255))
-    emitter.Size         = NumberSequence.new(0.6)
+    emitter.Texture = "rbxassetid://5833323391"
+    emitter.Color = ColorSequence.new(Color3.fromRGB(255,255,255))
+    emitter.Size = NumberSequence.new(0.6)
     emitter.Transparency = NumberSequence.new(0)
-    emitter.Lifetime     = NumberRange.new(12, 20)
-    emitter.Rate         = 150
-    emitter.Speed        = NumberRange.new(5, 10)
-    emitter.SpreadAngle  = Vector2.new(30, 30)
-    emitter.Acceleration = Vector3.new(0, -7, 0)
-    emitter.Rotation     = NumberRange.new(0, 360)
-    emitter.RotSpeed     = NumberRange.new(-30, 30)
-    emitter.Parent       = snowPart
-    emitter.Enabled      = true
+    emitter.Lifetime = NumberRange.new(12,20)
+    emitter.Rate = 150
+    emitter.Speed = NumberRange.new(5,10)
+    emitter.SpreadAngle = Vector2.new(30,30)
+    emitter.Acceleration = Vector3.new(0,-7,0)
+    emitter.Rotation = NumberRange.new(0,360)
+    emitter.RotSpeed = NumberRange.new(-30,30)
+    emitter.Parent = snowPart; emitter.Enabled = true
     RunService.RenderStepped:Connect(function()
         if camera and snowPart and snowPart.Parent then
-            snowPart.Position = camera.CFrame.Position + Vector3.new(0, 35, 0)
+            snowPart.Position = camera.CFrame.Position + Vector3.new(0,35,0)
         end
     end)
     Library:Notify("Dark Sky + Snow enabled", 4)
 end})
 
 local colorCorrection = Instance.new("ColorCorrectionEffect")
-colorCorrection.Parent     = Lighting
-colorCorrection.Saturation = 0
-colorCorrection.Contrast   = 0.1
+colorCorrection.Parent = Lighting; colorCorrection.Saturation = 0; colorCorrection.Contrast = 0.1
 local blurEffect = Instance.new("BlurEffect")
-blurEffect.Parent = Lighting
-blurEffect.Size   = 0
+blurEffect.Parent = Lighting; blurEffect.Size = 0
 
-WD_R:AddLabel("Screen Tint"):AddColorPicker("WorldTint", {Default=Color3.fromRGB(255, 255, 255), Callback=function(v)
+WD_R:AddLabel("Screen Tint"):AddColorPicker("WorldTint", {Default=Color3.fromRGB(255,255,255), Callback=function(v)
     colorCorrection.TintColor = v
 end})
 WD_R:AddSlider("WorldSat", {Text="Saturation", Default=0, Min=-1, Max=1, Rounding=1, Callback=function(v)
@@ -2004,7 +2215,7 @@ WD_S:AddButton({Text="Enable Sound Replacements", Func=function()
 end})
 
 WD_N:AddButton({Text="Enable No Hands", Func=function()
-    local MESH_IDS = {"rbxassetid://12307734932", "rbxassetid://12307583853"}
+    local MESH_IDS = {"rbxassetid://12307734932","rbxassetid://12307583853"}
     local function disableMeshes()
         local count = 0
         for _, obj in pairs(workspace:GetDescendants()) do
@@ -2116,11 +2327,208 @@ MS_A:AddButton({Text="Arch Spoofer (Visual Only)", Func=function()
 end})
 
 -- ══════════════════════
+-- MECHANICS TAB
+-- ══════════════════════
+local MC_Status = Tabs.Mechanics:AddLeftGroupbox("Controller Status")
+local MC_Speed  = Tabs.Mechanics:AddLeftGroupbox("Speed & Movement")
+local MC_Jump   = Tabs.Mechanics:AddRightGroupbox("Jump & Slide")
+local MC_Shoot  = Tabs.Mechanics:AddLeftGroupbox("Auto-Shoot (PC Force)")
+local MC_Effect = Tabs.Mechanics:AddRightGroupbox("Visual Effects")
+local MC_Arcade = Tabs.Mechanics:AddLeftGroupbox("Arcade")
+local MC_Anim   = Tabs.Mechanics:AddRightGroupbox("Preloaded Animations")
+
+-- ── Status ──
+MC_Status:AddLabel("MechanicsCtrl: " .. (MechanicsCtrl and "Loaded" or "FAILED"))
+MC_Status:AddLabel("EntityCtrl:    " .. (EntityCtrl    and "Loaded" or "FAILED"))
+MC_Status:AddLabel("ArcadeCtrl:    " .. (ArcadeCtrl    and "Loaded" or "FAILED"))
+MC_Status:AddLabel("PreloadCtrl:   " .. (PreloadCtrl   and "Loaded" or "FAILED"))
+MC_Status:AddButton({Text="Reload Controllers", Func=function()
+    pcall(function() MechanicsCtrl = require(Controllers:WaitForChild("MechanicsController", 3)) end)
+    pcall(function() EntityCtrl    = require(Controllers:WaitForChild("EntityController",    3)) end)
+    pcall(function() ArcadeCtrl    = require(Controllers:WaitForChild("ArcadeController",    3)) end)
+    pcall(function() PreloadCtrl   = require(Controllers:WaitForChild("PreloadController",   3)) end)
+    Library:Notify("Controllers reloaded", 3)
+end})
+
+-- ── Speed & Movement ──
+MC_Speed:AddToggle("MCSpeedOn", {
+    Text="Walk Speed Override", Default=false,
+    Callback=function(v)
+        MechCFG.SpeedEnabled = v
+        if v then startSpeedOverride() else stopSpeedOverride() end
+    end,
+})
+MC_Speed:AddSlider("MCWalkSpeed", {
+    Text="Walk Speed", Default=16, Min=1, Max=100, Rounding=0,
+    Callback=function(v) MechCFG.WalkSpeed = v end,
+})
+MC_Speed:AddButton({Text="Reset Speed", Func=function()
+    MechCFG.SpeedEnabled = false
+    stopSpeedOverride()
+    Library:Notify("Speed reset", 2)
+end})
+MC_Speed:AddToggle("MCForceSprint", {
+    Text="Force Sprint (locked on)", Default=false,
+    Callback=function(v)
+        MechCFG.ForceSprintOn = v
+        if v then startForceSprint() else stopForceSprint() end
+    end,
+})
+MC_Speed:AddToggle("MCSlideJumpBoost", {
+    Text="Slide Jump Boost", Default=false,
+    Callback=function(v)
+        slideJumpBoostEnabled = v
+        if v then startSlideJumpBoost() else stopSlideJumpBoost() end
+    end,
+})
+MC_Speed:AddLabel("Slide Jump: Press Space while sliding")
+MC_Speed:AddLabel("triggers HighJump for extra boost")
+MC_Speed:AddToggle("MCLeanLock", {
+    Text="Lock Camera Lean", Default=false,
+    Callback=function(v)
+        MechCFG.LeanLock = v
+        if not v then setCameraLean(0) end
+    end,
+})
+MC_Speed:AddSlider("MCLeanVal", {
+    Text="Lean Value", Default=0, Min=-2, Max=2, Rounding=0,
+    Callback=function(v)
+        MechCFG.LeanValue = v
+        if MechCFG.LeanLock then setCameraLean(v) end
+    end,
+})
+
+-- ── Jump & Slide ──
+MC_Jump:AddLabel("One-shot actions:")
+MC_Jump:AddButton({Text="Trigger Slide Now", Func=function()
+    doSlide(); Library:Notify("Slide triggered", 2)
+end})
+MC_Jump:AddButton({Text="Trigger High Jump", Func=function()
+    doHighJump(); Library:Notify("High Jump triggered", 2)
+end})
+MC_Jump:AddButton({Text="Trigger Double Jump", Func=function()
+    doDoubleJump(); Library:Notify("Double Jump triggered", 2)
+end})
+MC_Jump:AddButton({Text="Stop Sliding", Func=function()
+    if MechanicsCtrl then pcall(function() MechanicsCtrl:StopSliding() end) end
+    Library:Notify("Slide stopped", 2)
+end})
+MC_Jump:AddLabel("")
+MC_Jump:AddLabel("Auto-Slide loop:")
+MC_Jump:AddToggle("MCSlideLoop", {
+    Text="Continuous Slide (loop)", Default=false,
+    Callback=function(v)
+        slideLoopActive = v
+        if v then
+            if slideLoopConn then slideLoopConn:Disconnect() end
+            slideLoopConn = RunService.Heartbeat:Connect(function()
+                if not slideLoopActive then return end
+                if MechanicsCtrl and MechanicsCtrl.LocalFighter then
+                    if not MechanicsCtrl.IsSliding then
+                        pcall(function() MechanicsCtrl:Slide() end)
+                    end
+                end
+            end)
+        else
+            if slideLoopConn then slideLoopConn:Disconnect(); slideLoopConn = nil end
+            pcall(function() if MechanicsCtrl then MechanicsCtrl:StopSliding() end end)
+        end
+    end,
+})
+
+-- ── Auto-Shoot ──
+MC_Shoot:AddLabel("Forces auto-shoot to work on PC/KB")
+MC_Shoot:AddLabel("Patches _CanAutoShoot then calls _ToggleAutoShoot")
+MC_Shoot:AddToggle("MCAutoShootPC", {
+    Text="Force Auto-Shoot on PC", Default=false,
+    Callback=function(v)
+        MechCFG.AutoShootPC = v
+        if v then enableAutoShootPC() else disableAutoShootPC() end
+    end,
+})
+MC_Shoot:AddLabel("Note: works best with a weapon equipped")
+
+-- ── Visual Effects ──
+MC_Effect:AddToggle("MCHurtOff", {
+    Text="Disable Hurt Flash Effect", Default=false,
+    Callback=function(v)
+        MechCFG.HurtEffectOff = v
+        setHurtEffect(not v)
+    end,
+})
+MC_Effect:AddLabel("Removes red flash when enemies take damage")
+MC_Effect:AddToggle("MCRangeESP", {
+    Text="Shooting Range ESP", Default=false,
+    Callback=function(v)
+        rangeESPEnabled = v
+        if v then startRangeESP() else stopRangeESP() end
+    end,
+})
+MC_Effect:AddLabel("Shows entity name labels via EntityController")
+MC_Effect:AddLabel("GetScreenPoints — works on range dummies too")
+
+-- ── Arcade ──
+MC_Arcade:AddLabel("Auto-Join fires ArcadeController:Join()")
+MC_Arcade:AddLabel("when CanJoin() returns true")
+MC_Arcade:AddToggle("MCAutoJoin", {
+    Text="Auto Join Arcade Duel", Default=false,
+    Callback=function(v)
+        MechCFG.AutoJoinArcade = v
+        if v then startAutoJoinArcade() else stopAutoJoinArcade() end
+    end,
+})
+MC_Arcade:AddButton({Text="Join Now", Func=function()
+    if not ArcadeCtrl then Library:Notify("ArcadeController not loaded", 3); return end
+    local ok, err = pcall(function() ArcadeCtrl:Join() end)
+    Library:Notify(ok and "Join fired" or ("Join failed: " .. tostring(err)), 3)
+end})
+MC_Arcade:AddButton({Text="Check CanJoin", Func=function()
+    if not ArcadeCtrl then Library:Notify("ArcadeController not loaded", 3); return end
+    local ok, can = pcall(function() return ArcadeCtrl:CanJoin() end)
+    Library:Notify(ok and ("CanJoin: " .. tostring(can)) or "Failed", 3)
+end})
+MC_Arcade:AddButton({Text="Check Join Cooldown", Func=function()
+    if not ArcadeCtrl then Library:Notify("ArcadeController not loaded", 3); return end
+    local ok, cd = pcall(function() return ArcadeCtrl:GetJoinCooldown() end)
+    Library:Notify(ok and ("Cooldown: " .. tostring(cd) .. "s") or "Failed", 3)
+end})
+
+-- ── Preloaded Animations ──
+MC_Anim:AddLabel("Animation IDs from PreloadController")
+MC_Anim:AddButton({Text="List All (console)", Func=function()
+    if not PreloadCtrl then Library:Notify("PreloadController not loaded", 3); return end
+    local names = {
+        "SlidingStartForward","SlidingLoopForward","SlidingJump","SlidingJumpFall",
+        "WeaponUnlockIdle","WeaponUnlockPlay","FinalResultsCamera",
+        "LobbyPortalFalling","ZombieSpawn",
+    }
+    print("[Preload] Animation IDs:")
+    for _, name in ipairs(names) do
+        local id = PreloadCtrl:GetPreloadedAnimationID(name)
+        print(string.format("  %-30s = %s", name, tostring(id)))
+    end
+    Library:Notify("Printed " .. #names .. " IDs to console", 3)
+end})
+MC_Anim:AddButton({Text="Play Slide Jump Anim", Func=function()
+    if not PreloadCtrl then Library:Notify("PreloadController not loaded", 3); return end
+    local animObj = PreloadCtrl:GetPreloadedAnimation("SlidingJump")
+    if not animObj then Library:Notify("Animation not preloaded", 3); return end
+    local char = LP.Character; if not char then return end
+    local hum  = char:FindFirstChildWhichIsA("Humanoid"); if not hum then return end
+    local anim = hum:FindFirstChildOfClass("Animator")
+    if anim then
+        local ok, track = pcall(function() return anim:LoadAnimation(animObj) end)
+        if ok and track then track:Play() end
+    end
+    Library:Notify("Slide jump animation played", 3)
+end})
+
+-- ══════════════════════
 -- SKIN CHANGER v2 TAB
 -- ══════════════════════
-local SC2_SelectedWeapon = "Knife"
-local SC2_SelectedSkin   = "None"
-local SC2_SelectedCosType= "Skin"
+local SC2_SelectedWeapon  = "Knife"
+local SC2_SelectedSkin    = "None"
+local SC2_SelectedCosType = "Skin"
 
 local SC2_L  = Tabs.SkinChanger:AddLeftGroupbox("Skin Changer v2")
 local SC2_LC = Tabs.SkinChanger:AddLeftGroupbox("Equip Cosmetic")
@@ -2128,7 +2536,6 @@ local SC2_LS = Tabs.SkinChanger:AddLeftGroupbox("View Equipped")
 local SC2_R  = Tabs.SkinChanger:AddRightGroupbox("Browse Cosmetics")
 local SC2_RI = Tabs.SkinChanger:AddRightGroupbox("Cosmetic Info & Debug")
 
--- ── Main apply ──
 SC2_L:AddLabel("Unlocks ALL weapons + cosmetics client-side")
 SC2_L:AddLabel("Skins · Wraps · Charms · Finishers · Weapons")
 SC2_L:AddLabel("Config saved to unlockall/config_v2.json")
@@ -2150,41 +2557,26 @@ SC2_L:AddButton({Text="Force Replicate FavoritedCosmetics", Func=function()
     Library:Notify("Replicated", 2)
 end})
 
--- ── Equip panel ──
 SC2_LC:AddLabel("Select weapon + type + cosmetic, then Equip")
 SC2_LC:AddDropdown("SC2Weapon", {
-    Text    = "Weapon",
-    Default = "Knife",
-    Values  = {
-        "Knife","AssaultRifle","Shotgun","Sniper","Handgun",
-        "Katana","Scythe","Uzi","Revolver","Crossbow","Bow",
-        "RPG","Minigun","SMG","Pistol",
-    },
-    Callback = function(v)
-        SC2_SelectedWeapon = v
-    end,
+    Text="Weapon", Default="Knife",
+    Values={"Knife","AssaultRifle","Shotgun","Sniper","Handgun",
+            "Katana","Scythe","Uzi","Revolver","Crossbow","Bow",
+            "RPG","Minigun","SMG","Pistol"},
+    Callback=function(v) SC2_SelectedWeapon = v end,
 })
 SC2_LC:AddDropdown("SC2CosType", {
-    Text    = "Cosmetic Type",
-    Default = "Skin",
-    Values  = {"Skin","Wrap","Charm","Finisher"},
-    Callback = function(v)
-        SC2_SelectedCosType = v
-    end,
+    Text="Cosmetic Type", Default="Skin",
+    Values={"Skin","Wrap","Charm","Finisher"},
+    Callback=function(v) SC2_SelectedCosType = v end,
 })
 SC2_LC:AddDropdown("SC2SkinPreset", {
-    Text    = "Cosmetic Name",
-    Default = "None",
-    Values  = {
-        "None",
-        "Karambit","Balisong","Default",
-        "Ruby","Emerald","Sapphire","Gold","Diamond",
-        "Shadow","Phantom","Crimson","Arctic",
-        "Obsidian","Pearl","Amethyst","Topaz",
-    },
-    Callback = function(v)
-        SC2_SelectedSkin = v
-    end,
+    Text="Cosmetic Name", Default="None",
+    Values={"None","Karambit","Balisong","Default",
+            "Ruby","Emerald","Sapphire","Gold","Diamond",
+            "Shadow","Phantom","Crimson","Arctic",
+            "Obsidian","Pearl","Amethyst","Topaz"},
+    Callback=function(v) SC2_SelectedSkin = v end,
 })
 SC2_LC:AddButton({Text="Equip Selected Cosmetic", Func=function()
     if SC2_SelectedSkin == "None" then
@@ -2204,13 +2596,11 @@ SC2_LC:AddButton({Text="Remove ALL from Selected Weapon", Func=function()
     Library:Notify("Cleared all cosmetics from " .. SC2_SelectedWeapon, 2)
 end})
 
--- ── View equipped ──
 SC2_LS:AddButton({Text="Show Equipped on Selected Weapon", Func=function()
     if not SC2.applied then Library:Notify("Apply first", 2); return end
     local eq = SC2.equipped[SC2_SelectedWeapon]
     if not eq or not next(eq) then
-        Library:Notify(SC2_SelectedWeapon .. ": Nothing equipped", 3)
-        return
+        Library:Notify(SC2_SelectedWeapon .. ": Nothing equipped", 3); return
     end
     for cosType, cosData in pairs(eq) do
         Library:Notify(SC2_SelectedWeapon .. " → " .. cosType .. ": " .. (cosData.Name or "?"), 4)
@@ -2223,8 +2613,7 @@ SC2_LS:AddButton({Text="Show All Equipped (all weapons)", Func=function()
     for weapon, cosmetics in pairs(SC2.equipped) do
         for cosType, cosData in pairs(cosmetics) do
             Library:Notify(weapon .. " → " .. cosType .. ": " .. (cosData.Name or "?"), 3)
-            count = count + 1
-            task.wait(0.2)
+            count = count + 1; task.wait(0.2)
         end
     end
     if count == 0 then Library:Notify("Nothing equipped", 3) end
@@ -2240,78 +2629,64 @@ SC2_LS:AddButton({Text="Print Config to Console", Func=function()
         end
     end
     if not any then print("  (nothing equipped)") end
-    print("[SC2] ══ Favorites ══")
-    for weapon, favs in pairs(SC2.favorites) do
-        for name, v in pairs(favs) do
-            if v then print("  " .. weapon .. " | " .. name) end
-        end
-    end
     Library:Notify("Config printed to console", 2)
 end})
 SC2_LS:AddButton({Text="Show Last Used Weapon", Func=function()
     Library:Notify("Last used weapon: " .. (SC2.lastUsedWeapon or "None"), 3)
 end})
 
--- ── Browse ──
 SC2_R:AddLabel("Lists cosmetics from live CosmeticLibrary")
 SC2_R:AddLabel("Apply Skin Changer v2 first to populate")
 SC2_R:AddButton({Text="List All Skins (console)", Func=function()
     if not SC2.applied then Library:Notify("Apply first", 2); return end
     local skins = SC2_getCosmeticsOfType("Skin")
-    print("[SC2] Available Skins (" .. #skins .. "):")
-    for _, name in ipairs(skins) do print("  " .. name) end
-    Library:Notify("Listed " .. #skins .. " skins — see console", 3)
+    print("[SC2] Available Skins (" .. #skins .. "):"); for _, n in ipairs(skins) do print("  "..n) end
+    Library:Notify("Listed " .. #skins .. " skins", 3)
 end})
 SC2_R:AddButton({Text="List All Wraps (console)", Func=function()
     if not SC2.applied then Library:Notify("Apply first", 2); return end
     local wraps = SC2_getCosmeticsOfType("Wrap")
-    print("[SC2] Available Wraps (" .. #wraps .. "):")
-    for _, name in ipairs(wraps) do print("  " .. name) end
-    Library:Notify("Listed " .. #wraps .. " wraps — see console", 3)
+    print("[SC2] Available Wraps (" .. #wraps .. "):"); for _, n in ipairs(wraps) do print("  "..n) end
+    Library:Notify("Listed " .. #wraps .. " wraps", 3)
 end})
 SC2_R:AddButton({Text="List All Charms (console)", Func=function()
     if not SC2.applied then Library:Notify("Apply first", 2); return end
     local charms = SC2_getCosmeticsOfType("Charm")
-    print("[SC2] Available Charms (" .. #charms .. "):")
-    for _, name in ipairs(charms) do print("  " .. name) end
-    Library:Notify("Listed " .. #charms .. " charms — see console", 3)
+    print("[SC2] Available Charms (" .. #charms .. "):"); for _, n in ipairs(charms) do print("  "..n) end
+    Library:Notify("Listed " .. #charms .. " charms", 3)
 end})
 SC2_R:AddButton({Text="List All Finishers (console)", Func=function()
     if not SC2.applied then Library:Notify("Apply first", 2); return end
     local finishers = SC2_getCosmeticsOfType("Finisher")
-    print("[SC2] Available Finishers (" .. #finishers .. "):")
-    for _, name in ipairs(finishers) do print("  " .. name) end
-    Library:Notify("Listed " .. #finishers .. " finishers — see console", 3)
+    print("[SC2] Available Finishers (" .. #finishers .. "):"); for _, n in ipairs(finishers) do print("  "..n) end
+    Library:Notify("Listed " .. #finishers .. " finishers", 3)
 end})
 SC2_R:AddButton({Text="List All Weapons (console)", Func=function()
     if not SC2.applied then Library:Notify("Apply first", 2); return end
     local weapons = SC2_getAllWeapons()
-    print("[SC2] Available Weapons (" .. #weapons .. "):")
-    for _, name in ipairs(weapons) do print("  " .. name) end
-    Library:Notify("Listed " .. #weapons .. " weapons — see console", 3)
+    print("[SC2] Available Weapons (" .. #weapons .. "):"); for _, n in ipairs(weapons) do print("  "..n) end
+    Library:Notify("Listed " .. #weapons .. " weapons", 3)
 end})
 SC2_R:AddButton({Text="List ALL Cosmetics (console)", Func=function()
     if not SC2.applied then Library:Notify("Apply first", 2); return end
     local all = SC2_getCosmeticsOfType(nil)
-    print("[SC2] All Cosmetics (" .. #all .. "):")
-    for _, name in ipairs(all) do print("  " .. name) end
-    Library:Notify("Listed " .. #all .. " cosmetics — see console", 3)
+    print("[SC2] All Cosmetics (" .. #all .. "):"); for _, n in ipairs(all) do print("  "..n) end
+    Library:Notify("Listed " .. #all .. " cosmetics", 3)
 end})
 
--- ── Info & Debug ──
 SC2_RI:AddLabel("Module Status")
 SC2_RI:AddButton({Text="Check Module Status", Func=function()
-    Library:Notify("SC2 Applied: "   .. tostring(SC2.applied), 2)
+    Library:Notify("SC2 Applied: "    .. tostring(SC2.applied), 2)
     task.wait(0.3)
-    Library:Notify("CosmeticLib: "   .. (SC2.CosmeticLibrary and "Loaded ✓" or "Not loaded ✗"), 2)
+    Library:Notify("CosmeticLib: "   .. (SC2.CosmeticLibrary   and "Loaded ✓" or "Not loaded ✗"), 2)
     task.wait(0.3)
-    Library:Notify("ItemLib: "       .. (SC2.ItemLibrary     and "Loaded ✓" or "Not loaded ✗"), 2)
+    Library:Notify("ItemLib: "       .. (SC2.ItemLibrary        and "Loaded ✓" or "Not loaded ✗"), 2)
     task.wait(0.3)
-    Library:Notify("DataCtrl: "      .. (SC2.DataController  and "Loaded ✓" or "Not loaded ✗"), 2)
+    Library:Notify("DataCtrl: "      .. (SC2.DataController     and "Loaded ✓" or "Not loaded ✗"), 2)
     task.wait(0.3)
-    Library:Notify("EnumLib: "       .. (SC2.EnumLibrary     and "Loaded ✓" or "Not loaded ✗"), 2)
+    Library:Notify("EnumLib: "       .. (SC2.EnumLibrary        and "Loaded ✓" or "Not loaded ✗"), 2)
     task.wait(0.3)
-    Library:Notify("FighterCtrl: "   .. (SC2.FighterController and "Loaded ✓" or "Not loaded ✗"), 2)
+    Library:Notify("FighterCtrl: "   .. (SC2.FighterController  and "Loaded ✓" or "Not loaded ✗"), 2)
     task.wait(0.3)
     Library:Notify("Hook Applied: "  .. tostring(SC2.hookApplied), 2)
 end})
@@ -2340,15 +2715,13 @@ SC2_RI:AddButton({Text="Print Selected Cosmetic Data", Func=function()
         end
     end
 end})
-SC2_RI:AddLabel("Equipped Count")
 SC2_RI:AddButton({Text="Count All Equipped Cosmetics", Func=function()
-    local total = 0
-    local weapons = 0
+    local total, weapons = 0, 0
     for weapon, cosmetics in pairs(SC2.equipped) do
         weapons = weapons + 1
         for _ in pairs(cosmetics) do total = total + 1 end
     end
-    Library:Notify(total .. " cosmetics equipped across " .. weapons .. " weapons", 4)
+    Library:Notify(total .. " cosmetics across " .. weapons .. " weapons", 4)
 end})
 
 -- ══════════════════════
@@ -2360,7 +2733,7 @@ local ST_R = Tabs.Settings:AddRightGroupbox("Stop All")
 ST_L:AddToggle("ConsoleOn", {Text="Enable Console to Screen", Default=true, Callback=function(v)
     consoleEnabled = v
 end})
-ST_L:AddLabel("Text Color"):AddColorPicker("ConsoleColor", {Default=Color3.fromRGB(255, 255, 100), Callback=function(v)
+ST_L:AddLabel("Text Color"):AddColorPicker("ConsoleColor", {Default=Color3.fromRGB(255,255,100), Callback=function(v)
     consoleTextColor = v
 end})
 ST_L:AddSlider("ConsoleDur", {Text="Duration (s)", Default=4, Min=1, Max=10, Rounding=1, Callback=function(v)
@@ -2368,24 +2741,53 @@ ST_L:AddSlider("ConsoleDur", {Text="Duration (s)", Default=4, Min=1, Max=10, Rou
 end})
 
 ST_R:AddButton({Text="Stop All Features", Func=function()
+    -- Aimbot
     AimbotCFG.On = false; lockedTarget = nil; lockTimer = 0
+    -- Silent Aim
     SAHookCFG.On = false; stopSAHook()
+    -- Ragebot
     silentActive = false; stopSilentAim()
+    -- Triggerbot
     TrigCFG.On = false
     TrigState.waiting = false; TrigState.timer = 0; TrigState.grace = 0
+    -- Mobile Trig
     MobileTrigCFG.On = false
     MobileTrigState.waiting = false; MobileTrigState.timer = 0; MobileTrigState.cooldown = 0
+    -- Emotes
     CFG.Emote.On = false; stopEmote()
+    -- Spoofer
     stopAutoSpoof()
+    -- Sky
     removeSky()
+    -- Crosshair
     CFG.Crosshair.On = false
     crosshairImg.ImageTransparency = 1; UIS.MouseIconEnabled = true
+    -- Weapon status
     CFG.WeaponStatus.On = false; removeWeaponStatus()
+    -- Gun
     GunCFG.NoRecoil = false; GunCFG.NoSpread = false; GunCFG.FastShoot = false
     patchGun()
+    -- Anti-aim
     stopAntiAim()
+    -- FOV circles
     if fovCircle   then fovCircle.Visible   = false end
     if saFovCircle then saFovCircle.Visible = false end
+    -- Mechanics
+    stopSpeedOverride()
+    stopForceSprint()
+    stopSlideJumpBoost()
+    stopRangeESP()
+    stopAutoJoinArcade()
+    slideLoopActive = false
+    if slideLoopConn then slideLoopConn:Disconnect(); slideLoopConn = nil end
+    MechCFG.AutoShootPC = false
+    if origCanAutoShoot and MechanicsCtrl then
+        MechanicsCtrl._CanAutoShoot = origCanAutoShoot
+        origCanAutoShoot = nil
+        pcall(function() MechanicsCtrl:_ToggleAutoShoot() end)
+    end
+    if EntityCtrl then pcall(function() EntityCtrl._hurt_effect_enabled = true end) end
+    pcall(function() if MechanicsCtrl then MechanicsCtrl:SetCameraLean(0) end end)
     Library:Notify("All features stopped", 3)
 end})
 ST_R:AddButton({Text="Unload UI", Func=function() Library:Unload() end})
@@ -2407,10 +2809,12 @@ table.insert(ActiveConnections, RunService.RenderStepped:Connect(function(dt)
     camera = workspace.CurrentCamera
     local center = getScreenCenter()
 
+    -- Crosshair
     if CFG.Crosshair.On then
         crosshairImg.Position = UDim2.new(0.5, 0, 0.5, 0)
     end
 
+    -- FOV circles
     if fovCircle then
         fovCircle.Position = center
         fovCircle.Radius   = AimbotCFG.MaxFOV
@@ -2424,6 +2828,11 @@ table.insert(ActiveConnections, RunService.RenderStepped:Connect(function(dt)
         saFovCircle.Position = center
         saFovCircle.Radius   = SAHookCFG.IgnoreFOV and 0 or saGetEffectiveFOV()
         saFovCircle.Visible  = SAHookCFG.DrawFOV and SAHookCFG.On and not SAHookCFG.IgnoreFOV
+    end
+
+    -- Camera lean lock
+    if MechCFG.LeanLock and MechanicsCtrl then
+        pcall(function() MechanicsCtrl:SetCameraLean(MechCFG.LeanValue) end)
     end
 
     -- AIMBOT
@@ -2570,6 +2979,10 @@ end))
 -- ═══════════════════════════════════════════
 Library:Notify("Rivals Tool v9.8 loaded — " .. (IsMobile and "MOBILE" or "PC"), 6)
 task.wait(6)
-Library:Notify("Skin Changer v2 ready — go to Skin Changer tab and click Apply", 5)
+Library:Notify("Skin Changer v2 + Mechanics tab ready", 5)
 print("[RIVALS TOOL v9.8] " .. (IsMobile and "MOBILE" or "PC"))
-print("[SC2] Skin Changer v2 integrated — apply from UI tab")
+print("[SC2] Skin Changer v2 integrated")
+print("[MECH] MechanicsController: " .. (MechanicsCtrl and "Loaded" or "FAILED"))
+print("[MECH] EntityController:    " .. (EntityCtrl    and "Loaded" or "FAILED"))
+print("[MECH] ArcadeController:    " .. (ArcadeCtrl    and "Loaded" or "FAILED"))
+print("[MECH] PreloadController:   " .. (PreloadCtrl   and "Loaded" or "FAILED"))

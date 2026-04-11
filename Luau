@@ -2,10 +2,6 @@
     RIVALS TOOL v9.8 — LinoriaLib Edition
 ]]
 
--- Auto/Silent Load Config
-local AUTO_LOAD   = false
-local SILENT_LOAD = false
-
 -- ═══════════════════════════════════════════
 -- SERVICES
 -- ═══════════════════════════════════════════
@@ -21,21 +17,6 @@ local TweenService      = game:GetService("TweenService")
 local LP       = Players.LocalPlayer
 local IsMobile = UIS.TouchEnabled and not UIS.KeyboardEnabled
 local camera   = workspace.CurrentCamera
-
--- ═══════════════════════════════════════════
--- AUTO LOAD CHECK
--- ═══════════════════════════════════════════
-if AUTO_LOAD then
-    local ok, info = pcall(function()
-        return game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId)
-    end)
-    local isRivals = tostring(game.PlaceId):find("17625359962")
-        or (ok and info and info.Name and info.Name:lower():find("rivals"))
-    if not isRivals then
-        warn("[Rivals Tool] Not a Rivals match — auto load cancelled")
-        return
-    end
-end
 
 -- ═══════════════════════════════════════════
 -- AC BYPASS
@@ -67,7 +48,7 @@ Library.ShowToggleFrameInKeybinds = true
 local Window = Library:CreateWindow({
     Title                = "Rivals Tool v9.8",
     Center               = true,
-    AutoShow             = not SILENT_LOAD,
+    AutoShow             = true,
     Resizable            = true,
     ShowCustomCursor     = false,
     UnlockMouseWhileOpen = true,
@@ -1133,52 +1114,6 @@ end
 -- ═══════════════════════════════════════════
 -- SKIN CHANGER V2
 -- ═══════════════════════════════════════════
-
---[[
-    Skin Changer v2 by luastun
-    Integrated into Rivals Tool v9.8
-    The animation table changes with the skin you pick.
-    
-    SKIN PRESETS:
-        Each entry has:
-            SkinPath   - path inside PlayerScripts.Assets.ViewModels
-            WeaponPath - path to the base weapon folder
-            AnimTable  - old anim ID -> new anim ID replacements
-]]
-
--- All known animation IDs from AnimationLibrary (used for reference by skin changer)
-local ANIM_LIBRARY = {
-    -- knife default
-    knife_equip          = "rbxassetid://12613363718",
-    knife_idle           = "rbxassetid://12613190591",
-    knife_sprint         = "rbxassetid://12886796453",
-    knife_inspect        = "rbxassetid://12613329711",
-    knife_inspect_rare   = "rbxassetid://12613320859",
-    knife_attack1        = "rbxassetid://12613340305",
-    knife_attack2        = "rbxassetid://12613350645",
-    knife_heavyattack1   = "rbxassetid://12613354440",
-    -- karambit
-    knife_karambit_equip         = "rbxassetid://18742841521",
-    knife_karambit_idle          = "rbxassetid://18742849437",
-    knife_karambit_sprint        = "rbxassetid://18742894186",
-    knife_karambit_inspect       = "rbxassetid://18742879471",
-    knife_karambit_attack1       = "rbxassetid://18742860878",
-    knife_karambit_attack2       = "rbxassetid://18742864831",
-    knife_karambit_heavyattack1  = "rbxassetid://18742868264",
-    knife_karambit_heavyattack_hit = "rbxassetid://18742872634",
-    -- balisong
-    knife_balisong_equip         = "rbxassetid://130021374819064",
-    knife_balisong_idle          = "rbxassetid://90095202332049",
-    knife_balisong_sprint        = "rbxassetid://79696764086908",
-    knife_balisong_inspect       = "rbxassetid://86667035849478",
-    knife_balisong_attack1       = "rbxassetid://100199777831515",
-    knife_balisong_attack2       = "rbxassetid://76981758062644",
-    knife_balisong_heavyattack1  = "rbxassetid://125644419135995",
-    knife_balisong_heavyattack_hit = "rbxassetid://123415605337684",
-}
-
--- Skin preset definitions
--- Add more skins here following the same pattern
 local SKIN_PRESETS = {
     {
         Name       = "Knife → Karambit",
@@ -1212,14 +1147,13 @@ local SKIN_PRESETS = {
     },
 }
 
--- Core skin changer state
 local SC = {
-    Active       = false,
-    CurrentPreset= nil,
-    AnimConn     = nil,
-    LoadedTracks = {},
-    ViewModel    = nil,
-    Animator     = nil,
+    Active         = false,
+    CurrentPreset  = nil,
+    AnimConn       = nil,
+    LoadedTracks   = {},
+    ViewModel      = nil,
+    Animator       = nil,
     EquippedWeapon = nil,
 }
 
@@ -1252,7 +1186,7 @@ local function SC_Apply(preset)
         return LP.PlayerScripts.Assets.ViewModels[preset.SkinCase][preset.SkinName]
     end)
     if not ok or not skinPath then
-        Library:Notify("Skin Changer: Skin path not found: " .. preset.SkinCase .. "/" .. preset.SkinName, 4)
+        Library:Notify("Skin path not found: " .. preset.SkinCase .. "/" .. preset.SkinName, 4)
         return
     end
 
@@ -1260,25 +1194,23 @@ local function SC_Apply(preset)
         return LP.PlayerScripts.Assets.ViewModels.Weapons[preset.WeaponName]
     end)
     if not ok2 or not weaponPath then
-        Library:Notify("Skin Changer: Weapon path not found: " .. preset.WeaponName, 4)
+        Library:Notify("Weapon path not found: " .. preset.WeaponName, 4)
         return
     end
 
-    -- Apply skin mesh/texture
     SC_ChangeWeaponSkin(skinPath, weaponPath)
 
-    -- Find viewmodel and animator
-    local FirstPerson = workspace:FindFirstChild("ViewModels") and workspace.ViewModels:FindFirstChild("FirstPerson")
+    local FirstPerson = workspace:FindFirstChild("ViewModels")
+        and workspace.ViewModels:FindFirstChild("FirstPerson")
     if not FirstPerson then
-        Library:Notify("Skin Changer: FirstPerson viewmodel not found", 4)
+        Library:Notify("FirstPerson viewmodel not found", 4)
         return
     end
 
-    SC.ViewModel = nil
-    SC.Animator  = nil
+    SC.ViewModel    = nil
+    SC.Animator     = nil
     SC.LoadedTracks = {}
 
-    -- Wait for viewmodel to appear
     task.spawn(function()
         local timeout = 10
         local elapsed = 0
@@ -1296,23 +1228,21 @@ local function SC_Apply(preset)
         until SC.ViewModel or elapsed >= timeout
 
         if not SC.ViewModel then
-            Library:Notify("Skin Changer: ViewModel not found", 4)
+            Library:Notify("ViewModel not found", 4)
             return
         end
 
         SC.Animator = SC.ViewModel:WaitForChild("AnimationController"):WaitForChild("Animator")
 
-        -- Wait until the equipped weapon matches
         local waitElapsed = 0
         repeat
             task.wait(0.1)
             waitElapsed = waitElapsed + 0.1
         until SC.EquippedWeapon == tostring(preset.WeaponName) or waitElapsed >= 10
 
-        SC.Active = true
+        SC.Active        = true
         SC.CurrentPreset = preset
 
-        -- Hook animations
         SC.AnimConn = SC.Animator.AnimationPlayed:Connect(function(track)
             if not SC.Active then return end
             local currentId = track.Animation.AnimationId
@@ -1328,12 +1258,17 @@ local function SC_Apply(preset)
             end
 
             if SC.LoadedTracks[newId] then
-                pcall(function() SC.LoadedTracks[newId]:Stop(); SC.LoadedTracks[newId]:Destroy() end)
+                pcall(function()
+                    SC.LoadedTracks[newId]:Stop()
+                    SC.LoadedTracks[newId]:Destroy()
+                end)
             end
 
             local newAnim = Instance.new("Animation")
             newAnim.AnimationId = newId
-            local ok3, newTrack = pcall(function() return SC.Animator:LoadAnimation(newAnim) end)
+            local ok3, newTrack = pcall(function()
+                return SC.Animator:LoadAnimation(newAnim)
+            end)
             if ok3 and newTrack then
                 SC.LoadedTracks[newId] = newTrack
                 newTrack:Play()
@@ -1865,14 +1800,12 @@ local SC_C = Tabs.SkinChanger:AddLeftGroupbox("Custom Skin")
 SC_L:AddLabel("Select a preset and click Apply")
 SC_L:AddLabel("Skin path: PlayerScripts.Assets.ViewModels")
 
--- Build preset buttons dynamically
 for _, preset in ipairs(SKIN_PRESETS) do
     SC_L:AddButton({Text="Apply: " .. preset.Name, Func=function()
         SC_Apply(preset)
     end})
 end
 
-SC_R:AddLabel("Active: " .. (SC.Active and "Yes" or "No"))
 SC_R:AddButton({Text="Stop Skin Changer", Func=function()
     SC_Stop()
     Library:Notify("Skin Changer stopped", 2)
@@ -1880,13 +1813,11 @@ end})
 SC_R:AddLabel("After stopping, rejoin or")
 SC_R:AddLabel("re-equip weapon to reset mesh")
 
--- Custom skin entry
 local customSkinCase   = "Skin Case 2"
 local customSkinName   = "Karambit"
 local customWeaponName = "Knife"
 
 SC_C:AddLabel("Custom Skin (manual entry)")
-SC_C:AddLabel("Skin Case name (e.g. Skin Case 2)")
 SC_C:AddButton({Text="Set Case: Skin Case 2", Func=function()
     customSkinCase = "Skin Case 2"
     Library:Notify("Case set: " .. customSkinCase, 2)
@@ -1896,24 +1827,18 @@ SC_C:AddButton({Text="Set Case: Skin Case 1", Func=function()
     Library:Notify("Case set: " .. customSkinCase, 2)
 end})
 SC_C:AddDropdown("SCWeapon", {
-    Text    = "Weapon",
-    Default = "Knife",
-    Values  = {"Knife","AssaultRifle","Shotgun","Sniper","Handgun","Katana","Scythe","Uzi","Revolver"},
-    Callback = function(v)
-        customWeaponName = v
-    end
+    Text     = "Weapon",
+    Default  = "Knife",
+    Values   = {"Knife","AssaultRifle","Shotgun","Sniper","Handgun","Katana","Scythe","Uzi","Revolver"},
+    Callback = function(v) customWeaponName = v end,
 })
 SC_C:AddDropdown("SCSkin", {
-    Text    = "Skin Name",
-    Default = "Karambit",
-    Values  = {"Karambit","Balisong","Default"},
-    Callback = function(v)
-        customSkinName = v
-    end
+    Text     = "Skin Name",
+    Default  = "Karambit",
+    Values   = {"Karambit","Balisong","Default"},
+    Callback = function(v) customSkinName = v end,
 })
 SC_C:AddButton({Text="Apply Custom Skin", Func=function()
-    -- Build anim table for knife→karambit or knife→balisong as example
-    -- For other weapons, AnimTable can be empty (just changes mesh)
     local animTable = {}
     if customWeaponName == "Knife" and customSkinName == "Karambit" then
         animTable = SKIN_PRESETS[1].AnimTable

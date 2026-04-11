@@ -2,6 +2,7 @@
     RIVALS TOOL v9.8 — LinoriaLib Edition
     + Skin Changer v2 (Advanced Unlock All)
     + Mechanics Controller Tab
+    + Executor Compatibility Patch
 ]]
 
 -- ═══════════════════════════════════════════
@@ -21,20 +22,49 @@ local IsMobile = UIS.TouchEnabled and not UIS.KeyboardEnabled
 local camera   = workspace.CurrentCamera
 
 -- ═══════════════════════════════════════════
--- AC BYPASS
+-- WAIT FOR GAME READY
 -- ═══════════════════════════════════════════
-assert(hookmetamethod, "Your executor doesn't support hookmetamethod.")
+if not game:IsLoaded() then game.Loaded:Wait() end
+if not LP.Character then LP.CharacterAdded:Wait() end
+task.wait(2)
 
-if not game:IsLoaded() then
-    game.Loaded:Wait()
+-- ═══════════════════════════════════════════
+-- EXECUTOR COMPATIBILITY PATCH
+-- ═══════════════════════════════════════════
+local function safeClone(svc)
+    if cloneref then return cloneref(svc) end
+    return svc
 end
 
-for i, v in getgc() do
-    if typeof(v) == "function" and string.find(debug.info(v, "s"), "AnalyticsPipelineController") then
-        hookfunction(v, function()
-            return task.wait(9e9)
-        end)
+if not newcclosure then
+    newcclosure = function(f) return f end
+end
+
+if not checkcaller then
+    checkcaller = function() return false end
+end
+
+if not hookmetamethod then
+    hookmetamethod = nil -- will be checked before use
+end
+
+if not hookfunction then
+    hookfunction = nil
+end
+
+-- ═══════════════════════════════════════════
+-- AC BYPASS
+-- ═══════════════════════════════════════════
+if hookmetamethod then
+    for i, v in getgc() do
+        if typeof(v) == "function" and string.find(debug.info(v, "s"), "AnalyticsPipelineController") then
+            hookfunction(v, function()
+                return task.wait(9e9)
+            end)
+        end
     end
+else
+    warn("[RivalsTool] hookmetamethod not supported — AC bypass skipped")
 end
 
 -- ═══════════════════════════════════════════
@@ -247,18 +277,20 @@ local EntityCtrl    = nil
 local ArcadeCtrl    = nil
 local PreloadCtrl   = nil
 
-pcall(function()
-    MechanicsCtrl = require(Controllers:WaitForChild("MechanicsController", 5))
-end)
-pcall(function()
-    EntityCtrl = require(Controllers:WaitForChild("EntityController", 5))
-end)
-pcall(function()
-    ArcadeCtrl = require(Controllers:WaitForChild("ArcadeController", 5))
-end)
-pcall(function()
-    PreloadCtrl = require(Controllers:WaitForChild("PreloadController", 5))
-end)
+if Controllers then
+    pcall(function()
+        MechanicsCtrl = require(Controllers:WaitForChild("MechanicsController", 5))
+    end)
+    pcall(function()
+        EntityCtrl = require(Controllers:WaitForChild("EntityController", 5))
+    end)
+    pcall(function()
+        ArcadeCtrl = require(Controllers:WaitForChild("ArcadeController", 5))
+    end)
+    pcall(function()
+        PreloadCtrl = require(Controllers:WaitForChild("PreloadController", 5))
+    end)
+end
 
 -- ═══════════════════════════════════════════
 -- REMOTES
@@ -626,6 +658,10 @@ local function saHookValid(plr, camPos, center)
 end
 
 local function startSAHook()
+    if not hookmetamethod then
+        Library:Notify("Silent Aim requires hookmetamethod — not supported on your executor", 4)
+        return
+    end
     if not saHookApplied then
         local ok = pcall(function()
             saHookIdx = hookmetamethod(game, "__index", newcclosure(function(self, idx, ...)
@@ -784,9 +820,9 @@ end
 -- ═══════════════════════════════════════════
 -- RAGEBOT
 -- ═══════════════════════════════════════════
-local rs_sa      = cloneref(game:GetService("ReplicatedStorage"))
-local players_sa = cloneref(game:GetService("Players"))
-local ws_sa      = cloneref(game:GetService("Workspace"))
+local rs_sa      = safeClone(game:GetService("ReplicatedStorage"))
+local players_sa = safeClone(game:GetService("Players"))
+local ws_sa      = safeClone(game:GetService("Workspace"))
 
 local silentActive       = false
 local silentVisibleCheck = false
@@ -847,7 +883,7 @@ local function sa_calcPoint(origin, target_pos, target_char)
 end
 
 local function tryRagebotReload(item)
-    if not item then return end
+    if not item or not enums_mod then return end
     pcall(function()
         rs_sa.Remotes.Replication.Fighter.UseItem:FireServer(
             item:Get("ObjectID"), enums_mod:ToEnum("Reload"), {}, nil
@@ -861,6 +897,10 @@ local function tryRagebotReload(item)
 end
 
 local function startSilentAim()
+    if not util_mod or not enums_mod or not fighter_mod then
+        Library:Notify("Ragebot modules not loaded — cannot start", 4)
+        return
+    end
     if silentConn then silentConn:Disconnect() end
     silentConn = RunService.Heartbeat:Connect(function(dt)
         if not silentActive or not LP.Character then return end
@@ -911,8 +951,6 @@ end
 -- ═══════════════════════════════════════════
 -- MECHANICS HELPERS
 -- ═══════════════════════════════════════════
-
--- Walk speed override
 local speedConn = nil
 local function startSpeedOverride()
     if speedConn then speedConn:Disconnect() end
@@ -934,7 +972,6 @@ local function stopSpeedOverride()
     end)
 end
 
--- Force sprint
 local forceSprintConn = nil
 local function startForceSprint()
     if forceSprintConn then forceSprintConn:Disconnect() end
@@ -953,7 +990,6 @@ local function stopForceSprint()
     pcall(function() if MechanicsCtrl then MechanicsCtrl:SetSprinting(false) end end)
 end
 
--- Slide / Jump
 local function doSlide()
     if not MechanicsCtrl then Library:Notify("MechanicsController not loaded", 3); return end
     pcall(function() MechanicsCtrl:Slide() end)
@@ -969,7 +1005,6 @@ local function doDoubleJump()
     pcall(function() MechanicsCtrl:DoubleJump() end)
 end
 
--- Auto-shoot PC patch
 local origCanAutoShoot = nil
 local function enableAutoShootPC()
     if not MechanicsCtrl then Library:Notify("MechanicsController not loaded", 3); return end
@@ -997,19 +1032,16 @@ local function disableAutoShootPC()
     end)
 end
 
--- Hurt effect
 local function setHurtEffect(enabled)
     if not EntityCtrl then return end
     pcall(function() EntityCtrl._hurt_effect_enabled = enabled end)
 end
 
--- Camera lean
 local function setCameraLean(value)
     if not MechanicsCtrl then return end
     pcall(function() MechanicsCtrl:SetCameraLean(value) end)
 end
 
--- Auto-join arcade
 local autoJoinConn = nil
 local function startAutoJoinArcade()
     if autoJoinConn then autoJoinConn:Disconnect() end
@@ -1026,7 +1058,6 @@ local function stopAutoJoinArcade()
     if autoJoinConn then autoJoinConn:Disconnect(); autoJoinConn = nil end
 end
 
--- Slide jump boost
 local slideJumpBoostEnabled = false
 local slideJumpConn         = nil
 
@@ -1047,11 +1078,9 @@ local function stopSlideJumpBoost()
     if slideJumpConn then slideJumpConn:Disconnect(); slideJumpConn = nil end
 end
 
--- Slide loop
 local slideLoopActive = false
 local slideLoopConn   = nil
 
--- Range ESP
 local rangeESPEnabled = false
 local rangeESPLabels  = {}
 local rangeESPConn    = nil
@@ -1546,6 +1575,10 @@ end
 
 local function SC2_applyRemoteHooks()
     if SC2.hookApplied then return end
+    if not hookmetamethod then
+        warn("[SC2] hookmetamethod not available — remote hooks skipped")
+        return
+    end
     local remotes        = ReplicatedStorage:FindFirstChild("Remotes")
     if not remotes then return end
     local dataR          = remotes:FindFirstChild("Data")
@@ -1888,7 +1921,8 @@ end})
 local SA_L = Tabs.SilentAim:AddLeftGroupbox("Main")
 local SA_R = Tabs.SilentAim:AddRightGroupbox("FOV & Targeting")
 
-SA_L:AddLabel("Hook: " .. (hookmetamethod and "Supported" or "NOT SUPPORTED"))
+local hmSupported = hookmetamethod ~= nil
+SA_L:AddLabel("Hook: " .. (hmSupported and "Supported" or "NOT SUPPORTED — executor too weak"))
 SA_L:AddToggle("SAOn", {Text="Enabled", Default=false, Callback=function(v)
     SAHookCFG.On = v; if v then startSAHook() else stopSAHook() end
 end})
@@ -2244,7 +2278,7 @@ local MS_S = Tabs.Misc:AddLeftGroupbox("Spoofer")
 local MS_C = Tabs.Misc:AddRightGroupbox("Auto Collect")
 local MS_A = Tabs.Misc:AddLeftGroupbox("Arch Spoofer")
 
-MS_L:AddLabel("AC Bypass: Active on load")
+MS_L:AddLabel("AC Bypass: " .. (hookmetamethod and "Active" or "SKIPPED — executor too weak"))
 MS_L:AddLabel("Method: AnalyticsPipelineController GC hook")
 MS_L:AddLabel("All matching functions replaced with infinite yield")
 
@@ -2337,12 +2371,12 @@ local MC_Effect = Tabs.Mechanics:AddRightGroupbox("Visual Effects")
 local MC_Arcade = Tabs.Mechanics:AddLeftGroupbox("Arcade")
 local MC_Anim   = Tabs.Mechanics:AddRightGroupbox("Preloaded Animations")
 
--- ── Status ──
 MC_Status:AddLabel("MechanicsCtrl: " .. (MechanicsCtrl and "Loaded" or "FAILED"))
 MC_Status:AddLabel("EntityCtrl:    " .. (EntityCtrl    and "Loaded" or "FAILED"))
 MC_Status:AddLabel("ArcadeCtrl:    " .. (ArcadeCtrl    and "Loaded" or "FAILED"))
 MC_Status:AddLabel("PreloadCtrl:   " .. (PreloadCtrl   and "Loaded" or "FAILED"))
 MC_Status:AddButton({Text="Reload Controllers", Func=function()
+    if not Controllers then Library:Notify("Controllers folder not found", 3); return end
     pcall(function() MechanicsCtrl = require(Controllers:WaitForChild("MechanicsController", 3)) end)
     pcall(function() EntityCtrl    = require(Controllers:WaitForChild("EntityController",    3)) end)
     pcall(function() ArcadeCtrl    = require(Controllers:WaitForChild("ArcadeController",    3)) end)
@@ -2350,7 +2384,6 @@ MC_Status:AddButton({Text="Reload Controllers", Func=function()
     Library:Notify("Controllers reloaded", 3)
 end})
 
--- ── Speed & Movement ──
 MC_Speed:AddToggle("MCSpeedOn", {
     Text="Walk Speed Override", Default=false,
     Callback=function(v)
@@ -2398,7 +2431,6 @@ MC_Speed:AddSlider("MCLeanVal", {
     end,
 })
 
--- ── Jump & Slide ──
 MC_Jump:AddLabel("One-shot actions:")
 MC_Jump:AddButton({Text="Trigger Slide Now", Func=function()
     doSlide(); Library:Notify("Slide triggered", 2)
@@ -2436,7 +2468,6 @@ MC_Jump:AddToggle("MCSlideLoop", {
     end,
 })
 
--- ── Auto-Shoot ──
 MC_Shoot:AddLabel("Forces auto-shoot to work on PC/KB")
 MC_Shoot:AddLabel("Patches _CanAutoShoot then calls _ToggleAutoShoot")
 MC_Shoot:AddToggle("MCAutoShootPC", {
@@ -2448,7 +2479,6 @@ MC_Shoot:AddToggle("MCAutoShootPC", {
 })
 MC_Shoot:AddLabel("Note: works best with a weapon equipped")
 
--- ── Visual Effects ──
 MC_Effect:AddToggle("MCHurtOff", {
     Text="Disable Hurt Flash Effect", Default=false,
     Callback=function(v)
@@ -2456,7 +2486,7 @@ MC_Effect:AddToggle("MCHurtOff", {
         setHurtEffect(not v)
     end,
 })
-MC_Effect:AddLabel("Removes red flash when enemies take damage")
+MC_Effect:AddLabel("Removes red flash when taking damage")
 MC_Effect:AddToggle("MCRangeESP", {
     Text="Shooting Range ESP", Default=false,
     Callback=function(v)
@@ -2467,7 +2497,6 @@ MC_Effect:AddToggle("MCRangeESP", {
 MC_Effect:AddLabel("Shows entity name labels via EntityController")
 MC_Effect:AddLabel("GetScreenPoints — works on range dummies too")
 
--- ── Arcade ──
 MC_Arcade:AddLabel("Auto-Join fires ArcadeController:Join()")
 MC_Arcade:AddLabel("when CanJoin() returns true")
 MC_Arcade:AddToggle("MCAutoJoin", {
@@ -2493,7 +2522,6 @@ MC_Arcade:AddButton({Text="Check Join Cooldown", Func=function()
     Library:Notify(ok and ("Cooldown: " .. tostring(cd) .. "s") or "Failed", 3)
 end})
 
--- ── Preloaded Animations ──
 MC_Anim:AddLabel("Animation IDs from PreloadController")
 MC_Anim:AddButton({Text="List All (console)", Func=function()
     if not PreloadCtrl then Library:Notify("PreloadController not loaded", 3); return end
@@ -2640,31 +2668,31 @@ SC2_R:AddLabel("Apply Skin Changer v2 first to populate")
 SC2_R:AddButton({Text="List All Skins (console)", Func=function()
     if not SC2.applied then Library:Notify("Apply first", 2); return end
     local skins = SC2_getCosmeticsOfType("Skin")
-    print("[SC2] Available Skins (" .. #skins .. "):"); for _, n in ipairs(skins) do print("  "..n) end
+    print("[SC2] Skins (" .. #skins .. "):"); for _, n in ipairs(skins) do print("  "..n) end
     Library:Notify("Listed " .. #skins .. " skins", 3)
 end})
 SC2_R:AddButton({Text="List All Wraps (console)", Func=function()
     if not SC2.applied then Library:Notify("Apply first", 2); return end
     local wraps = SC2_getCosmeticsOfType("Wrap")
-    print("[SC2] Available Wraps (" .. #wraps .. "):"); for _, n in ipairs(wraps) do print("  "..n) end
+    print("[SC2] Wraps (" .. #wraps .. "):"); for _, n in ipairs(wraps) do print("  "..n) end
     Library:Notify("Listed " .. #wraps .. " wraps", 3)
 end})
 SC2_R:AddButton({Text="List All Charms (console)", Func=function()
     if not SC2.applied then Library:Notify("Apply first", 2); return end
     local charms = SC2_getCosmeticsOfType("Charm")
-    print("[SC2] Available Charms (" .. #charms .. "):"); for _, n in ipairs(charms) do print("  "..n) end
+    print("[SC2] Charms (" .. #charms .. "):"); for _, n in ipairs(charms) do print("  "..n) end
     Library:Notify("Listed " .. #charms .. " charms", 3)
 end})
 SC2_R:AddButton({Text="List All Finishers (console)", Func=function()
     if not SC2.applied then Library:Notify("Apply first", 2); return end
     local finishers = SC2_getCosmeticsOfType("Finisher")
-    print("[SC2] Available Finishers (" .. #finishers .. "):"); for _, n in ipairs(finishers) do print("  "..n) end
+    print("[SC2] Finishers (" .. #finishers .. "):"); for _, n in ipairs(finishers) do print("  "..n) end
     Library:Notify("Listed " .. #finishers .. " finishers", 3)
 end})
 SC2_R:AddButton({Text="List All Weapons (console)", Func=function()
     if not SC2.applied then Library:Notify("Apply first", 2); return end
     local weapons = SC2_getAllWeapons()
-    print("[SC2] Available Weapons (" .. #weapons .. "):"); for _, n in ipairs(weapons) do print("  "..n) end
+    print("[SC2] Weapons (" .. #weapons .. "):"); for _, n in ipairs(weapons) do print("  "..n) end
     Library:Notify("Listed " .. #weapons .. " weapons", 3)
 end})
 SC2_R:AddButton({Text="List ALL Cosmetics (console)", Func=function()
@@ -2676,19 +2704,19 @@ end})
 
 SC2_RI:AddLabel("Module Status")
 SC2_RI:AddButton({Text="Check Module Status", Func=function()
-    Library:Notify("SC2 Applied: "    .. tostring(SC2.applied), 2)
+    Library:Notify("SC2 Applied: "   .. tostring(SC2.applied), 2)
     task.wait(0.3)
-    Library:Notify("CosmeticLib: "   .. (SC2.CosmeticLibrary   and "Loaded ✓" or "Not loaded ✗"), 2)
+    Library:Notify("CosmeticLib: "  .. (SC2.CosmeticLibrary  and "Loaded ✓" or "Not loaded ✗"), 2)
     task.wait(0.3)
-    Library:Notify("ItemLib: "       .. (SC2.ItemLibrary        and "Loaded ✓" or "Not loaded ✗"), 2)
+    Library:Notify("ItemLib: "      .. (SC2.ItemLibrary       and "Loaded ✓" or "Not loaded ✗"), 2)
     task.wait(0.3)
-    Library:Notify("DataCtrl: "      .. (SC2.DataController     and "Loaded ✓" or "Not loaded ✗"), 2)
+    Library:Notify("DataCtrl: "     .. (SC2.DataController    and "Loaded ✓" or "Not loaded ✗"), 2)
     task.wait(0.3)
-    Library:Notify("EnumLib: "       .. (SC2.EnumLibrary        and "Loaded ✓" or "Not loaded ✗"), 2)
+    Library:Notify("EnumLib: "      .. (SC2.EnumLibrary       and "Loaded ✓" or "Not loaded ✗"), 2)
     task.wait(0.3)
-    Library:Notify("FighterCtrl: "   .. (SC2.FighterController  and "Loaded ✓" or "Not loaded ✗"), 2)
+    Library:Notify("FighterCtrl: "  .. (SC2.FighterController and "Loaded ✓" or "Not loaded ✗"), 2)
     task.wait(0.3)
-    Library:Notify("Hook Applied: "  .. tostring(SC2.hookApplied), 2)
+    Library:Notify("Hook Applied: " .. tostring(SC2.hookApplied), 2)
 end})
 SC2_RI:AddLabel("Cosmetic Lookup")
 SC2_RI:AddButton({Text="Check Selected Cosmetic Exists", Func=function()
@@ -2809,12 +2837,10 @@ table.insert(ActiveConnections, RunService.RenderStepped:Connect(function(dt)
     camera = workspace.CurrentCamera
     local center = getScreenCenter()
 
-    -- Crosshair
     if CFG.Crosshair.On then
         crosshairImg.Position = UDim2.new(0.5, 0, 0.5, 0)
     end
 
-    -- FOV circles
     if fovCircle then
         fovCircle.Position = center
         fovCircle.Radius   = AimbotCFG.MaxFOV
@@ -2964,10 +2990,12 @@ table.insert(ActiveConnections, RunService.Heartbeat:Connect(function(dt)
                 if not obj or not obj.Parent then dropCache[obj] = nil; continue end
                 if (CFG.Collect.Health and obj:FindFirstChild("Health") and nh)
                 or (CFG.Collect.Ammo   and obj:FindFirstChild("Ammo")) then
-                    pcall(function()
-                        firetouchinterest(hrp, obj, 0)
-                        firetouchinterest(hrp, obj, 1)
-                    end)
+                    if firetouchinterest then
+                        pcall(function()
+                            firetouchinterest(hrp, obj, 0)
+                            firetouchinterest(hrp, obj, 1)
+                        end)
+                    end
                 end
             end
         end
@@ -2981,7 +3009,12 @@ Library:Notify("Rivals Tool v9.8 loaded — " .. (IsMobile and "MOBILE" or "PC")
 task.wait(6)
 Library:Notify("Skin Changer v2 + Mechanics tab ready", 5)
 print("[RIVALS TOOL v9.8] " .. (IsMobile and "MOBILE" or "PC"))
-print("[SC2] Skin Changer v2 integrated")
+print("[COMPAT] hookmetamethod: " .. tostring(hookmetamethod ~= nil))
+print("[COMPAT] newcclosure:    " .. tostring(newcclosure ~= nil))
+print("[COMPAT] checkcaller:    " .. tostring(checkcaller ~= nil))
+print("[COMPAT] cloneref:       " .. tostring(cloneref ~= nil))
+print("[COMPAT] firetouchinterest: " .. tostring(firetouchinterest ~= nil))
+print("[SC2] Skin Changer v2 integrated — apply from UI tab")
 print("[MECH] MechanicsController: " .. (MechanicsCtrl and "Loaded" or "FAILED"))
 print("[MECH] EntityController:    " .. (EntityCtrl    and "Loaded" or "FAILED"))
 print("[MECH] ArcadeController:    " .. (ArcadeCtrl    and "Loaded" or "FAILED"))

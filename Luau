@@ -2410,11 +2410,6 @@ Library:Notify("Rivals Tool v9.8 loaded — "..(IsMobile and "MOBILE" or "PC"),6
 task.wait(6)
 Library:Notify("Skin Changer v2 ready — go to Skin Changer tab and click Apply",5)
 task.wait(3)
-Library:Notify("Mechanics tab ready — controllers: "
-    ..(MechanicsCtrl and "MC " or "")
-    ..(EntityCtrl    and "EC " or "")
-    ..(ArcadeCtrl    and "AC " or "")
-    ..(PreloadCtrl   and "PC"  or ""), 5)
 print("[RIVALS TOOL v9.8] "..(IsMobile and "MOBILE" or "PC"))
 print("[SC2] Skin Changer v2 integrated — apply from UI tab")
 print("[Mechanics] MechanicsCtrl:"..tostring(MechanicsCtrl~=nil).." EntityCtrl:"..tostring(EntityCtrl~=nil).." ArcadeCtrl:"..tostring(ArcadeCtrl~=nil))

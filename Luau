@@ -1,9 +1,6 @@
 --[[
     RIVALS TOOL v9.9 — Custom UI Edition
-    Custom UI: Dark theme, mobile support, smooth animations
-    Aimbot: Smoothness + Reaction Time + Forgot Time + Delay Position
-    Silent Aim: ViewportSize hook + server manipulation
-    Fix: cloneref fallback
+    Mechanics: Slide Boost + Double Jump only
 ]]
 
 local Players           = game:GetService("Players")
@@ -19,14 +16,6 @@ local LP       = Players.LocalPlayer
 local IsMobile = UIS.TouchEnabled and not UIS.KeyboardEnabled
 local camera   = workspace.CurrentCamera
 
-local function safeRef(obj)
-    if cloneref then
-        local ok, result = pcall(cloneref, obj)
-        if ok and result then return result end
-    end
-    return obj
-end
-
 -- AC BYPASS
 if hookmetamethod then
     if not game:IsLoaded() then game.Loaded:Wait() end
@@ -41,11 +30,6 @@ if hookmetamethod then
         end
     end)
 end
-
--- SAFE REFERENCES
-local rs_sa      = safeRef(game:GetService("ReplicatedStorage"))
-local players_sa = safeRef(game:GetService("Players"))
-local ws_sa      = safeRef(game:GetService("Workspace"))
 
 -- SCREEN GUI
 local ScreenGui = Instance.new("ScreenGui")
@@ -170,8 +154,8 @@ local Header = Make("Frame", {BackgroundColor3=T.Surface, Size=UDim2.new(1,0,0,4
 Corner(Header, 10)
 Make("Frame", {BackgroundColor3=T.Surface, Size=UDim2.new(1,0,0,12), Position=UDim2.new(0,0,1,-12), ZIndex=12, Parent=Header})
 Make("Frame", {BackgroundColor3=T.Accent,  Size=UDim2.new(1,0,0,2),  Position=UDim2.new(0,0,1,-2),  ZIndex=13, Parent=Header})
-Make("TextLabel", {BackgroundTransparency=1, Position=UDim2.new(0,12,0,5), Size=UDim2.new(0,300,0,20), Font=T.Font,    Text="Rivals Tool v9.9", TextColor3=T.Text,   TextSize=15, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=14, Parent=Header})
-Make("TextLabel", {BackgroundTransparency=1, Position=UDim2.new(0,12,0,26),Size=UDim2.new(0,300,0,14), Font=T.FontReg, Text="RShift to toggle",   TextColor3=T.TextDim,TextSize=11, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=14, Parent=Header})
+Make("TextLabel", {BackgroundTransparency=1, Position=UDim2.new(0,12,0,5), Size=UDim2.new(0,300,0,20), Font=T.Font, Text="Rivals Tool v9.9", TextColor3=T.Text, TextSize=15, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=14, Parent=Header})
+Make("TextLabel", {BackgroundTransparency=1, Position=UDim2.new(0,12,0,26),Size=UDim2.new(0,300,0,14), Font=T.FontReg, Text="RShift to toggle", TextColor3=T.TextDim, TextSize=11, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=14, Parent=Header})
 
 local closeBtn = Make("TextButton", {BackgroundColor3=Color3.fromRGB(190,45,45), Size=UDim2.new(0,18,0,18), Position=UDim2.new(1,-28,0,14), Font=T.Font, Text="✕", TextColor3=Color3.new(1,1,1), TextSize=11, ZIndex=15, Parent=Header})
 Corner(closeBtn, 5)
@@ -546,7 +530,7 @@ local Tabs = {
 Root.Size=UDim2.new(0,W,0,0); Root.Visible=true
 task.defer(function() Tween(Root,{Size=UDim2.new(0,W,0,H)},0.22) end)
 
--- ALL CONFIGS (from v9.9)
+-- CONFIGS
 local AimbotCFG = {
     On=false, Smoothness=10, ReactionTime=100, ForgotTime=3,
     XSmooth=0.0, YSmooth=0.0, JumpSmooth=0.0,
@@ -816,6 +800,8 @@ Players.PlayerRemoving:Connect(function(p) playerImmunity[p]=nil end)
 -- SILENT AIM
 local saHookTarget=nil; local saHookConn=nil; local saHookApplied=false; local saHookIdx=nil
 local saManipConn=nil; local sa_util_mod=nil; local sa_enums_mod=nil; local sa_fighter_mod=nil
+local rs_sa = game:GetService("ReplicatedStorage")
+local ws_sa = game:GetService("Workspace")
 pcall(function()
     sa_util_mod   =require(rs_sa.Modules.Utility)
     sa_enums_mod  =require(rs_sa.Modules.EnumLibrary)
@@ -1037,7 +1023,7 @@ local SA_PEEK_OFFSETS_RB={Vector3.new(0,12,0),Vector3.new(0,16,0),Vector3.new(0,
 local function sa_getClosest()
     if not LP.Character or not LP.Character:FindFirstChild("HumanoidRootPart") then return nil,nil end
     local target,tchar,dist=nil,nil,silentMaxDist
-    for _,v in next,players_sa:GetPlayers() do
+    for _,v in next,Players:GetPlayers() do
         if v==LP then continue end
         if silentTeamCheck and isSameTeamRivals(v) then continue end
         if not v.Character or not v.Character:FindFirstChild("Head") then continue end
@@ -1206,88 +1192,24 @@ local function removeWeaponStatus()
     local ok,WSH=pcall(require,hp); if ok and WSH then WSH.ApplyItemStatusToBackground=oldWSFunc end; wsApplied=false
 end
 
--- MECHANICS
-local speedConn=nil
-local function startSpeedOverride()
-    if speedConn then speedConn:Disconnect() end
-    speedConn=RunService.Heartbeat:Connect(function()
-        if not MechCFG.SpeedEnabled then return end
-        if not MechanicsCtrl or not MechanicsCtrl.LocalFighter then return end
-        local entity=MechanicsCtrl.LocalFighter.Entity
-        if entity and entity.Humanoid then entity.Humanoid.WalkSpeed=MechCFG.WalkSpeed end
-    end)
-end
-local function stopSpeedOverride()
-    MechCFG.SpeedEnabled=false; if speedConn then speedConn:Disconnect(); speedConn=nil end
-    pcall(function() if MechanicsCtrl then MechanicsCtrl:_UpdateWalkSpeed() end end)
-end
-local forceSprintConn=nil
-local function startForceSprint()
-    if forceSprintConn then forceSprintConn:Disconnect() end
-    forceSprintConn=RunService.Heartbeat:Connect(function()
-        if not MechCFG.ForceSprintOn then return end
-        if not MechanicsCtrl then return end
-        if not MechanicsCtrl.IsSprinting then pcall(function() MechanicsCtrl:SetSprinting(true) end) end
-    end)
-end
-local function stopForceSprint()
-    MechCFG.ForceSprintOn=false; if forceSprintConn then forceSprintConn:Disconnect(); forceSprintConn=nil end
-    pcall(function() if MechanicsCtrl then MechanicsCtrl:SetSprinting(false) end end)
-end
-local slideLoopConn=nil
-local function startSlideLoop()
-    if slideLoopConn then slideLoopConn:Disconnect() end
-    slideLoopConn=RunService.Heartbeat:Connect(function()
-        if not MechCFG.SlideLoop then return end
-        if not MechanicsCtrl or not MechanicsCtrl.LocalFighter then return end
-        if not MechanicsCtrl.IsSliding then pcall(function() MechanicsCtrl:Slide() end) end
-    end)
-end
-local function stopSlideLoop()
-    MechCFG.SlideLoop=false; if slideLoopConn then slideLoopConn:Disconnect(); slideLoopConn=nil end
-    pcall(function() if MechanicsCtrl then MechanicsCtrl:StopSliding() end end)
-end
+-- MECHANICS (Slide Boost + Double Jump ONLY)
 local slideJumpBoostEnabled=false; local slideJumpConn=nil
 local function startSlideJumpBoost()
     if slideJumpConn then slideJumpConn:Disconnect() end
     slideJumpConn=UIS.InputBegan:Connect(function(i,gpe)
         if gpe or not slideJumpBoostEnabled then return end
-        if i.KeyCode==Enum.KeyCode.Space then if MechanicsCtrl and MechanicsCtrl.IsSliding then pcall(function() MechanicsCtrl:HighJump() end) end end
+        if i.KeyCode==Enum.KeyCode.Space then
+            if MechanicsCtrl and MechanicsCtrl.IsSliding then
+                pcall(function() MechanicsCtrl:HighJump() end)
+            end
+        end
     end)
 end
 local function stopSlideJumpBoost()
-    slideJumpBoostEnabled=false; if slideJumpConn then slideJumpConn:Disconnect(); slideJumpConn=nil end
+    slideJumpBoostEnabled=false
+    if slideJumpConn then slideJumpConn:Disconnect(); slideJumpConn=nil end
 end
-local origCanAutoShoot=nil
-local function enableAutoShootPC()
-    if not MechanicsCtrl then Notify("Mechanics","MechanicsController not loaded",3,"error"); return end
-    pcall(function()
-        origCanAutoShoot=origCanAutoShoot or MechanicsCtrl._CanAutoShoot
-        MechanicsCtrl._CanAutoShoot=function(self) return self.LocalFighter and self.LocalFighter.EquippedItem and not self.LocalFighter:Get("IsHiddenByCutscene") end
-        MechanicsCtrl:_ToggleAutoShoot(); Notify("Auto-Shoot","Forced ON",3,"success")
-    end)
-end
-local function disableAutoShootPC()
-    if not MechanicsCtrl then return end
-    pcall(function()
-        if origCanAutoShoot then MechanicsCtrl._CanAutoShoot=origCanAutoShoot; origCanAutoShoot=nil end
-        MechanicsCtrl:_ToggleAutoShoot(); Notify("Auto-Shoot","Restored",3,"info")
-    end)
-end
-local function setHurtEffect(enabled)
-    if not EntityCtrl then return end; pcall(function() EntityCtrl._hurt_effect_enabled=enabled end)
-end
-local autoJoinConn=nil
-local function startAutoJoinArcade()
-    if autoJoinConn then autoJoinConn:Disconnect() end
-    autoJoinConn=RunService.Heartbeat:Connect(function()
-        if not MechCFG.AutoJoinArcade or not ArcadeCtrl then return end
-        pcall(function() if ArcadeCtrl:CanJoin() then ArcadeCtrl:Join() end end)
-    end)
-end
-local function stopAutoJoinArcade()
-    MechCFG.AutoJoinArcade=false; if autoJoinConn then autoJoinConn:Disconnect(); autoJoinConn=nil end
-end
+
 local rangeESPEnabled=false; local rangeESPLabels={}; local rangeESPConn=nil
 local function clearRangeESP() for _,lbl in pairs(rangeESPLabels) do pcall(function() lbl:Destroy() end) end; rangeESPLabels={} end
 local function startRangeESP()
@@ -1524,7 +1446,6 @@ local MS_C = Tabs.Misc:AddRightGroupbox("Auto Collect")
 local MS_A = Tabs.Misc:AddLeftGroupbox("Extras")
 
 MS_L:AddLabel("AC Bypass: AnalyticsPipelineController GC hook")
-MS_L:AddLabel("cloneref: safeRef() fallback applied")
 MS_L:AddLabel("Device: "..(IsMobile and "MOBILE" or "PC"))
 
 local emoteAnimId=""
@@ -1561,73 +1482,41 @@ MS_A:AddButton("Arch Spoofer (Visual)", function()
     Notify("Arch Spoofer","Activated (visual only)",4,"success")
 end)
 
--- MECHANICS
+-- MECHANICS (Slide Boost + Double Jump only)
 local MC_Status = Tabs.Mechanics:AddLeftGroupbox("Controller Status")
-local MC_Speed  = Tabs.Mechanics:AddLeftGroupbox("Speed & Movement")
-local MC_Jump   = Tabs.Mechanics:AddRightGroupbox("Jump & Slide")
-local MC_Shoot  = Tabs.Mechanics:AddLeftGroupbox("Auto-Shoot")
-local MC_Effect = Tabs.Mechanics:AddRightGroupbox("Effects")
-local MC_Arcade = Tabs.Mechanics:AddLeftGroupbox("Arcade")
-local MC_Anim   = Tabs.Mechanics:AddRightGroupbox("Animations")
+local MC_Jump   = Tabs.Mechanics:AddRightGroupbox("Jump & Slide Boost")
 
 MC_Status:AddLabel("MechanicsCtrl: "..(MechanicsCtrl and "Loaded ✓" or "FAILED ✗"))
-MC_Status:AddLabel("EntityCtrl:    "..(EntityCtrl    and "Loaded ✓" or "FAILED ✗"))
-MC_Status:AddLabel("ArcadeCtrl:    "..(ArcadeCtrl    and "Loaded ✓" or "FAILED ✗"))
-MC_Status:AddLabel("PreloadCtrl:   "..(PreloadCtrl   and "Loaded ✓" or "FAILED ✗"))
 MC_Status:AddButton("Reload Controllers", function()
     pcall(function() MechanicsCtrl=require(Controllers_f:WaitForChild("MechanicsController",3)) end)
-    pcall(function() EntityCtrl   =require(Controllers_f:WaitForChild("EntityController",   3)) end)
-    pcall(function() ArcadeCtrl   =require(Controllers_f:WaitForChild("ArcadeController",   3)) end)
-    pcall(function() PreloadCtrl  =require(Controllers_f:WaitForChild("PreloadController",  3)) end)
     Notify("Mechanics","Controllers reloaded",3,"success")
 end)
 
-MC_Speed:AddToggle("Walk Speed Override", false, function(v) MechCFG.SpeedEnabled=v; if v then startSpeedOverride() else stopSpeedOverride() end end)
-MC_Speed:AddSlider("Walk Speed", 1, 100, 16, "", 0, function(v) MechCFG.WalkSpeed=v end)
-MC_Speed:AddButton("Reset Speed", function() MechCFG.SpeedEnabled=false; stopSpeedOverride(); Notify("Speed","Reset",2,"info") end)
-MC_Speed:AddToggle("Force Sprint", false, function(v) MechCFG.ForceSprintOn=v; if v then startForceSprint() else stopForceSprint() end end)
-MC_Speed:AddToggle("Slide Jump Boost", false, function(v) slideJumpBoostEnabled=v; if v then startSlideJumpBoost() else stopSlideJumpBoost() end end)
-
-MC_Jump:AddButton("Trigger Slide",       function() if not MechanicsCtrl then return end; pcall(function() MechanicsCtrl:Slide()      end); Notify("Mechanics","Slide triggered",2,"info")      end)
-MC_Jump:AddButton("Trigger High Jump",   function() if not MechanicsCtrl then return end; pcall(function() MechanicsCtrl:HighJump()   end); Notify("Mechanics","High Jump triggered",2,"info")  end)
-MC_Jump:AddButton("Trigger Double Jump", function() if not MechanicsCtrl then return end; pcall(function() MechanicsCtrl:DoubleJump() end); Notify("Mechanics","Double Jump triggered",2,"info") end)
-MC_Jump:AddButton("Stop Sliding",        function() if MechanicsCtrl then pcall(function() MechanicsCtrl:StopSliding() end) end; Notify("Mechanics","Slide stopped",2,"info") end)
-MC_Jump:AddToggle("Continuous Slide Loop", false, function(v) MechCFG.SlideLoop=v; if v then startSlideLoop() else stopSlideLoop() end end)
-
-MC_Shoot:AddLabel("Patches _CanAutoShoot for PC / KB")
-MC_Shoot:AddToggle("Force Auto-Shoot on PC", false, function(v) MechCFG.AutoShootPC=v; if v then enableAutoShootPC() else disableAutoShootPC() end end)
-MC_Shoot:AddLabel("Works best with a weapon equipped")
-
-MC_Effect:AddToggle("Disable Hurt Flash", false, function(v) MechCFG.HurtEffectOff=v; setHurtEffect(not v) end)
-MC_Effect:AddToggle("Range / Entity ESP", false, function(v) rangeESPEnabled=v; if v then startRangeESP() else stopRangeESP() end end)
-
-MC_Arcade:AddToggle("Auto Join Arcade", false, function(v) MechCFG.AutoJoinArcade=v; if v then startAutoJoinArcade() else stopAutoJoinArcade() end end)
-MC_Arcade:AddButton("Join Now", function()
-    if not ArcadeCtrl then Notify("Arcade","Controller not loaded",3,"error"); return end
-    local ok,err=pcall(function() ArcadeCtrl:Join() end)
-    Notify("Arcade",ok and "Join fired" or "Failed: "..tostring(err),3,ok and "success" or "error")
+MC_Jump:AddLabel("Slide Boost: Jump while sliding for high jump")
+MC_Jump:AddToggle("Slide Jump Boost", false, function(v)
+    slideJumpBoostEnabled=v
+    if v then startSlideJumpBoost() else stopSlideJumpBoost() end
 end)
-MC_Arcade:AddButton("Check CanJoin", function()
-    if not ArcadeCtrl then Notify("Arcade","Controller not loaded",3,"error"); return end
-    local ok,can=pcall(function() return ArcadeCtrl:CanJoin() end)
-    Notify("Arcade",ok and ("CanJoin: "..tostring(can)) or "Failed",3,"info")
+MC_Jump:AddDivider()
+MC_Jump:AddLabel("Manual triggers")
+MC_Jump:AddButton("Trigger Double Jump", function()
+    if not MechanicsCtrl then Notify("Mechanics","Controller not loaded",3,"error"); return end
+    pcall(function() MechanicsCtrl:DoubleJump() end)
+    Notify("Mechanics","Double Jump triggered",2,"info")
 end)
-
-MC_Anim:AddButton("List All IDs (console)", function()
-    if not PreloadCtrl then Notify("Animations","PreloadController not loaded",3,"error"); return end
-    local names={"SlidingStartForward","SlidingLoopForward","SlidingJump","SlidingJumpFall","WeaponUnlockIdle","WeaponUnlockPlay","FinalResultsCamera","LobbyPortalFalling","ZombieSpawn"}
-    print("[Preload] Animation IDs:")
-    for _,name in ipairs(names) do print(string.format("  %-30s = %s",name,tostring(PreloadCtrl:GetPreloadedAnimationID(name)))) end
-    Notify("Animations","Printed to console",3,"info")
+MC_Jump:AddButton("Trigger High Jump", function()
+    if not MechanicsCtrl then Notify("Mechanics","Controller not loaded",3,"error"); return end
+    pcall(function() MechanicsCtrl:HighJump() end)
+    Notify("Mechanics","High Jump triggered",2,"info")
 end)
-MC_Anim:AddButton("Play Slide Jump Anim", function()
-    if not PreloadCtrl then Notify("Animations","PreloadController not loaded",3,"error"); return end
-    local animObj=PreloadCtrl:GetPreloadedAnimation("SlidingJump"); if not animObj then Notify("Animations","Not preloaded",3,"error"); return end
-    local char=LP.Character; if not char then return end
-    local hum=char:FindFirstChildWhichIsA("Humanoid"); if not hum then return end
-    local anim=hum:FindFirstChildOfClass("Animator")
-    if anim then local ok,track=pcall(function() return anim:LoadAnimation(animObj) end); if ok and track then track:Play() end end
-    Notify("Animations","Played",3,"success")
+MC_Jump:AddButton("Trigger Slide", function()
+    if not MechanicsCtrl then Notify("Mechanics","Controller not loaded",3,"error"); return end
+    pcall(function() MechanicsCtrl:Slide() end)
+    Notify("Mechanics","Slide triggered",2,"info")
+end)
+MC_Jump:AddButton("Stop Sliding", function()
+    if MechanicsCtrl then pcall(function() MechanicsCtrl:StopSliding() end) end
+    Notify("Mechanics","Slide stopped",2,"info")
 end)
 
 -- SKIN CHANGER
@@ -1656,10 +1545,8 @@ SK_R:AddLabel("Check console (F9) for cosmetic names")
 local ST_L = Tabs.Settings:AddLeftGroupbox("General")
 local ST_R = Tabs.Settings:AddRightGroupbox("Stop All")
 
-ST_L:AddLabel("Rivals Tool v9.9 — Custom UI Edition")
+ST_L:AddLabel("Rivals Tool v9.9 — Slide Boost + Double Jump Edition")
 ST_L:AddLabel("Press RShift (PC) or ☰ (Mobile) to toggle")
-ST_L:AddLabel("AC Bypass: Active on load")
-ST_L:AddLabel("cloneref: safeRef() fallback active")
 ST_L:AddLabel("Device: "..(IsMobile and "MOBILE" or "PC"))
 
 ST_R:AddButton("Stop All Features", function()
@@ -1673,14 +1560,8 @@ ST_R:AddButton("Stop All Features", function()
     CFG.WeaponStatus.On=false; removeWeaponStatus()
     GunCFG.NoRecoil=false; GunCFG.NoSpread=false; GunCFG.FastShoot=false; patchGun()
     stopAntiAim(); AntiAimCFG.LeanLock=false; setCameraLean(0)
-    stopSpeedOverride(); stopForceSprint(); stopSlideJumpBoost()
-    stopRangeESP(); stopAutoJoinArcade(); stopSlideLoop()
-    MechCFG.AutoShootPC=false
-    if origCanAutoShoot and MechanicsCtrl then
-        MechanicsCtrl._CanAutoShoot=origCanAutoShoot; origCanAutoShoot=nil
-        pcall(function() MechanicsCtrl:_ToggleAutoShoot() end)
-    end
-    if EntityCtrl then pcall(function() EntityCtrl._hurt_effect_enabled=true end) end
+    stopSlideJumpBoost()
+    stopRangeESP()
     if fovCircle   then fovCircle.Visible=false   end
     if saFovCircle then saFovCircle.Visible=false end
     Notify("Stop All","All features disabled",3,"info")
@@ -1692,6 +1573,8 @@ ST_R:AddButton("Unload UI", function()
 end)
 
 -- CORE RENDER STEP
+local lockTimer=0; local lockedTarget=nil; local reactionTimer=0; local isInReaction=false
+
 table.insert(ActiveConnections, RunService.RenderStepped:Connect(function(dt)
     camera=workspace.CurrentCamera
     local center=getScreenCenter()
@@ -1804,9 +1687,9 @@ end))
 
 -- LOAD COMPLETE
 task.delay(0.8, function()
-    Notify("Rivals Tool v9.9","Custom UI loaded — "..(IsMobile and "MOBILE" or "PC"),5,"success")
+    Notify("Rivals Tool v9.9","Slide Boost + Double Jump Edition loaded!",5,"success")
 end)
 task.delay(2, function()
-    Notify("Info","RShift to toggle | cloneref fix active",4,"info")
+    Notify("Info","RShift to toggle | Mechanics: Slide Boost + Double Jump",4,"info")
 end)
-print("[RIVALS TOOL v9.9] "..(IsMobile and "MOBILE" or "PC").." | Custom UI | cloneref fix")
+print("[RIVALS TOOL v9.9] "..(IsMobile and "MOBILE" or "PC").." | Slide Boost + Double Jump")

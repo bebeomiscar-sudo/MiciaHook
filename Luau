@@ -1,7 +1,7 @@
 --[[
-    RIVALS TOOL — Clean Edition
+    RIVALS TOOL — Fixed Target Parts Edition
     Features: Aimbot, Silent Aim, Manipulation, Ragebot, AC Bypass, World Visuals, Hit Numbers/Sounds
-    Fixes: Aimbot FOV properly respected, no distance check on SA, no unlock all
+    Fixes: All target parts available, proper priority fallback for combined selections
 ]]
 
 -- ═══════════════════════════════════════════
@@ -213,19 +213,89 @@ local function isVisible(origin, targetPart)
     return ok and r or false
 end
 
+-- ═══════════════════════════════════════════
+-- FIXED TARGET PART SYSTEM
+-- All available parts with proper priority fallback
+-- ═══════════════════════════════════════════
+local ALL_TARGET_PARTS = {
+    "Head",
+    "HumanoidRootPart",
+    "UpperTorso", 
+    "LowerTorso",
+    "Torso",
+    "LeftUpperArm",
+    "LeftLowerArm",
+    "LeftHand",
+    "RightUpperArm",
+    "RightLowerArm",
+    "RightHand",
+    "LeftUpperLeg",
+    "LeftLowerLeg",
+    "LeftFoot",
+    "RightUpperLeg",
+    "RightLowerLeg",
+    "RightFoot",
+}
+
+-- Combined presets with proper priority order
+local TARGET_PART_PRESETS = {
+    ["Head"]              = {"Head"},
+    ["HumanoidRootPart"]  = {"HumanoidRootPart"},
+    ["Torso"]             = {"Torso", "UpperTorso", "LowerTorso", "HumanoidRootPart"},
+    ["UpperTorso"]        = {"UpperTorso", "Torso", "LowerTorso", "HumanoidRootPart"},
+    ["LowerTorso"]        = {"LowerTorso", "Torso", "UpperTorso", "HumanoidRootPart"},
+    ["Body"]              = {"UpperTorso", "LowerTorso", "Torso", "HumanoidRootPart"},
+    ["Arms"]              = {"LeftUpperArm", "RightUpperArm", "LeftLowerArm", "RightLowerArm", "LeftHand", "RightHand"},
+    ["Legs"]              = {"LeftUpperLeg", "RightUpperLeg", "LeftLowerLeg", "RightLowerLeg", "LeftFoot", "RightFoot"},
+    ["Head, Body"]        = {"Head", "UpperTorso", "LowerTorso", "Torso", "HumanoidRootPart"},
+    ["Body, Head"]        = {"UpperTorso", "LowerTorso", "Torso", "HumanoidRootPart", "Head"},
+    ["Head, Arms"]        = {"Head", "LeftUpperArm", "RightUpperArm", "LeftLowerArm", "RightLowerArm"},
+    ["Arms, Head"]        = {"LeftUpperArm", "RightUpperArm", "Head", "LeftLowerArm", "RightLowerArm"},
+    ["Head, Legs"]        = {"Head", "LeftUpperLeg", "RightUpperLeg", "LeftLowerLeg", "RightLowerLeg"},
+    ["Legs, Head"]        = {"LeftUpperLeg", "RightUpperLeg", "Head", "LeftLowerLeg", "RightLowerLeg"},
+    ["Random"]            = {"Random"}, -- Special handling
+}
+
 local function getBestPart(char, setting)
-    local names = {
-        ["Head"]       = {"Head"},
-        ["Body"]       = {"UpperTorso", "LowerTorso", "HumanoidRootPart"},
-        ["Head, Body"] = {"Head", "UpperTorso", "LowerTorso", "HumanoidRootPart"},
-        ["Body, Head"] = {"UpperTorso", "LowerTorso", "Head"},
-    }
-    local parts = names[setting] or {"Head"}
-    for _, n in ipairs(parts) do 
-        local p = char:FindFirstChild(n)
+    local preset = TARGET_PART_PRESETS[setting]
+    if not preset then preset = {"Head"} end
+    
+    -- Handle random selection
+    if preset[1] == "Random" then
+        local available = {}
+        for _, partName in ipairs(ALL_TARGET_PARTS) do
+            local p = char:FindFirstChild(partName)
+            if p then table.insert(available, p) end
+        end
+        if #available > 0 then
+            return available[math.random(1, #available)]
+        end
+        return nil
+    end
+    
+    -- Normal priority order fallback
+    for _, partName in ipairs(preset) do
+        local p = char:FindFirstChild(partName)
         if p then return p end
     end
+    
+    -- Ultimate fallback - any humanoid part
+    for _, partName in ipairs(ALL_TARGET_PARTS) do
+        local p = char:FindFirstChild(partName)
+        if p then return p end
+    end
+    
     return nil
+end
+
+-- Get all available parts in a character for random selection
+local function getAllAvailableParts(char)
+    local available = {}
+    for _, partName in ipairs(ALL_TARGET_PARTS) do
+        local p = char:FindFirstChild(partName)
+        if p then table.insert(available, p) end
+    end
+    return available
 end
 
 local function getEffectiveFOV()
@@ -237,7 +307,7 @@ local function getEffectiveFOV()
 end
 
 -- ═══════════════════════════════════════════
--- AIMBOT FOV FIX - Proper FOV checking
+-- AIMBOT FOV CHECK
 -- ═══════════════════════════════════════════
 local function isInAimbotFOV(targetPart)
     if not targetPart then return false end
@@ -305,7 +375,6 @@ local function isTargetStillValid(part)
     if not part or not part.Parent then return false end
     local hum = part.Parent:FindFirstChildOfClass("Humanoid")
     if not hum or hum.Health <= 0 then return false end
-    -- FIX: Check if target is still within FOV
     if not isInAimbotFOV(part) then return false end
     if AimbotCFG.VisibleCheck and not isVisible(camera.CFrame.Position, part) then return false end
     if AimbotCFG.TeamCheck then
@@ -315,11 +384,11 @@ local function isTargetStillValid(part)
     return true
 end
 
--- FIX: Only find targets within FOV, not closest overall
+-- FIXED: Proper FOV filtering for target finding
 local function findNewAimbotTarget()
     local c = getScreenCenter()
     local effectiveFOV = getEffectiveFOV()
-    local bp, bd = nil, effectiveFOV -- Start with FOV as max distance
+    local bp, bd = nil, effectiveFOV
     
     for _, p in ipairs(Players:GetPlayers()) do
         if p == LP then continue end
@@ -331,20 +400,19 @@ local function findNewAimbotTarget()
         local h = ch:FindFirstChildOfClass("Humanoid")
         if not h or h.Health <= 0 then continue end
         
+        -- Get best part based on current setting
         local part = getBestPart(ch, AimbotCFG.TargetPart)
         if not part then continue end
         
-        -- FIX: Check if on screen first
+        -- Check if on screen and within FOV
         local sp, on = camera:WorldToScreenPoint(part.Position)
         if not on then continue end
         
-        -- FIX: Check FOV distance
         local d = (Vector2.new(sp.X, sp.Y) - c).Magnitude
         if d > effectiveFOV then continue end -- Skip if outside FOV
         
         if AimbotCFG.VisibleCheck and not isVisible(camera.CFrame.Position, part) then continue end
         
-        -- Only target if within FOV
         if d < bd then 
             bd = d
             bp = part 
@@ -416,30 +484,9 @@ local function saGetEffectiveFOV()
     return f
 end
 
+-- FIXED: SA uses same target part system
 local function saGetTargetPart(char)
-    local names = {
-        ["Head"]       = {"Head"},
-        ["Body"]       = {"UpperTorso", "LowerTorso", "HumanoidRootPart"},
-        ["Head, Body"] = {"Head", "UpperTorso", "LowerTorso", "HumanoidRootPart"},
-        ["Body, Head"] = {"UpperTorso", "LowerTorso", "Head"},
-    }
-    local parts = names[SAHookCFG.TargetParts] or {"Head"}
-    
-    if SAHookCFG.PreferRandom then
-        local v = {}
-        for _, n in ipairs(parts) do 
-            local p = char:FindFirstChild(n)
-            if p then table.insert(v, p) end 
-        end
-        if #v > 0 then return v[math.random(1, #v)] end
-        return nil
-    end
-    
-    for _, n in ipairs(parts) do 
-        local p = char:FindFirstChild(n)
-        if p then return p end 
-    end
-    return nil
+    return getBestPart(char, SAHookCFG.TargetParts)
 end
 
 local function saHookVisible(part, camPos)
@@ -453,7 +500,6 @@ local function saHookVisible(part, camPos)
     return result == nil or result.Instance:IsDescendantOf(part.Parent)
 end
 
--- REMOVED: Distance check from SA validation
 local function saHookValid(plr, camPos, center)
     local char = plr.Character
     if not char then return false end
@@ -467,19 +513,16 @@ local function saHookValid(plr, camPos, center)
     
     if SAHookCFG.TeamCheck and isSameTeamRivals(plr) then return false end
     
-    local head = char:FindFirstChild("Head")
-    if not head then return false end
+    -- Get target part using same system as aimbot
+    local tp = saGetTargetPart(char)
+    if not tp then return false end
     
-    -- REMOVED: Distance check - no more (head.Position - camPos).Magnitude check
-    
+    -- For FOV check, use the actual target part position
     if not SAHookCFG.IgnoreFOV then
-        local sp, on = workspace.CurrentCamera:WorldToViewportPoint(head.Position)
+        local sp, on = workspace.CurrentCamera:WorldToViewportPoint(tp.Position)
         if not on then return false end
         if (Vector2.new(sp.X, sp.Y) - center).Magnitude > saGetEffectiveFOV() then return false end
     end
-    
-    local tp = saGetTargetPart(char)
-    if not tp then return false end
     
     if not saHookVisible(tp, camPos) then return false end
     
@@ -1060,6 +1103,25 @@ end
 -- UI SETUP
 -- ═══════════════════════════════════════════
 
+-- All target part options for dropdown
+local ALL_TARGET_OPTIONS = {
+    "Head",
+    "HumanoidRootPart",
+    "Torso",
+    "UpperTorso",
+    "LowerTorso",
+    "Body",
+    "Arms",
+    "Legs",
+    "Head, Body",
+    "Body, Head",
+    "Head, Arms",
+    "Arms, Head",
+    "Head, Legs",
+    "Legs, Head",
+    "Random"
+}
+
 -- Legitbot Tab
 local LB_L = Tabs.Legitbot:AddLeftGroupbox("Aimbot")
 local LB_R = Tabs.Legitbot:AddRightGroupbox("Delay Position")
@@ -1130,10 +1192,11 @@ LB_L:AddToggle("AimbotVis", {
     end
 })
 
+-- FIXED: All target parts available
 LB_L:AddDropdown("AimbotPart", {
     Text = "Target Part",
     Default = "Head",
-    Values = {"Head", "Body", "Head, Body", "Body, Head"},
+    Values = ALL_TARGET_OPTIONS,
     Callback = function(v) 
         AimbotCFG.TargetPart = v 
     end,
@@ -1281,8 +1344,6 @@ SA_L:AddSlider("SAHit", {
     end
 })
 
--- REMOVED: Distance slider - no distance check in Silent Aim
-
 SA_L:AddToggle("SATeam", {
     Text = "Team Check",
     Default = true,
@@ -1335,10 +1396,11 @@ SA_R:AddToggle("SADynFOV", {
     end
 })
 
+-- FIXED: All target parts for Silent Aim too
 SA_R:AddDropdown("SATargetParts", {
     Text = "Target Parts",
     Default = "Head, Body",
-    Values = {"Head", "Body", "Head, Body", "Body, Head"},
+    Values = ALL_TARGET_OPTIONS,
     Callback = function(v) 
         SAHookCFG.TargetParts = v 
     end,
@@ -1763,7 +1825,7 @@ RunService.RenderStepped:Connect(function(dt)
         saFovCircle.Visible = SAHookCFG.DrawFOV and SAHookCFG.On and not SAHookCFG.IgnoreFOV
     end
 
-    -- AIMBOT - FIXED FOV CHECK
+    -- AIMBOT
     if AimbotCFG.On and CameraController then
         if isInReaction then
             reactionTimer = reactionTimer - dt
@@ -1773,14 +1835,12 @@ RunService.RenderStepped:Connect(function(dt)
         end
         
         if not isInReaction then
-            -- FIX: Check if locked target is still valid (includes FOV check)
             if lockedTarget and not isTargetStillValid(lockedTarget) then
                 lockedTarget = nil
                 lockTimer = 0
                 resetDelayedPos()
             end
             
-            -- FIX: Only find new target if none locked
             if not lockedTarget then
                 local newT = findNewAimbotTarget()
                 if newT then
@@ -1792,16 +1852,13 @@ RunService.RenderStepped:Connect(function(dt)
                 end
             end
             
-            -- FIX: Only aim if we have a valid locked target within FOV
             if lockedTarget then
                 lockTimer = lockTimer + dt
                 if lockTimer > AimbotCFG.ForgotTime then
-                    -- Release lock after forgot time
                     lockedTarget = nil
                     lockTimer = 0
                     resetDelayedPos()
                 else
-                    -- FIX: Double-check target is still in FOV before aiming
                     if isInAimbotFOV(lockedTarget) then
                         local aimPos = getDelayedPos(lockedTarget, dt)
                         if aimPos then
@@ -1819,7 +1876,6 @@ RunService.RenderStepped:Connect(function(dt)
                             end)
                         end
                     else
-                        -- Target left FOV, release lock
                         lockedTarget = nil
                         lockTimer = 0
                         resetDelayedPos()
@@ -1835,5 +1891,5 @@ end)
 -- ═══════════════════════════════════════════
 Library:Notify("Rivals Tool loaded — " .. (IsMobile and "MOBILE" or "PC"), 6)
 print("[RIVALS TOOL] " .. (IsMobile and "MOBILE" or "PC"))
-print("[FIX] Aimbot FOV properly respected - no more pulling when outside FOV")
-print("[SA] Distance check removed - works at any range")
+print("[FIX] All target parts available with proper priority fallback")
+print("[FIX] Head, Body / Body, Head now work correctly with priority order")

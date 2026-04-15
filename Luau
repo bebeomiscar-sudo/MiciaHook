@@ -1,7 +1,7 @@
 --[[
     RIVALS TOOL — Clean Edition
-    Features: Aimbot, Silent Aim, Manipulation, Ragebot, AC Bypass
-    Excluded: cloneref fallback
+    Features: Aimbot, Silent Aim, Manipulation, Ragebot, AC Bypass, World Visuals, Hit Numbers/Sounds
+    Fixes: Aimbot FOV properly respected, no distance check on SA, no unlock all
 ]]
 
 -- ═══════════════════════════════════════════
@@ -64,6 +64,7 @@ local Tabs = {
     Ragebot     = Window:AddTab("Ragebot"),
     Gun         = Window:AddTab("Gun"),
     Visuals     = Window:AddTab("Visuals"),
+    World       = Window:AddTab("World"),
     Misc        = Window:AddTab("Misc"),
     Settings    = Window:AddTab("Settings"),
 }
@@ -93,7 +94,6 @@ local SAHookCFG = {
     VisCheck        = false,
     TeamCheck       = true,
     HitChance       = 100,
-    Distance        = 1000,
     IgnoreFOV       = false,
     FOVSize         = 600,
     DrawFOV         = true,
@@ -237,6 +237,19 @@ local function getEffectiveFOV()
 end
 
 -- ═══════════════════════════════════════════
+-- AIMBOT FOV FIX - Proper FOV checking
+-- ═══════════════════════════════════════════
+local function isInAimbotFOV(targetPart)
+    if not targetPart then return false end
+    local sp, onScreen = camera:WorldToViewportPoint(targetPart.Position)
+    if not onScreen then return false end
+    
+    local center = getScreenCenter()
+    local distance = (Vector2.new(sp.X, sp.Y) - center).Magnitude
+    return distance <= getEffectiveFOV()
+end
+
+-- ═══════════════════════════════════════════
 -- AIMBOT DELAYED POSITION SYSTEM
 -- ═══════════════════════════════════════════
 local delayedTargetPos = nil
@@ -292,6 +305,8 @@ local function isTargetStillValid(part)
     if not part or not part.Parent then return false end
     local hum = part.Parent:FindFirstChildOfClass("Humanoid")
     if not hum or hum.Health <= 0 then return false end
+    -- FIX: Check if target is still within FOV
+    if not isInAimbotFOV(part) then return false end
     if AimbotCFG.VisibleCheck and not isVisible(camera.CFrame.Position, part) then return false end
     if AimbotCFG.TeamCheck then
         local p = Players:GetPlayerFromCharacter(part.Parent)
@@ -300,9 +315,11 @@ local function isTargetStillValid(part)
     return true
 end
 
+-- FIX: Only find targets within FOV, not closest overall
 local function findNewAimbotTarget()
     local c = getScreenCenter()
-    local bp, bd = nil, getEffectiveFOV()
+    local effectiveFOV = getEffectiveFOV()
+    local bp, bd = nil, effectiveFOV -- Start with FOV as max distance
     
     for _, p in ipairs(Players:GetPlayers()) do
         if p == LP then continue end
@@ -317,12 +334,17 @@ local function findNewAimbotTarget()
         local part = getBestPart(ch, AimbotCFG.TargetPart)
         if not part then continue end
         
-        if AimbotCFG.VisibleCheck and not isVisible(camera.CFrame.Position, part) then continue end
-        
+        -- FIX: Check if on screen first
         local sp, on = camera:WorldToScreenPoint(part.Position)
         if not on then continue end
         
+        -- FIX: Check FOV distance
         local d = (Vector2.new(sp.X, sp.Y) - c).Magnitude
+        if d > effectiveFOV then continue end -- Skip if outside FOV
+        
+        if AimbotCFG.VisibleCheck and not isVisible(camera.CFrame.Position, part) then continue end
+        
+        -- Only target if within FOV
         if d < bd then 
             bd = d
             bp = part 
@@ -366,7 +388,7 @@ local function applyFOVStyle(circle, style)
 end
 
 -- ═══════════════════════════════════════════
--- SILENT AIM
+-- SILENT AIM (No Distance Check)
 -- ═══════════════════════════════════════════
 local saHookTarget    = nil
 local saHookApplied   = false
@@ -431,6 +453,7 @@ local function saHookVisible(part, camPos)
     return result == nil or result.Instance:IsDescendantOf(part.Parent)
 end
 
+-- REMOVED: Distance check from SA validation
 local function saHookValid(plr, camPos, center)
     local char = plr.Character
     if not char then return false end
@@ -447,7 +470,7 @@ local function saHookValid(plr, camPos, center)
     local head = char:FindFirstChild("Head")
     if not head then return false end
     
-    if (head.Position - camPos).Magnitude > SAHookCFG.Distance then return false end
+    -- REMOVED: Distance check - no more (head.Position - camPos).Magnitude check
     
     if not SAHookCFG.IgnoreFOV then
         local sp, on = workspace.CurrentCamera:WorldToViewportPoint(head.Position)
@@ -866,6 +889,174 @@ local function patchGun()
 end
 
 -- ═══════════════════════════════════════════
+-- HIT NUMBERS
+-- ═══════════════════════════════════════════
+local hitEnabled  = true
+local hitColor    = Color3.fromRGB(255, 20, 147)
+local hitStayTime = 5
+
+local hitNumberGui = Instance.new("ScreenGui")
+hitNumberGui.Name = "HitNumbersUI"
+hitNumberGui.ResetOnSpawn = false
+hitNumberGui.IgnoreGuiInset = true
+hitNumberGui.Parent = LP:WaitForChild("PlayerGui")
+
+local function showHit(amount)
+    if not hitEnabled then return end
+    local label = Instance.new("TextLabel")
+    label.BackgroundTransparency = 1
+    label.AutomaticSize = Enum.AutomaticSize.XY
+    label.Text = tostring(math.floor(amount + 0.5))
+    label.Font = Enum.Font.Jura
+    label.TextColor3 = hitColor
+    label.TextSize = 50
+    label.TextStrokeTransparency = 0
+    label.TextStrokeColor3 = Color3.new(0, 0, 0)
+    label.TextTransparency = 1
+    label.Position = UDim2.new(0.5, math.random(-180, 180), 0.45, math.random(-120, 120))
+    label.AnchorPoint = Vector2.new(0.5, 0.5)
+    label.Parent = hitNumberGui
+    
+    TweenService:Create(label, TweenInfo.new(0.3), {TextTransparency = 0}):Play()
+    
+    task.delay(hitStayTime, function()
+        TweenService:Create(label, TweenInfo.new(1), {TextTransparency = 1}):Play()
+        task.wait(1)
+        label:Destroy()
+    end)
+end
+
+local function setupHumanoid(hum2)
+    local lastHealth = hum2.Health
+    hum2.HealthChanged:Connect(function(newHealth)
+        local dmg = lastHealth - newHealth
+        if dmg > 0.1 then showHit(dmg) end
+        lastHealth = newHealth
+    end)
+end
+
+Players.PlayerAdded:Connect(function(plr)
+    plr.CharacterAdded:Connect(function(char)
+        local hum = char:WaitForChild("Humanoid")
+        if hum then setupHumanoid(hum) end
+    end)
+end)
+
+for _, plr in ipairs(Players:GetPlayers()) do
+    if plr.Character then
+        local hum = plr.Character:FindFirstChild("Humanoid")
+        if hum then setupHumanoid(hum) end
+    end
+end
+
+-- ═══════════════════════════════════════════
+-- HIT SOUNDS
+-- ═══════════════════════════════════════════
+local hitSoundReplacements = {
+    [16530229616] = 8941612531,
+    [16530229541] = 8941612531,
+    [16530229695] = 8941612531,
+    [16537337310] = 5043539486,
+    [16537449730] = 5043539486,
+    [16810041280] = 140314442804013,
+    [13110130082] = 97859770743369,
+}
+
+local function replaceSound(obj)
+    for oldId, newId in pairs(hitSoundReplacements) do
+        local oldF = "rbxassetid://" .. tostring(oldId)
+        if obj.SoundId == oldF or obj.SoundId:find(tostring(oldId)) then
+            obj.SoundId = "rbxassetid://" .. tostring(newId)
+            return
+        end
+    end
+end
+
+local function enableHitSounds()
+    for _, obj in ipairs(game:GetDescendants()) do
+        if obj:IsA("Sound") then replaceSound(obj) end
+    end
+    game.DescendantAdded:Connect(function(child)
+        if child:IsA("Sound") then replaceSound(child) end
+    end)
+    Library:Notify("Hit sounds enabled", 3)
+end
+
+-- ═══════════════════════════════════════════
+-- WORLD VISUALS
+-- ═══════════════════════════════════════════
+local customSky = nil
+local snowPart = nil
+local colorCorrection = Instance.new("ColorCorrectionEffect")
+colorCorrection.Parent = Lighting
+colorCorrection.Saturation = 0
+colorCorrection.Contrast = 0.1
+
+local blurEffect = Instance.new("BlurEffect")
+blurEffect.Parent = Lighting
+blurEffect.Size = 0
+
+local function applySky()
+    for _, v in pairs(Lighting:GetChildren()) do
+        if v:IsA("Sky") then v:Destroy() end
+    end
+    customSky = Instance.new("Sky", Lighting)
+    customSky.SkyboxBk = "rbxassetid://159454299"
+    customSky.SkyboxDn = "rbxassetid://159454296"
+    customSky.SkyboxFt = "rbxassetid://159454293"
+    customSky.SkyboxLf = "rbxassetid://159454286"
+    customSky.SkyboxRt = "rbxassetid://159454288"
+    customSky.SkyboxUp = "rbxassetid://159454300"
+    customSky.SunAngularSize = 0
+    customSky.MoonAngularSize = 0
+    Lighting.Ambient = Color3.fromRGB(150, 150, 150)
+    Lighting.OutdoorAmbient = Color3.fromRGB(100, 100, 100)
+end
+
+local function removeSky()
+    if customSky then
+        customSky:Destroy()
+        customSky = nil
+    end
+    if snowPart then
+        snowPart:Destroy()
+        snowPart = nil
+    end
+end
+
+local function enableSnow()
+    if snowPart then snowPart:Destroy() end
+    snowPart = Instance.new("Part")
+    snowPart.Name = "SimpleSnow"
+    snowPart.Size = Vector3.new(100, 1, 100)
+    snowPart.Transparency = 1
+    snowPart.CanCollide = false
+    snowPart.Anchored = true
+    snowPart.Parent = workspace
+    
+    local emitter = Instance.new("ParticleEmitter")
+    emitter.Texture = "rbxassetid://5833323391"
+    emitter.Color = ColorSequence.new(Color3.fromRGB(255, 255, 255))
+    emitter.Size = NumberSequence.new(0.6)
+    emitter.Transparency = NumberSequence.new(0)
+    emitter.Lifetime = NumberRange.new(12, 20)
+    emitter.Rate = 150
+    emitter.Speed = NumberRange.new(5, 10)
+    emitter.SpreadAngle = Vector2.new(30, 30)
+    emitter.Acceleration = Vector3.new(0, -7, 0)
+    emitter.Rotation = NumberRange.new(0, 360)
+    emitter.RotSpeed = NumberRange.new(-30, 30)
+    emitter.Parent = snowPart
+    emitter.Enabled = true
+    
+    RunService.RenderStepped:Connect(function()
+        if camera and snowPart and snowPart.Parent then
+            snowPart.Position = camera.CFrame.Position + Vector3.new(0, 35, 0)
+        end
+    end)
+end
+
+-- ═══════════════════════════════════════════
 -- UI SETUP
 -- ═══════════════════════════════════════════
 
@@ -1051,7 +1242,7 @@ LB_F:AddToggle("AimbotDynFOV", {
     end
 })
 
--- Silent Aim Tab
+-- Silent Aim Tab (No Distance Check)
 local SA_L = Tabs.SilentAim:AddLeftGroupbox("Main")
 local SA_R = Tabs.SilentAim:AddRightGroupbox("FOV & Targeting")
 local SA_M = Tabs.SilentAim:AddLeftGroupbox("Server Manipulation")
@@ -1072,7 +1263,7 @@ SA_L:AddToggle("SAOn", {
 })
 
 SA_L:AddToggle("SAVis", {
-    Text = "Visible Check (fixed)",
+    Text = "Visible Check",
     Default = false,
     Callback = function(v) 
         SAHookCFG.VisCheck = v 
@@ -1090,16 +1281,7 @@ SA_L:AddSlider("SAHit", {
     end
 })
 
-SA_L:AddSlider("SADist", {
-    Text = "Max Distance (studs)",
-    Default = 1000,
-    Min = 100,
-    Max = 2000,
-    Rounding = 0,
-    Callback = function(v) 
-        SAHookCFG.Distance = v 
-    end
-})
+-- REMOVED: Distance slider - no distance check in Silent Aim
 
 SA_L:AddToggle("SATeam", {
     Text = "Team Check",
@@ -1325,8 +1507,10 @@ GN_L:AddButton({
     end
 })
 
--- Visuals Tab (Crosshair)
+-- Visuals Tab (Crosshair + Hit Numbers)
 local VS_L = Tabs.Visuals:AddLeftGroupbox("Crosshair")
+local VS_R = Tabs.Visuals:AddRightGroupbox("Hit Numbers")
+
 local crosshairGui = Instance.new("ScreenGui")
 crosshairGui.Name = "CustomCrosshair"
 crosshairGui.ResetOnSpawn = false
@@ -1361,6 +1545,125 @@ VS_L:AddSlider("CrossSize", {
     end
 })
 
+VS_R:AddToggle("HitNumOn", {
+    Text = "Enable Hit Numbers",
+    Default = true,
+    Callback = function(v) 
+        hitEnabled = v 
+    end
+})
+
+VS_R:AddLabel("Color"):AddColorPicker("HitNumColor", {
+    Default = Color3.fromRGB(255, 20, 147),
+    Callback = function(v) 
+        hitColor = v 
+    end
+})
+
+VS_R:AddSlider("HitNumDur", {
+    Text = "Duration (s)",
+    Default = 5,
+    Min = 1,
+    Max = 10,
+    Rounding = 1,
+    Callback = function(v) 
+        hitStayTime = v 
+    end
+})
+
+-- World Tab (Sky, Snow, Effects, Hit Sounds)
+local WD_L = Tabs.World:AddLeftGroupbox("Sky & Snow")
+local WD_R = Tabs.World:AddRightGroupbox("World Effects")
+local WD_S = Tabs.World:AddLeftGroupbox("Sounds")
+
+WD_L:AddToggle("SkyOn", {
+    Text = "Enable Custom Sky",
+    Default = false,
+    Callback = function(v)
+        if v then 
+            applySky() 
+        else 
+            removeSky() 
+        end
+    end
+})
+
+WD_L:AddButton({
+    Text = "Enable Dark Sky + Snow",
+    Func = function()
+        local DARK_SKY_ID = "rbxassetid://16553660713"
+        local sky = Lighting:FindFirstChildOfClass("Sky")
+        if not sky then 
+            sky = Instance.new("Sky")
+            sky.Name = "CustomSky"
+            sky.Parent = Lighting 
+        end
+        for _, prop in ipairs({"SkyboxBk","SkyboxDn","SkyboxFt","SkyboxLf","SkyboxRt","SkyboxUp"}) do
+            sky[prop] = DARK_SKY_ID
+        end
+        enableSnow()
+        Library:Notify("Dark Sky + Snow enabled", 4)
+    end
+})
+
+WD_R:AddLabel("Screen Tint"):AddColorPicker("WorldTint", {
+    Default = Color3.fromRGB(255, 255, 255),
+    Callback = function(v) 
+        colorCorrection.TintColor = v 
+    end
+})
+
+WD_R:AddSlider("WorldSat", {
+    Text = "Saturation",
+    Default = 0,
+    Min = -1,
+    Max = 1,
+    Rounding = 1,
+    Callback = function(v) 
+        colorCorrection.Saturation = v 
+    end
+})
+
+WD_R:AddSlider("WorldCon", {
+    Text = "Contrast",
+    Default = 0,
+    Min = -1,
+    Max = 1,
+    Rounding = 1,
+    Callback = function(v) 
+        colorCorrection.Contrast = v 
+    end
+})
+
+WD_R:AddSlider("WorldBlur", {
+    Text = "Blur",
+    Default = 0,
+    Min = 0,
+    Max = 24,
+    Rounding = 0,
+    Callback = function(v) 
+        blurEffect.Size = v 
+    end
+})
+
+WD_R:AddSlider("WorldBright", {
+    Text = "Brightness",
+    Default = 1,
+    Min = 0,
+    Max = 5,
+    Rounding = 1,
+    Callback = function(v) 
+        Lighting.Brightness = v 
+    end
+})
+
+WD_S:AddButton({
+    Text = "Enable Hit Sounds",
+    Func = function() 
+        enableHitSounds() 
+    end
+})
+
 -- Misc Tab (AC Info)
 local MS_L = Tabs.Misc:AddLeftGroupbox("AC Bypass Info")
 MS_L:AddLabel("AC Bypass: Active on load")
@@ -1391,6 +1694,13 @@ ST_R:AddButton({
         GunCFG.NoSpread = false
         GunCFG.FastShoot = false
         patchGun()
+        
+        -- World
+        removeSky()
+        colorCorrection.Saturation = 0
+        colorCorrection.Contrast = 0.1
+        blurEffect.Size = 0
+        Lighting.Brightness = 1
         
         -- FOV circles
         if fovCircle then 
@@ -1453,7 +1763,7 @@ RunService.RenderStepped:Connect(function(dt)
         saFovCircle.Visible = SAHookCFG.DrawFOV and SAHookCFG.On and not SAHookCFG.IgnoreFOV
     end
 
-    -- AIMBOT
+    -- AIMBOT - FIXED FOV CHECK
     if AimbotCFG.On and CameraController then
         if isInReaction then
             reactionTimer = reactionTimer - dt
@@ -1463,12 +1773,14 @@ RunService.RenderStepped:Connect(function(dt)
         end
         
         if not isInReaction then
+            -- FIX: Check if locked target is still valid (includes FOV check)
             if lockedTarget and not isTargetStillValid(lockedTarget) then
                 lockedTarget = nil
                 lockTimer = 0
                 resetDelayedPos()
             end
             
+            -- FIX: Only find new target if none locked
             if not lockedTarget then
                 local newT = findNewAimbotTarget()
                 if newT then
@@ -1480,27 +1792,37 @@ RunService.RenderStepped:Connect(function(dt)
                 end
             end
             
+            -- FIX: Only aim if we have a valid locked target within FOV
             if lockedTarget then
                 lockTimer = lockTimer + dt
                 if lockTimer > AimbotCFG.ForgotTime then
+                    -- Release lock after forgot time
                     lockedTarget = nil
                     lockTimer = 0
                     resetDelayedPos()
                 else
-                    local aimPos = getDelayedPos(lockedTarget, dt)
-                    if aimPos then
-                        local sm = math.clamp(1 / math.max(AimbotCFG.Smoothness, 0.1), 0.01, 1)
-                        pcall(function()
-                            local cp  = camera.CFrame.Position
-                            local du  = (aimPos - cp).Unit
-                            local tP  = math.asin(math.clamp(du.Y, -1, 1))
-                            local tY  = math.atan2(-du.X, -du.Z)
-                            local cur = CameraController.Rotation
-                            CameraController:SetRotation(Vector2.new(
-                                cur.X + (tP - cur.X) * sm,
-                                cur.Y + angleDiff(cur.Y, tY) * sm
-                            ))
-                        end)
+                    -- FIX: Double-check target is still in FOV before aiming
+                    if isInAimbotFOV(lockedTarget) then
+                        local aimPos = getDelayedPos(lockedTarget, dt)
+                        if aimPos then
+                            local sm = math.clamp(1 / math.max(AimbotCFG.Smoothness, 0.1), 0.01, 1)
+                            pcall(function()
+                                local cp  = camera.CFrame.Position
+                                local du  = (aimPos - cp).Unit
+                                local tP  = math.asin(math.clamp(du.Y, -1, 1))
+                                local tY  = math.atan2(-du.X, -du.Z)
+                                local cur = CameraController.Rotation
+                                CameraController:SetRotation(Vector2.new(
+                                    cur.X + (tP - cur.X) * sm,
+                                    cur.Y + angleDiff(cur.Y, tY) * sm
+                                ))
+                            end)
+                        end
+                    else
+                        -- Target left FOV, release lock
+                        lockedTarget = nil
+                        lockTimer = 0
+                        resetDelayedPos()
                     end
                 end
             end
@@ -1513,4 +1835,5 @@ end)
 -- ═══════════════════════════════════════════
 Library:Notify("Rivals Tool loaded — " .. (IsMobile and "MOBILE" or "PC"), 6)
 print("[RIVALS TOOL] " .. (IsMobile and "MOBILE" or "PC"))
-print("[SA] Modules: util=" .. tostring(sa_util_mod ~= nil) .. " enums=" .. tostring(sa_enums_mod ~= nil) .. " fighter=" .. tostring(sa_fighter_mod ~= nil))
+print("[FIX] Aimbot FOV properly respected - no more pulling when outside FOV")
+print("[SA] Distance check removed - works at any range")

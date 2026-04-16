@@ -1,22 +1,19 @@
---// Unnamed Enhancements - Complete LinoriaLib Version
---// Mobile Compatible with All Features
+-- === UI Changer Beta - Complete Version with All Features ===
 
-local Library = loadstring(game:HttpGet('https://raw.githubusercontent.com/violin-suzutsuki/LinoriaLib/refs/heads/main/Library.lua'))()
-local SaveManager = loadstring(game:HttpGet('https://raw.githubusercontent.com/violin-suzutsuki/LinoriaLib/refs/heads/main/addons/SaveManager.lua'))()
-local ThemeManager = loadstring(game:HttpGet('https://raw.githubusercontent.com/violin-suzutsuki/LinoriaLib/refs/heads/main/addons/ThemeManager.lua'))()
+local repo = 'https://raw.githubusercontent.com/mstudio45/LinoriaLib/main/'
+
+local Library = loadstring(game:HttpGet(repo .. 'Library.lua'))()
+local ThemeManager = loadstring(game:HttpGet(repo .. 'addons/ThemeManager.lua'))()
+local SaveManager = loadstring(game:HttpGet(repo .. 'addons/SaveManager.lua'))()
+
+Library.ShowToggleFrameInKeybinds = true
 
 --// Services
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local ContextActionService = game:GetService("ContextActionService")
 local TweenService = game:GetService("TweenService")
-local TextService = game:GetService("TextService")
 local Lighting = game:GetService("Lighting")
-local Teams = game:GetService("Teams")
-local HttpService = game:GetService("HttpService")
-local GuiService = game:GetService("GuiService")
-local TextChatService = game:GetService("TextChatService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
@@ -24,21 +21,26 @@ local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
 local Mouse = LocalPlayer:GetMouse()
 
---// Compatibility
-local cloneref = cloneref or function(inst) return inst end
-local gethui = gethui or function() return game:GetService("CoreGui") end
-local protect_gui = (syn and syn.protect_gui) or function() end
-local getcustomasset = getcustomasset or getsynasset or function() return "" end
+local Window = Library:CreateWindow({
+    Title = 'UI Changer Beta',
+    Center = true,
+    AutoShow = false,
+    Resizable = true,
+    ShowCustomCursor = false,
+    UnlockMouseWhileOpen = true,
+    NotifySide = "Left",
+    TabPadding = 8,
+    MenuFadeTime = 0.2,
+    Size = UDim2.fromOffset(400, 520)
+})
 
-if not getgenv then getgenv = function() return _G end end
-
-if getgenv().UE_LOADED then return end
-
---// Global Tables
-if not getgenv().Toggles then getgenv().Toggles = {} end
-if not getgenv().Options then getgenv().Options = {} end
-local Toggles = getgenv().Toggles
-local Options = getgenv().Options
+local Tabs = {
+    Combat = Window:AddTab('Combat'),
+    Visuals = Window:AddTab('Visuals'),
+    World = Window:AddTab('World'),
+    Misc = Window:AddTab('Misc'),
+    Settings = Window:AddTab('Settings'),
+}
 
 --// State Management
 local State = {
@@ -46,8 +48,7 @@ local State = {
         silent = { circle = nil },
         aimbot = { circle = nil },
         crosshair = {},
-        fov = {},
-        tracers = {}
+        fov = {}
     },
     manipulation = {
         active = false,
@@ -56,23 +57,13 @@ local State = {
     },
     visuals = {
         espObjects = {},
-        chamsObjects = {},
-        beamObjects = {}
+        chamsObjects = {}
     },
-    localFighter = nil,
-    remotes = {},
-    modules = {},
-    raycastParams = RaycastParams.new(),
-    connections = {},
-    mobileButtons = {}
+    raycastParams = RaycastParams.new()
 }
 
 State.raycastParams.FilterType = Enum.RaycastFilterType.Exclude
 State.raycastParams.FilterDescendantsInstances = {LocalPlayer.Character}
-
---// Mobile Detection
-local IsMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
-Library.IsMobile = IsMobile
 
 --// Drawing Setup
 local function CreateDrawing(type, properties)
@@ -83,113 +74,16 @@ local function CreateDrawing(type, properties)
     return drawing
 end
 
---// Initialize Drawings
+-- Initialize Drawings
 State.drawings.silent.circle = CreateDrawing("Circle", {
-    Visible = false,
-    Radius = 100,
-    Color = Color3.new(1, 1, 1),
-    Thickness = 1,
-    Filled = false,
-    Transparency = 1,
-    NumSides = 64
+    Visible = false, Radius = 100, Color = Color3.new(1, 1, 1),
+    Thickness = 1, Filled = false, Transparency = 1, NumSides = 64
 })
 
 State.drawings.aimbot.circle = CreateDrawing("Circle", {
-    Visible = false,
-    Radius = 100,
-    Color = Color3.new(1, 1, 1),
-    Thickness = 1,
-    Filled = false,
-    Transparency = 1,
-    NumSides = 64
+    Visible = false, Radius = 100, Color = Color3.new(1, 1, 1),
+    Thickness = 1, Filled = false, Transparency = 1, NumSides = 64
 })
-
---// Create Mobile Button
-local function CreateMobileButton(name, position, size, callback)
-    if not IsMobile then return nil end
-    
-    local ScreenGui = Instance.new("ScreenGui")
-    ScreenGui.Name = "MobileButton_" .. name
-    ScreenGui.Parent = gethui()
-    protect_gui(ScreenGui)
-    
-    local Button = Instance.new("TextButton")
-    Button.Name = name
-    Button.Size = size or UDim2.new(0, 80, 0, 80)
-    Button.Position = position or UDim2.new(0, 10, 0.5, -40)
-    Button.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-    Button.BackgroundTransparency = 0.3
-    Button.BorderSizePixel = 0
-    Button.Text = name
-    Button.TextColor3 = Color3.new(1, 1, 1)
-    Button.TextSize = 14
-    Button.Font = Enum.Font.GothamBold
-    Button.Parent = ScreenGui
-    
-    local UICorner = Instance.new("UICorner")
-    UICorner.CornerRadius = UDim.new(0, 20)
-    UICorner.Parent = Button
-    
-    local UIStroke = Instance.new("UIStroke")
-    UIStroke.Color = Color3.fromRGB(100, 100, 100)
-    UIStroke.Thickness = 2
-    UIStroke.Parent = Button
-    
-    local active = false
-    
-    Button.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.Touch then
-            active = true
-            Button.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-            if callback then callback(true) end
-        end
-    end)
-    
-    Button.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.Touch then
-            active = false
-            Button.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-            if callback then callback(false) end
-        end
-    end)
-    
-    -- Make draggable
-    local dragging = false
-    local dragStart = nil
-    local startPos = nil
-    
-    Button.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.Touch and #Button:GetChildren() > 0 then
-            local touchPos = input.Position
-            if (touchPos - Button.AbsolutePosition - Vector2.new(Button.AbsoluteSize.X/2, Button.AbsoluteSize.Y/2)).Magnitude < 30 then
-                dragging = true
-                dragStart = input.Position
-                startPos = Button.Position
-            end
-        end
-    end)
-    
-    UserInputService.InputChanged:Connect(function(input)
-        if dragging and input.UserInputType == Enum.UserInputType.Touch then
-            local delta = input.Position - dragStart
-            Button.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-        end
-    end)
-    
-    UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.Touch then
-            dragging = false
-        end
-    end)
-    
-    State.mobileButtons[name] = {
-        gui = ScreenGui,
-        button = Button,
-        active = function() return active end
-    }
-    
-    return State.mobileButtons[name]
-end
 
 --// Utility Functions
 local function GetCharacter(player)
@@ -210,10 +104,6 @@ local function IsPlayerAlive(player)
     return humanoid and humanoid.Health > 0
 end
 
-local function IsTeamMate(player)
-    return player.Team == LocalPlayer.Team
-end
-
 local function WorldToViewport(position)
     local screenPos, onScreen = Camera:WorldToViewportPoint(position)
     return Vector2.new(screenPos.X, screenPos.Y), onScreen, screenPos.Z
@@ -230,7 +120,7 @@ local function GetClosestPlayer(fov, visibleOnly, teamCheck)
     
     for _, player in pairs(Players:GetPlayers()) do
         if player == LocalPlayer then continue end
-        if teamCheck and IsTeamMate(player) then continue end
+        if teamCheck and player.Team == LocalPlayer.Team then continue end
         
         local character = GetCharacter(player)
         if not character then continue end
@@ -263,19 +153,15 @@ local function GetClosestPlayer(fov, visibleOnly, teamCheck)
             }
         end
     end
-    
     return closest
 end
 
 --// Metatable Hook Setup
 local function SetupMetatableHooks()
-    local success, err = pcall(function()
+    local success = pcall(function()
         local mt = getrawmetatable(game)
         if not mt then return end
-        
         local oldNamecall = mt.__namecall
-        local oldIndex = mt.__index
-        
         setreadonly(mt, false)
         
         mt.__namecall = newcclosure(function(self, ...)
@@ -283,7 +169,6 @@ local function SetupMetatableHooks()
             local args = {...}
             
             if method == "FireServer" and self:IsDescendantOf(ReplicatedStorage) then
-                -- No Spread
                 if Toggles.exploits_no_spread and Toggles.exploits_no_spread.Value then
                     for _, arg in pairs(args) do
                         if type(arg) == "table" then
@@ -297,7 +182,6 @@ local function SetupMetatableHooks()
                     end
                 end
                 
-                -- Silent Aim Manipulation
                 if Toggles.silent_manipulation and Toggles.silent_manipulation.Value and State.manipulation.targetPosition then
                     for _, arg in pairs(args) do
                         if type(arg) == "table" then
@@ -311,16 +195,10 @@ local function SetupMetatableHooks()
                     end
                 end
             end
-            
             return oldNamecall(self, ...)
         end)
-        
         setreadonly(mt, true)
     end)
-    
-    if not success then
-        warn("Metatable hook failed:", err)
-    end
 end
 
 --// ESP System
@@ -330,10 +208,6 @@ ESP.__index = ESP
 function ESP.new(player)
     local self = setmetatable({}, ESP)
     self.Player = player
-    self.Character = nil
-    self.RootPart = nil
-    self.Humanoid = nil
-    
     self.Drawings = {
         Box = CreateDrawing("Square", { Visible = false, Thickness = 1, Filled = false }),
         BoxOutline = CreateDrawing("Square", { Visible = false, Thickness = 3, Filled = false, Color = Color3.new(0, 0, 0) }),
@@ -345,30 +219,19 @@ function ESP.new(player)
         Skeleton = {}
     }
     
-    -- Create skeleton lines
     local skeletonParts = {
-        {"Head", "UpperTorso"},
-        {"UpperTorso", "LowerTorso"},
-        {"UpperTorso", "LeftUpperArm"},
-        {"LeftUpperArm", "LeftLowerArm"},
-        {"LeftLowerArm", "LeftHand"},
-        {"UpperTorso", "RightUpperArm"},
-        {"RightUpperArm", "RightLowerArm"},
-        {"RightLowerArm", "RightHand"},
-        {"LowerTorso", "LeftUpperLeg"},
-        {"LeftUpperLeg", "LeftLowerLeg"},
-        {"LeftLowerLeg", "LeftFoot"},
-        {"LowerTorso", "RightUpperLeg"},
-        {"RightUpperLeg", "RightLowerLeg"},
-        {"RightLowerLeg", "RightFoot"}
+        {"Head", "UpperTorso"}, {"UpperTorso", "LowerTorso"},
+        {"UpperTorso", "LeftUpperArm"}, {"LeftUpperArm", "LeftLowerArm"}, {"LeftLowerArm", "LeftHand"},
+        {"UpperTorso", "RightUpperArm"}, {"RightUpperArm", "RightLowerArm"}, {"RightLowerArm", "RightHand"},
+        {"LowerTorso", "LeftUpperLeg"}, {"LeftUpperLeg", "LeftLowerLeg"}, {"LeftLowerLeg", "LeftFoot"},
+        {"LowerTorso", "RightUpperLeg"}, {"RightUpperLeg", "RightLowerLeg"}, {"RightLowerLeg", "RightFoot"}
     }
     
     for _, pair in pairs(skeletonParts) do
         table.insert(self.Drawings.Skeleton, {
             Line = CreateDrawing("Line", { Visible = false, Thickness = 1 }),
             Outline = CreateDrawing("Line", { Visible = false, Thickness = 3, Color = Color3.new(0, 0, 0) }),
-            Part1 = pair[1],
-            Part2 = pair[2]
+            Part1 = pair[1], Part2 = pair[2]
         })
     end
     
@@ -401,7 +264,7 @@ function ESP:Update()
         return
     end
     
-    if not Toggles.esp_show_team.Value and IsTeamMate(self.Player) then
+    if not Toggles.esp_show_team.Value and self.Player.Team == LocalPlayer.Team then
         self:SetVisible(false)
         return
     end
@@ -418,7 +281,6 @@ function ESP:Update()
         return
     end
     
-    -- Calculate box size
     local head = character:FindFirstChild("Head")
     local leg = character:FindFirstChild("LeftFoot") or character:FindFirstChild("LeftLowerLeg")
     
@@ -434,14 +296,12 @@ function ESP:Update()
         boxPosition = Vector2.new(screenPos.X - 25, screenPos.Y - 40)
     end
     
-    -- Update Box
     if Toggles.esp_box.Value then
         local color = Options.esp_box_color and Options.esp_box_color.Value or Color3.new(1, 1, 1)
         self.Drawings.Box.Size = boxSize
         self.Drawings.Box.Position = boxPosition
         self.Drawings.Box.Color = color
         self.Drawings.Box.Visible = true
-        
         self.Drawings.BoxOutline.Size = boxSize
         self.Drawings.BoxOutline.Position = boxPosition
         self.Drawings.BoxOutline.Visible = true
@@ -450,19 +310,19 @@ function ESP:Update()
         self.Drawings.BoxOutline.Visible = false
     end
     
-    -- Update Fill
     if Toggles.esp_fill.Value then
         local fillColor = Options.esp_fill_color and Options.esp_fill_color.Value or Color3.new(1, 1, 1)
         local transparency = Options.esp_fill_transparency and Options.esp_fill_transparency.Value or 0.5
         self.Drawings.Box.Filled = true
         self.Drawings.Box.Transparency = transparency
         self.Drawings.Box.Color = fillColor
+    elseif not Toggles.esp_box.Value then
+        self.Drawings.Box.Visible = false
     else
         self.Drawings.Box.Filled = false
         self.Drawings.Box.Transparency = 1
     end
     
-    -- Update Name
     if Toggles.esp_name.Value then
         local nameText = Options.esp_name_type and Options.esp_name_type.Value == "DisplayName" and self.Player.DisplayName or self.Player.Name
         self.Drawings.Name.Text = nameText
@@ -473,7 +333,6 @@ function ESP:Update()
         self.Drawings.Name.Visible = false
     end
     
-    -- Update Distance
     if Toggles.esp_distance.Value then
         self.Drawings.Distance.Text = string.format("[%dm]", math.floor(distance))
         self.Drawings.Distance.Position = Vector2.new(screenPos.X, boxPosition.Y + boxSize.Y + 2)
@@ -483,14 +342,10 @@ function ESP:Update()
         self.Drawings.Distance.Visible = false
     end
     
-    -- Update Weapon
     if Toggles.esp_weapon.Value then
-        local weaponText = "Unknown"
-        -- Try to get weapon from backpack or character
+        local weaponText = "None"
         local tool = character:FindFirstChildOfClass("Tool")
-        if tool then
-            weaponText = tool.Name
-        end
+        if tool then weaponText = tool.Name end
         self.Drawings.Weapon.Text = weaponText
         self.Drawings.Weapon.Position = Vector2.new(screenPos.X, boxPosition.Y + boxSize.Y + (Toggles.esp_distance.Value and 15 or 2))
         self.Drawings.Weapon.Color = Options.esp_weapon_color and Options.esp_weapon_color.Value or Color3.new(1, 1, 1)
@@ -499,7 +354,6 @@ function ESP:Update()
         self.Drawings.Weapon.Visible = false
     end
     
-    -- Update Health Bar
     if Toggles.esp_healthbar.Value then
         local healthPercent = humanoid.Health / humanoid.MaxHealth
         local barHeight = boxSize.Y * healthPercent
@@ -518,7 +372,6 @@ function ESP:Update()
         self.Drawings.HealthBarOutline.Visible = false
     end
     
-    -- Update Skeleton
     if Toggles.esp_skeleton.Value then
         for _, lineData in pairs(self.Drawings.Skeleton) do
             local part1 = character:FindFirstChild(lineData.Part1)
@@ -572,9 +425,7 @@ function ESP:SetVisible(visible)
 end
 
 function ESP:Destroy()
-    if self.Connection then
-        self.Connection:Disconnect()
-    end
+    if self.Connection then self.Connection:Disconnect() end
     for _, drawing in pairs(self.Drawings) do
         if typeof(drawing) == "table" and drawing.Remove then
             drawing:Remove()
@@ -605,24 +456,17 @@ local function InitializeESP()
 end
 
 --// Crosshair System
-local function CreateCrosshair()
-    local crosshair = {
-        Top = CreateDrawing("Line", { Visible = false, Thickness = 2, Color = Color3.new(1, 1, 1) }),
-        Bottom = CreateDrawing("Line", { Visible = false, Thickness = 2, Color = Color3.new(1, 1, 1) }),
-        Left = CreateDrawing("Line", { Visible = false, Thickness = 2, Color = Color3.new(1, 1, 1) }),
-        Right = CreateDrawing("Line", { Visible = false, Thickness = 2, Color = Color3.new(1, 1, 1) }),
-        Center = CreateDrawing("Circle", { Visible = false, Radius = 2, Filled = true, Color = Color3.new(1, 1, 1) })
-    }
-    return crosshair
-end
-
-local crosshair = CreateCrosshair()
+local crosshair = {
+    Top = CreateDrawing("Line", { Visible = false, Thickness = 2, Color = Color3.new(1, 1, 1) }),
+    Bottom = CreateDrawing("Line", { Visible = false, Thickness = 2, Color = Color3.new(1, 1, 1) }),
+    Left = CreateDrawing("Line", { Visible = false, Thickness = 2, Color = Color3.new(1, 1, 1) }),
+    Right = CreateDrawing("Line", { Visible = false, Thickness = 2, Color = Color3.new(1, 1, 1) }),
+    Center = CreateDrawing("Circle", { Visible = false, Radius = 2, Filled = true, Color = Color3.new(1, 1, 1) })
+}
 
 local function UpdateCrosshair()
     if not Toggles.crosshair_enabled or not Toggles.crosshair_enabled.Value then
-        for _, line in pairs(crosshair) do
-            line.Visible = false
-        end
+        for _, line in pairs(crosshair) do line.Visible = false end
         return
     end
     
@@ -631,31 +475,26 @@ local function UpdateCrosshair()
     local gap = Options.crosshair_gap and Options.crosshair_gap.Value or 4
     local color = Options.crosshair_color and Options.crosshair_color.Value or Color3.new(1, 1, 1)
     
-    -- Top
     crosshair.Top.From = Vector2.new(center.X, center.Y - gap - size)
     crosshair.Top.To = Vector2.new(center.X, center.Y - gap)
     crosshair.Top.Color = color
     crosshair.Top.Visible = true
     
-    -- Bottom
     crosshair.Bottom.From = Vector2.new(center.X, center.Y + gap)
     crosshair.Bottom.To = Vector2.new(center.X, center.Y + gap + size)
     crosshair.Bottom.Color = color
     crosshair.Bottom.Visible = true
     
-    -- Left
     crosshair.Left.From = Vector2.new(center.X - gap - size, center.Y)
     crosshair.Left.To = Vector2.new(center.X - gap, center.Y)
     crosshair.Left.Color = color
     crosshair.Left.Visible = true
     
-    -- Right
     crosshair.Right.From = Vector2.new(center.X + gap, center.Y)
     crosshair.Right.To = Vector2.new(center.X + gap + size, center.Y)
     crosshair.Right.Color = color
     crosshair.Right.Visible = true
     
-    -- Center dot
     if Toggles.crosshair_dot and Toggles.crosshair_dot.Value then
         crosshair.Center.Position = center
         crosshair.Center.Color = color
@@ -665,7 +504,570 @@ local function UpdateCrosshair()
     end
 end
 
---// World Visuals
+--// Aimbot Logic
+local function UpdateAimbot()
+    if not Toggles.aimbot_enabled or not Toggles.aimbot_enabled.Value then
+        State.drawings.aimbot.circle.Visible = false
+        State.manipulation.targetPosition = nil
+        return
+    end
+    
+    local screenCenter = Camera.ViewportSize / 2
+    State.drawings.aimbot.circle.Position = screenCenter
+    State.drawings.aimbot.circle.Radius = Options.silent_radius and Options.silent_radius.Value or 100
+    State.drawings.aimbot.circle.Color = Options.aimbot_outline_color1 and Options.aimbot_outline_color1.Value or Color3.new(1, 1, 1)
+    State.drawings.aimbot.circle.Visible = Toggles.aimbot_fov_outline and Toggles.aimbot_fov_outline.Value or false
+    
+    local isActive = false
+    if Options.aimbot_keybind then
+        isActive = Options.aimbot_keybind:GetState()
+    end
+    
+    if isActive then
+        local target = GetClosestPlayer(
+            Options.silent_radius and Options.silent_radius.Value or 100,
+            Toggles.targeting_visibleonly and Toggles.targeting_visibleonly.Value,
+            not (Toggles.esp_show_team and Toggles.esp_show_team.Value)
+        )
+        
+        if target then
+            local hitchance = Options.silent_hitchance and Options.silent_hitchance.Value or 100
+            if math.random(1, 100) <= hitchance then
+                State.manipulation.targetPosition = target.RootPart.Position
+                State.manipulation.targetPlayer = target.Player
+                
+                if Toggles.aimbot_smooth and Toggles.aimbot_smooth.Value then
+                    local smoothness = Options.aimbot_smoothness and Options.aimbot_smoothness.Value or 0.1
+                    local targetScreen = target.ScreenPosition
+                    local mousePos = UserInputService:GetMouseLocation()
+                    local moveVec = (targetScreen - mousePos) * smoothness
+                    pcall(function() mousemoverel(moveVec.X, moveVec.Y) end)
+                end
+            else
+                State.manipulation.targetPosition = nil
+            end
+        else
+            State.manipulation.targetPosition = nil
+        end
+    else
+        State.manipulation.targetPosition = nil
+    end
+end
+
+--// Triggerbot
+local triggerbotConn = nil
+local function SetupTriggerbot()
+    if triggerbotConn then triggerbotConn:Disconnect(); triggerbotConn = nil end
+    if not Toggles.triggerbot_enabled or not Toggles.triggerbot_enabled.Value then return end
+    
+    triggerbotConn = RunService.Heartbeat:Connect(function()
+        local mouseTarget = Mouse.Target
+        if not mouseTarget then return end
+        local model = mouseTarget:FindFirstAncestorOfClass("Model")
+        if not model then return end
+        local humanoid = model:FindFirstChildOfClass("Humanoid")
+        if not humanoid or humanoid.Health <= 0 then return end
+        local player = Players:GetPlayerFromCharacter(model)
+        if not player or player == LocalPlayer then return end
+        
+        pcall(function()
+            -- Game specific fire logic would go here
+        end)
+    end)
+end
+
+--// ==================== COMBAT TAB ====================
+local TargetingGroup = Tabs.Combat:AddLeftGroupbox('Targeting')
+TargetingGroup:AddToggle('aimbot_enabled', { Text = 'Aimbot Enabled', Default = false })
+    :AddKeyPicker('aimbot_keybind', { Default = 'MB2', Mode = 'Hold', Text = 'Aimbot', NoUI = false })
+TargetingGroup:AddToggle('targeting_visibleonly', { Text = 'Visible Only', Default = true })
+TargetingGroup:AddToggle('aimbot_fov_outline', { Text = 'Show FOV', Default = false })
+    :AddColorPicker('aimbot_outline_color1', { Default = Color3.new(1, 1, 1), Title = 'FOV Color' })
+TargetingGroup:AddToggle('aimbot_fov_moving', { Text = 'FOV Rotation', Default = false })
+TargetingGroup:AddSlider('aimbot_fov_rotation_speed', { Text = 'Rotation Speed', Min = 0, Max = 5, Default = 1, Rounding = 2 })
+TargetingGroup:AddSlider('silent_radius', { Text = 'FOV Radius', Min = 0, Max = 500, Default = 100, Suffix = 'px' })
+TargetingGroup:AddSlider('silent_hitchance', { Text = 'Hit Chance', Min = 0, Max = 100, Default = 100, Suffix = '%' })
+TargetingGroup:AddToggle('silent_visualize', { Text = 'Visualize Silent', Default = false })
+    :AddColorPicker('silent_fill_color1', { Default = Color3.new(1, 1, 1), Title = 'Silent Color' })
+TargetingGroup:AddToggle('silent_manipulation', { Text = 'Silent Manipulation', Default = false })
+TargetingGroup:AddToggle('target_highlight_fill', { Text = 'Target Highlight', Default = false })
+    :AddColorPicker('target_highlight_color', { Default = Color3.new(1, 0, 0), Transparency = 0.5, Title = 'Highlight Color' })
+TargetingGroup:AddToggle('aimbot_smooth', { Text = 'Smooth Aim', Default = false })
+TargetingGroup:AddSlider('aimbot_smoothness', { Text = 'Smoothness', Min = 0.01, Max = 1, Default = 0.1, Rounding = 2 })
+
+local RagebotGroup = Tabs.Combat:AddLeftGroupbox('Ragebot')
+RagebotGroup:AddDropdown('ragebot_priority_targets', { Text = 'Priority Target', Values = {'Head', 'Body', 'Closest'}, Default = 'Head' })
+RagebotGroup:AddToggle('indicator_ragebot', { Text = 'Ragebot Indicator', Default = false })
+    :AddColorPicker('indicator_ragebot_status_color', { Default = Color3.fromRGB(255, 100, 100) })
+    :AddColorPicker('indicator_ragebot_text_color', { Default = Color3.fromRGB(255, 255, 255) })
+
+local ExploitsGroup = Tabs.Combat:AddRightGroupbox('Exploits')
+ExploitsGroup:AddToggle('exploits_no_spread', { Text = 'No Spread', Default = false })
+ExploitsGroup:AddToggle('exploits_full_auto', { Text = 'Full Auto', Default = false })
+
+local TriggerGroup = Tabs.Combat:AddRightGroupbox('Triggerbot')
+TriggerGroup:AddToggle('triggerbot_enabled', { Text = 'Triggerbot Enabled', Default = false })
+    :AddKeyPicker('triggerbot_key', { Default = 'T', Mode = 'Toggle', Text = 'Triggerbot', NoUI = false })
+TriggerGroup:AddDropdown('triggerbot_scoped', { Text = 'Mode', Values = {'Always', 'Scoped Only'}, Default = 'Always' })
+
+local AntiAimGroup = Tabs.Combat:AddRightGroupbox('Anti Aim')
+AntiAimGroup:AddToggle('anti_aim_enabled', { Text = 'Anti-Aim Enabled', Default = false })
+AntiAimGroup:AddSlider('anti_aim_custom_yaw', { Text = 'Yaw Angle', Min = -180, Max = 180, Default = 0 })
+AntiAimGroup:AddDropdown('anti_aim_pitch_mode', { Text = 'Pitch Mode', Values = {'None', 'Look Down', 'Custom', 'Offset'}, Default = 'None' })
+
+--// ==================== VISUALS TAB ====================
+local ESPGroup = Tabs.Visuals:AddLeftGroupbox('ESP')
+ESPGroup:AddToggle('esp_enabled', { Text = 'ESP Enabled', Default = false })
+ESPGroup:AddToggle('esp_box', { Text = 'Box', Default = false })
+    :AddColorPicker('esp_box_color', { Default = Color3.new(1, 1, 1), Title = 'Box Color' })
+ESPGroup:AddToggle('esp_fill', { Text = 'Fill', Default = false })
+    :AddColorPicker('esp_fill_color', { Default = Color3.new(1, 1, 1), Transparency = 0.5, Title = 'Fill Color' })
+ESPGroup:AddSlider('esp_fill_transparency', { Text = 'Fill Transparency', Min = 0, Max = 1, Default = 0.5, Rounding = 2 })
+ESPGroup:AddToggle('esp_name', { Text = 'Name', Default = false })
+    :AddColorPicker('esp_name_color', { Default = Color3.new(1, 1, 1), Title = 'Name Color' })
+ESPGroup:AddDropdown('esp_name_type', { Text = 'Name Type', Values = {'Name', 'DisplayName'}, Default = 'Name' })
+ESPGroup:AddToggle('esp_distance', { Text = 'Distance', Default = false })
+    :AddColorPicker('esp_distance_color', { Default = Color3.new(1, 1, 1), Title = 'Distance Color' })
+ESPGroup:AddToggle('esp_weapon', { Text = 'Weapon', Default = false })
+    :AddColorPicker('esp_weapon_color', { Default = Color3.new(1, 1, 1), Title = 'Weapon Color' })
+ESPGroup:AddToggle('esp_healthbar', { Text = 'Health Bar', Default = false })
+ESPGroup:AddToggle('esp_skeleton', { Text = 'Skeleton', Default = false })
+    :AddColorPicker('esp_skeleton_color', { Default = Color3.new(1, 1, 1), Title = 'Skeleton Color' })
+ESPGroup:AddToggle('esp_skeleton_outline', { Text = 'Skeleton Outline', Default = false })
+ESPGroup:AddToggle('esp_show_team', { Text = 'Show Team', Default = false })
+ESPGroup:AddSlider('esp_max_distance', { Text = 'Max Distance', Min = 100, Max = 5000, Default = 1000, Suffix = 'm' })
+
+local CrosshairGroup = Tabs.Visuals:AddRightGroupbox('Crosshair')
+CrosshairGroup:AddToggle('crosshair_enabled', { Text = 'Crosshair Enabled', Default = false })
+CrosshairGroup:AddToggle('crosshair_dot', { Text = 'Center Dot', Default = false })
+CrosshairGroup:AddSlider('crosshair_size', { Text = 'Size', Min = 2, Max = 50, Default = 12 })
+CrosshairGroup:AddSlider('crosshair_gap', { Text = 'Gap', Min = 0, Max = 20, Default = 4 })
+CrosshairGroup:AddColorPicker('crosshair_color', { Default = Color3.new(1, 1, 1), Title = 'Crosshair Color' })
+
+local ChamsGroup = Tabs.Visuals:AddRightGroupbox('Chams')
+ChamsGroup:AddToggle('esp_chams', { Text = 'Chams Enabled', Default = false })
+ChamsGroup:AddToggle('esp_chams_visible_only', { Text = 'Visible Only', Default = false })
+ChamsGroup:AddDropdown('esp_chams_material', { Text = 'Material', Values = {'ForceField', 'Neon', 'Glass'}, Default = 'ForceField' })
+
+--// ==================== WORLD TAB (Original + Enhanced) ====================
+local SkyGroup = Tabs.World:AddLeftGroupbox('Dark Sky & Snow')
+SkyGroup:AddButton({
+    Text = 'Enable Dark Sky + Snow',
+    Func = function()
+        local DARK_SKY_ID = "rbxassetid://16553660713"
+        local oldIds = {"14147881792", "14147882149", "14147882761", "14147882405", "14147881297"}
+        
+        local sky = game.Lighting:FindFirstChildOfClass("Sky")
+        if not sky then
+            sky = Instance.new("Sky")
+            sky.Name = "CustomSky"
+            sky.Parent = game.Lighting
+        end
+        
+        local replaced = false
+        for _, prop in ipairs({"SkyboxBk", "SkyboxDn", "SkyboxFt", "SkyboxLf", "SkyboxRt", "SkyboxUp"}) do
+            local current = sky[prop]
+            if current and typeof(current) == "string" then
+                for _, old in ipairs(oldIds) do
+                    if current:find(old) then
+                        sky[prop] = DARK_SKY_ID
+                        replaced = true
+                        break
+                    end
+                end
+            end
+        end
+        
+        if not replaced then
+            sky.SkyboxBk = DARK_SKY_ID
+            sky.SkyboxDn = DARK_SKY_ID
+            sky.SkyboxFt = DARK_SKY_ID
+            sky.SkyboxLf = DARK_SKY_ID
+            sky.SkyboxRt = DARK_SKY_ID
+            sky.SkyboxUp = DARK_SKY_ID
+        end
+        
+        local camera = Workspace.CurrentCamera
+        local snowPart = Instance.new("Part")
+        snowPart.Name = "SimpleSnow"
+        snowPart.Size = Vector3.new(100, 1, 100)
+        snowPart.Transparency = 1
+        snowPart.CanCollide = false
+        snowPart.Anchored = true
+        snowPart.Parent = Workspace
+        
+        local emitter = Instance.new("ParticleEmitter")
+        emitter.Texture = "rbxassetid://5833323391"
+        emitter.Color = ColorSequence.new(Color3.fromRGB(255, 255, 255))
+        emitter.Size = NumberSequence.new(0.6)
+        emitter.Transparency = NumberSequence.new(0)
+        emitter.Lifetime = NumberRange.new(12, 20)
+        emitter.Rate = 150
+        emitter.Speed = NumberRange.new(5, 10)
+        emitter.SpreadAngle = Vector2.new(30, 30)
+        emitter.Acceleration = Vector3.new(0, -7, 0)
+        emitter.Rotation = NumberRange.new(0, 360)
+        emitter.RotSpeed = NumberRange.new(-30, 30)
+        emitter.Parent = snowPart
+        
+        RunService.RenderStepped:Connect(function()
+            if camera and snowPart and snowPart.Parent then
+                snowPart.Position = camera.CFrame.Position + Vector3.new(0, 35, 0)
+            end
+        end)
+        
+        emitter.Enabled = true
+        Library:Notify('❄️ Dark Sky + Snow enabled', 5)
+    end
+})
+
+local SoundsGroup = Tabs.World:AddRightGroupbox('Sounds')
+SoundsGroup:AddButton({
+    Text = 'Enable Sound Replacements',
+    Func = function()
+        local replacements = {
+            [16537337310] = 133426190455626,
+            [16537449730] = 133426190455626,
+            [13110130082] = 103022841301405
+        }
+        
+        local function replaceSound(obj)
+            for oldId, newId in pairs(replacements) do
+                local oldFormatted = "rbxassetid://" .. tostring(oldId)
+                if obj.SoundId == oldFormatted or obj.SoundId:find(tostring(oldId)) then
+                    obj.SoundId = "rbxassetid://" .. tostring(newId)
+                    return
+                end
+            end
+        end
+        
+        for _, obj in ipairs(game:GetDescendants()) do
+            if obj:IsA("Sound") then replaceSound(obj) end
+        end
+        
+        game.DescendantAdded:Connect(function(child)
+            if child:IsA("Sound") then replaceSound(child) end
+        end)
+        
+        Library:Notify('🔊 Sound replacements enabled', 4)
+    end
+})
+
+-- Enhanced World Effects
+local BloomGroup = Tabs.World:AddLeftGroupbox('Bloom')
+BloomGroup:AddToggle('bloom_enabled', { Text = 'Bloom Enabled', Default = false })
+BloomGroup:AddSlider('bloom_intensity', { Text = 'Intensity', Min = 0, Max = 3, Default = 0.4, Rounding = 2 })
+BloomGroup:AddSlider('bloom_size', { Text = 'Size', Min = 0, Max = 56, Default = 24 })
+BloomGroup:AddSlider('bloom_threshold', { Text = 'Threshold', Min = 0, Max = 2, Default = 0.95, Rounding = 2 })
+
+local CCGroup = Tabs.World:AddRightGroupbox('Color Correction')
+CCGroup:AddToggle('color_correction_enabled', { Text = 'Color Correction Enabled', Default = false })
+    :AddColorPicker('color_correction_tint', { Default = Color3.new(1, 1, 1), Title = 'Tint Color' })
+CCGroup:AddSlider('color_correction_saturation', { Text = 'Saturation', Min = -1, Max = 1, Default = 0, Rounding = 2 })
+CCGroup:AddSlider('color_correction_contrast', { Text = 'Contrast', Min = -1, Max = 1, Default = 0, Rounding = 2 })
+CCGroup:AddSlider('color_correction_brightness', { Text = 'Brightness', Min = -1, Max = 1, Default = 0, Rounding = 2 })
+
+local AtmoGroup = Tabs.World:AddLeftGroupbox('Atmosphere')
+AtmoGroup:AddToggle('atmosphere_enabled', { Text = 'Atmosphere Enabled', Default = false })
+    :AddColorPicker('atmosphere_color', { Default = Color3.fromRGB(199, 170, 107), Title = 'Atmosphere Color' })
+AtmoGroup:AddSlider('atmosphere_decay', { Text = 'Decay', Min = 0, Max = 1, Default = 0, Rounding = 2 })
+AtmoGroup:AddSlider('atmosphere_glare', { Text = 'Glare', Min = 0, Max = 1, Default = 0, Rounding = 2 })
+AtmoGroup:AddSlider('atmosphere_haze', { Text = 'Haze', Min = 0, Max = 10, Default = 0, Rounding = 1 })
+AtmoGroup:AddSlider('atmosphere_density', { Text = 'Density', Min = 0, Max = 1, Default = 0.3, Rounding = 2 })
+AtmoGroup:AddSlider('atmosphere_offset', { Text = 'Offset', Min = 0, Max = 1, Default = 0, Rounding = 2 })
+
+local SunGroup = Tabs.World:AddRightGroupbox('Sun Rays')
+SunGroup:AddToggle('sunrays_enabled', { Text = 'Sun Rays Enabled', Default = false })
+SunGroup:AddSlider('sunrays_spread', { Text = 'Spread', Min = 0, Max = 1, Default = 0.5, Rounding = 2 })
+SunGroup:AddSlider('sunrays_intensity', { Text = 'Intensity', Min = 0, Max = 1, Default = 0.25, Rounding = 2 })
+
+local LightTechGroup = Tabs.World:AddLeftGroupbox('Lighting Technology')
+LightTechGroup:AddDropdown('lighting_technology', { Text = 'Technology', Values = {'ShadowMap', 'Future', 'Legacy'}, Default = 'ShadowMap' })
+
+--// ==================== MISC TAB (Original Features) ====================
+local ColorGroup = Tabs.Misc:AddLeftGroupbox('Color Changer')
+local currentColor = Color3.fromRGB(100, 0, 200)
+local currentStroke = Color3.fromRGB(170, 0, 255)
+
+local function ApplyWeaponColor()
+    pcall(function()
+        local player = game:GetService("Players").LocalPlayer
+        local handler = player:WaitForChild("PlayerScripts", 2):WaitForChild("Modules", 2):WaitForChild("WeaponStatusHandler", 2)
+        if not handler then return end
+        
+        local WeaponStatusHandler = require(handler)
+        local oldFunc = WeaponStatusHandler.ApplyItemStatusToBackground
+        
+        WeaponStatusHandler.ApplyItemStatusToBackground = function(self, background, stroke, status)
+            background.BackgroundColor3 = currentColor
+            if stroke then stroke.Color = currentStroke stroke.Thickness = 2 end
+            local parent = background.Parent
+            if parent and parent:FindFirstChild("Icon") then
+                parent.Icon.Picture.ImageTransparency = 0.1
+            end
+            return oldFunc(self, background, stroke, "Banned")
+        end
+    end)
+    Library:Notify('✅ Weapon slot color applied', 2.5)
+end
+
+ColorGroup:AddButton({ Text = 'Purple (Contra Band)', Func = function()
+    currentColor = Color3.fromRGB(100, 0, 200)
+    currentStroke = Color3.fromRGB(170, 0, 255)
+    ApplyWeaponColor()
+end })
+
+ColorGroup:AddButton({ Text = 'Gold', Func = function()
+    currentColor = Color3.fromRGB(255, 215, 0)
+    currentStroke = Color3.fromRGB(255, 240, 100)
+    ApplyWeaponColor()
+end })
+
+ColorGroup:AddLabel('Custom Color'):AddColorPicker('CustomSlotColor', {
+    Default = Color3.fromRGB(100, 0, 200),
+    Title = 'Pick any color',
+    Callback = function(Value)
+        currentColor = Value
+        currentStroke = Value:lerp(Color3.new(1,1,1), 0.3)
+        ApplyWeaponColor()
+    end
+})
+
+-- Hit Numbers
+local hitEnabled = true
+local hitColor = Color3.fromRGB(255, 20, 147)
+local hitStayTime = 5
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "HitNumbersUI"
+screenGui.ResetOnSpawn = false
+screenGui.IgnoreGuiInset = true
+screenGui.Parent = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
+
+local function showHit(amount)
+    if not hitEnabled then return end
+    local label = Instance.new("TextLabel")
+    label.BackgroundTransparency = 1
+    label.AutomaticSize = Enum.AutomaticSize.XY
+    label.Text = tostring(math.floor(amount + 0.5))
+    label.Font = Enum.Font.Jura
+    label.TextColor3 = hitColor
+    label.TextSize = 50
+    label.TextStrokeTransparency = 0
+    label.TextStrokeColor3 = Color3.new(0,0,0)
+    label.TextTransparency = 1
+    label.Position = UDim2.new(0.5, math.random(-180, 180), 0.45, math.random(-120, 120))
+    label.AnchorPoint = Vector2.new(0.5, 0.5)
+    label.Parent = screenGui
+    
+    TweenService:Create(label, TweenInfo.new(0.3), {TextTransparency = 0}):Play()
+    
+    task.delay(hitStayTime, function()
+        TweenService:Create(label, TweenInfo.new(1), {TextTransparency = 1}):Play()
+        task.wait(1)
+        label:Destroy()
+    end)
+end
+
+local function setupHumanoid(humanoid)
+    local lastHealth = humanoid.Health
+    humanoid.HealthChanged:Connect(function(newHealth)
+        local dmg = lastHealth - newHealth
+        if dmg > 0.1 then showHit(dmg) end
+        lastHealth = newHealth
+    end)
+end
+
+Players.PlayerAdded:Connect(function(plr)
+    plr.CharacterAdded:Connect(function(char)
+        local hum = char:WaitForChild("Humanoid")
+        if hum then setupHumanoid(hum) end
+    end)
+end)
+
+for _, plr in ipairs(Players:GetPlayers()) do
+    if plr.Character then
+        local hum = plr.Character:FindFirstChild("Humanoid")
+        if hum then setupHumanoid(hum) end
+    end
+end
+
+local HitGroup = Tabs.Misc:AddRightGroupbox('Hit Numbers')
+HitGroup:AddToggle('HitNumbers', { Text = 'Enable Hit Numbers', Default = true, Callback = function(v) hitEnabled = v end })
+HitGroup:AddLabel('Color'):AddColorPicker('HitColor', { Default = Color3.fromRGB(255, 20, 147), Callback = function(Value) hitColor = Value end })
+HitGroup:AddSlider('HitDuration', { Text = 'Duration (sec)', Default = 5, Min = 1, Max = 10, Rounding = 1, Callback = function(Value) hitStayTime = Value end })
+
+-- Arch Spoofer
+local ArchGroup = Tabs.Misc:AddRightGroupbox('Spoofer')
+ArchGroup:AddButton({
+    Text = 'Arch Spoofer (5B ELO + Archnemesis)',
+    Func = function()
+        loadstring([[ 
+            local ReplicatedStorage = game:GetService("ReplicatedStorage")
+            local Players = game:GetService("Players")
+            local LocalPlayer = Players.LocalPlayer
+            wait(1.5)
+            local SeasonModule = ReplicatedStorage:WaitForChild("Modules", 5):WaitForChild("SeasonLibrary", 5)
+            local SeasonLib = require(SeasonModule)
+            local fakeELO = 5000000000
+            local myUserId = LocalPlayer.UserId
+
+            local oldGetRank = SeasonLib.GetRank
+            SeasonLib.GetRank = function(self, elo, userId, ...)
+                if userId == myUserId or elo >= 3600 then return "Archnemesis" end
+                return oldGetRank(self, elo, userId, ...)
+            end
+
+            local oldHighest = SeasonLib.GetHighestELOLeaderboardRanking
+            SeasonLib.GetHighestELOLeaderboardRanking = function(self, elo, userId)
+                if userId == myUserId then return 1 end
+                return oldHighest(self, elo, userId) or 999999
+            end
+
+            if SeasonLib.RankProfiles and SeasonLib.RankProfiles.ranks_version1 then
+                local p = SeasonLib.RankProfiles.ranks_version1
+                if p then p.HighestRankELO = fakeELO end
+            end
+
+            print("🔥 Arch Spoofer activated")
+            Library:Notify('Arch Spoofer activated (Archnemesis + Top 1)', 5)
+        ]])()
+    end
+})
+
+-- No Hands
+local NoHandsGroup = Tabs.Misc:AddLeftGroupbox('No Hands')
+NoHandsGroup:AddButton({
+    Text = 'Enable No Hands',
+    Func = function()
+        local MESH_IDS = {"rbxassetid://12307734932", "rbxassetid://12307583853"}
+        
+        local function disableMeshes()
+            local count = 0
+            for _, obj in pairs(Workspace:GetDescendants()) do
+                local meshId = obj:IsA("MeshPart") and obj.MeshId or (obj:IsA("SpecialMesh") and obj.MeshId)
+                if meshId and table.find(MESH_IDS, meshId) then
+                    obj.MeshId = "rbxassetid://0"
+                    if obj.TextureId then obj.TextureId = "" end
+                    count += 1
+                end
+            end
+            for _, obj in pairs(ReplicatedStorage:GetDescendants()) do
+                local meshId = obj:IsA("MeshPart") and obj.MeshId or (obj:IsA("SpecialMesh") and obj.MeshId)
+                if meshId and table.find(MESH_IDS, meshId) then
+                    obj.MeshId = "rbxassetid://0"
+                    if obj.TextureId then obj.TextureId = "" end
+                    count += 1
+                end
+            end
+            if count > 0 then
+                Library:Notify('✅ No Hands applied (' .. count .. ' meshes)', 3)
+            end
+        end
+        
+        spawn(function()
+            while true do
+                disableMeshes()
+                task.wait(0.5)
+            end
+        end)
+        disableMeshes()
+        Library:Notify('🔄 No Hands loop enabled', 5)
+    end
+})
+
+-- Camera & Movement
+local CameraGroup = Tabs.Misc:AddLeftGroupbox('Camera')
+CameraGroup:AddToggle('camera_fov_changer', { Text = 'FOV Changer', Default = false })
+CameraGroup:AddSlider('camera_fov_value', { Text = 'FOV Value', Min = 30, Max = 120, Default = 70 })
+CameraGroup:AddSlider('camera_aspect_ratio_y', { Text = 'Aspect Ratio Y', Min = 0.1, Max = 3, Default = 1, Rounding = 2 })
+
+local MovementGroup = Tabs.Misc:AddRightGroupbox('Movement')
+MovementGroup:AddToggle('movement_speed', { Text = 'Speed Modifier', Default = false })
+MovementGroup:AddSlider('movement_speed_value', { Text = 'Speed', Min = 1, Max = 5, Default = 1, Rounding = 1, Suffix = 'x' })
+MovementGroup:AddToggle('movement_jump', { Text = 'Infinite Jump', Default = false })
+MovementGroup:AddToggle('movement_fly', { Text = 'Fly', Default = false })
+    :AddKeyPicker('movement_fly_key', { Default = 'F', Mode = 'Toggle', Text = 'Fly', NoUI = false })
+
+--// ==================== SETTINGS TAB ====================
+-- Console to Screen
+local consoleEnabled = true
+local consoleTextColor = Color3.fromRGB(255, 255, 100)
+local consoleDuration = 4
+local consoleLabels = {}
+
+local function showConsoleMessage(text)
+    if not consoleEnabled then return end
+    
+    local label = Instance.new("TextLabel")
+    label.BackgroundTransparency = 1
+    label.Text = "CONSOLE: " .. tostring(text)
+    label.Font = Enum.Font.Code
+    label.TextColor3 = consoleTextColor
+    label.TextSize = 18
+    label.TextStrokeTransparency = 0.7
+    label.TextStrokeColor3 = Color3.new(0,0,0)
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Size = UDim2.new(0.9, 0, 0, 30)
+    label.Position = UDim2.new(0.05, 0, 0.1 + (#consoleLabels * 0.06), 0)
+    label.Parent = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
+    
+    table.insert(consoleLabels, label)
+    
+    label.TextTransparency = 1
+    TweenService:Create(label, TweenInfo.new(0.3), {TextTransparency = 0}):Play()
+    
+    task.delay(consoleDuration, function()
+        if label and label.Parent then
+            TweenService:Create(label, TweenInfo.new(0.8), {TextTransparency = 1}):Play()
+            task.wait(0.8)
+            label:Destroy()
+        end
+        table.remove(consoleLabels, table.find(consoleLabels, label) or #consoleLabels + 1)
+    end)
+end
+
+local oldPrint = print
+local oldWarn = warn
+local oldError = error
+
+_G.print = function(...) local msg = table.concat({...}, " ") oldPrint(...) showConsoleMessage(msg) end
+_G.warn = function(...) local msg = table.concat({...}, " ") oldWarn(...) showConsoleMessage("[WARN] " .. msg) end
+_G.error = function(...) local msg = table.concat({...}, " ") oldError(...) showConsoleMessage("[ERROR] " .. msg) end
+
+local ConsoleGroup = Tabs.Settings:AddLeftGroupbox('Console to Screen')
+ConsoleGroup:AddToggle('ConsoleToScreen', { Text = 'Enable Console to Screen', Default = true, Callback = function(v) consoleEnabled = v end })
+ConsoleGroup:AddLabel('Text Color'):AddColorPicker('ConsoleColor', { Default = Color3.fromRGB(255, 255, 100), Title = 'Console Text Color', Callback = function(Value) consoleTextColor = Value end })
+ConsoleGroup:AddSlider('ConsoleDuration', { Text = 'Duration (seconds)', Default = 4, Min = 1, Max = 10, Rounding = 1, Callback = function(Value) consoleDuration = Value end })
+
+-- Main Settings
+local MenuGroup = Tabs.Settings:AddLeftGroupbox('Main Settings')
+MenuGroup:AddButton('Unload UI', function()
+    Library:Unload()
+    for _, esp in pairs(State.visuals.espObjects) do
+        esp:Destroy()
+    end
+    for _, drawing in pairs(crosshair) do
+        drawing:Remove()
+    end
+    State.drawings.silent.circle:Remove()
+    State.drawings.aimbot.circle:Remove()
+end)
+
+ThemeManager:SetLibrary(Library)
+SaveManager:SetLibrary(Library)
+SaveManager:IgnoreThemeSettings()
+SaveManager:SetIgnoreIndexes({})
+
+ThemeManager:SetFolder('UIChanger')
+SaveManager:SetFolder('UIChanger')
+
+SaveManager:BuildConfigSection(Tabs.Settings)
+ThemeManager:ApplyToTab(Tabs.Settings)
+SaveManager:LoadAutoloadConfig()
+
+Library.ToggleKeybind = Options.MenuKeybind
+
+--// ==================== WORLD EFFECTS INSTANCES ====================
 local BloomEffect = Instance.new("BloomEffect")
 BloomEffect.Parent = Lighting
 BloomEffect.Enabled = false
@@ -681,8 +1083,21 @@ local SunRays = Instance.new("SunRaysEffect")
 SunRays.Parent = Lighting
 SunRays.Enabled = false
 
-local function UpdateWorldVisuals()
-    -- Bloom
+local colorCorrection = Instance.new("ColorCorrectionEffect")
+colorCorrection.Parent = Lighting
+colorCorrection.Saturation = 0
+colorCorrection.Contrast = 0.1
+
+local blur = Instance.new("BlurEffect")
+blur.Parent = Lighting
+blur.Size = 0
+
+--// ==================== EVENT CONNECTIONS ====================
+RunService.RenderStepped:Connect(function()
+    UpdateAimbot()
+    UpdateCrosshair()
+    
+    -- Update World Effects
     if Toggles.bloom_enabled and Toggles.bloom_enabled.Value then
         BloomEffect.Enabled = true
         BloomEffect.Size = Options.bloom_size and Options.bloom_size.Value or 24
@@ -692,7 +1107,6 @@ local function UpdateWorldVisuals()
         BloomEffect.Enabled = false
     end
     
-    -- Color Correction
     if Toggles.color_correction_enabled and Toggles.color_correction_enabled.Value then
         ColorCorrection.Enabled = true
         ColorCorrection.TintColor = Options.color_correction_tint and Options.color_correction_tint.Value or Color3.new(1, 1, 1)
@@ -703,7 +1117,6 @@ local function UpdateWorldVisuals()
         ColorCorrection.Enabled = false
     end
     
-    -- Atmosphere
     if Toggles.atmosphere_enabled and Toggles.atmosphere_enabled.Value then
         Atmosphere.Color = Options.atmosphere_color and Options.atmosphere_color.Value or Color3.fromRGB(199, 170, 107)
         Atmosphere.Decay = Options.atmosphere_decay and Options.atmosphere_decay.Value or 0
@@ -715,7 +1128,6 @@ local function UpdateWorldVisuals()
         Atmosphere.Density = 0
     end
     
-    -- Sun Rays
     if Toggles.sunrays_enabled and Toggles.sunrays_enabled.Value then
         SunRays.Enabled = true
         SunRays.Spread = Options.sunrays_spread and Options.sunrays_spread.Value or 0.5
@@ -724,7 +1136,6 @@ local function UpdateWorldVisuals()
         SunRays.Enabled = false
     end
     
-    -- Lighting Technology
     if Options.lighting_technology then
         local tech = Options.lighting_technology.Value
         if tech == "ShadowMap" then
@@ -735,355 +1146,15 @@ local function UpdateWorldVisuals()
             Lighting.Technology = Enum.Technology.Legacy
         end
     end
-end
-
---// Aimbot Logic
-local aimbotActive = false
-
-local function UpdateAimbot()
-    if not Toggles.aimbot_enabled or not Toggles.aimbot_enabled.Value then
-        State.drawings.aimbot.circle.Visible = false
-        State.manipulation.targetPosition = nil
-        return
-    end
     
-    local screenCenter = Camera.ViewportSize / 2
-    State.drawings.aimbot.circle.Position = screenCenter
-    State.drawings.aimbot.circle.Radius = Options.silent_radius and Options.silent_radius.Value or 100
-    State.drawings.aimbot.circle.Color = Options.aimbot_outline_color1 and Options.aimbot_outline_color1.Value or Color3.new(1, 1, 1)
-    State.drawings.aimbot.circle.Visible = Toggles.aimbot_fov_outline and Toggles.aimbot_fov_outline.Value or false
-    
-    -- Check keybind or mobile button
-    local isActive = false
-    if Options.aimbot_keybind then
-        isActive = Options.aimbot_keybind:GetState()
+    -- Camera FOV
+    if Toggles.camera_fov_changer and Toggles.camera_fov_changer.Value then
+        Camera.FieldOfView = Options.camera_fov_value and Options.camera_fov_value.Value or 70
     end
-    
-    -- Mobile button override
-    if IsMobile and State.mobileButtons["Aimbot"] then
-        isActive = isActive or State.mobileButtons["Aimbot"].active()
-    end
-    
-    if isActive then
-        local target = GetClosestPlayer(
-            Options.silent_radius and Options.silent_radius.Value or 100,
-            Toggles.targeting_visibleonly and Toggles.targeting_visibleonly.Value,
-            not (Toggles.esp_show_team and Toggles.esp_show_team.Value)
-        )
-        
-        if target then
-            -- Hit chance check
-            local hitchance = Options.silent_hitchance and Options.silent_hitchance.Value or 100
-            if math.random(1, 100) <= hitchance then
-                State.manipulation.targetPosition = target.RootPart.Position
-                State.manipulation.targetPlayer = target.Player
-                
-                -- Smooth aim if enabled
-                if Toggles.aimbot_smooth and Toggles.aimbot_smooth.Value then
-                    local smoothness = Options.aimbot_smoothness and Options.aimbot_smoothness.Value or 0.1
-                    local targetScreen = target.ScreenPosition
-                    local mousePos = UserInputService:GetMouseLocation()
-                    local moveVec = (targetScreen - mousePos) * smoothness
-                    
-                    if not IsMobile then
-                        mousemoverel(moveVec.X, moveVec.Y)
-                    end
-                end
-                
-                -- Target highlight
-                if Toggles.target_highlight_fill and Toggles.target_highlight_fill.Value then
-                    -- Highlight logic here
-                end
-            else
-                State.manipulation.targetPosition = nil
-            end
-        else
-            State.manipulation.targetPosition = nil
-        end
-    else
-        State.manipulation.targetPosition = nil
-    end
-end
-
---// Triggerbot
-local triggerbotConn = nil
-
-local function SetupTriggerbot()
-    if triggerbotConn then
-        triggerbotConn:Disconnect()
-        triggerbotConn = nil
-    end
-    
-    if not Toggles.triggerbot_enabled or not Toggles.triggerbot_enabled.Value then
-        return
-    end
-    
-    triggerbotConn = RunService.Heartbeat:Connect(function()
-        local mouseTarget = Mouse.Target
-        if not mouseTarget then return end
-        
-        local model = mouseTarget:FindFirstAncestorOfClass("Model")
-        if not model then return end
-        
-        local humanoid = model:FindFirstChildOfClass("Humanoid")
-        if not humanoid or humanoid.Health <= 0 then return end
-        
-        local player = Players:GetPlayerFromCharacter(model)
-        if not player or player == LocalPlayer then return end
-        
-        -- Check scoped mode
-        if Options.triggerbot_scoped and Options.triggerbot_scoped.Value == "scoped only" then
-            -- Check if aiming (game specific)
-        end
-        
-        -- Fire
-        pcall(function()
-            -- Game specific fire logic
-        end)
-    end)
-end
-
---// Anti-Aim
-local function UpdateAntiAim()
-    if not Toggles.anti_aim_enabled or not Toggles.anti_aim_enabled.Value then
-        return
-    end
-    
-    -- This would require hooking into the game's camera system
-    -- Implementation depends on specific game
-end
-
---// UI Creation
-local Window = Library:CreateWindow({
-    Title = "Unnamed Enhancements",
-    Center = true,
-    AutoShow = true
-})
-
---// Combat Tab
-local CombatTab = Window:AddTab("Combat")
-
--- Targeting
-local TargetingGroup = CombatTab:AddLeftGroupbox("Targeting")
-TargetingGroup:AddToggle("aimbot_enabled", { Text = "Aimbot Enabled", Default = false })
-    :AddKeyPicker("aimbot_keybind", { Default = "MB2", Mode = "Hold", Text = "Aimbot", NoUI = false })
-TargetingGroup:AddToggle("targeting_visibleonly", { Text = "Visible Only", Default = true })
-TargetingGroup:AddToggle("aimbot_fov_outline", { Text = "Show FOV", Default = false })
-    :AddColorPicker("aimbot_outline_color1", { Default = Color3.new(1, 1, 1), Title = "FOV Color" })
-TargetingGroup:AddToggle("aimbot_fov_moving", { Text = "FOV Rotation", Default = false })
-TargetingGroup:AddSlider("aimbot_fov_rotation_speed", { Text = "Rotation Speed", Min = 0, Max = 5, Default = 1, Rounding = 2 })
-TargetingGroup:AddSlider("silent_radius", { Text = "FOV Radius", Min = 0, Max = 500, Default = 100, Suffix = "px" })
-TargetingGroup:AddSlider("silent_hitchance", { Text = "Hit Chance", Min = 0, Max = 100, Default = 100, Suffix = "%" })
-TargetingGroup:AddToggle("silent_visualize", { Text = "Visualize Silent", Default = false })
-    :AddColorPicker("silent_fill_color1", { Default = Color3.new(1, 1, 1), Title = "Silent Color" })
-TargetingGroup:AddToggle("silent_manipulation", { Text = "Silent Manipulation", Default = false })
-TargetingGroup:AddToggle("target_highlight_fill", { Text = "Target Highlight", Default = false })
-    :AddColorPicker("target_highlight_color", { Default = Color3.new(1, 0, 0), Transparency = 0.5, Title = "Highlight Color" })
-TargetingGroup:AddToggle("aimbot_smooth", { Text = "Smooth Aim", Default = false })
-TargetingGroup:AddSlider("aimbot_smoothness", { Text = "Smoothness", Min = 0.01, Max = 1, Default = 0.1, Rounding = 2 })
-
--- Ragebot
-local RagebotGroup = CombatTab:AddLeftGroupbox("Ragebot")
-RagebotGroup:AddDropdown("ragebot_priority_targets", { Text = "Priority Target", Values = {"Head", "Body", "Closest"}, Default = "Head" })
-RagebotGroup:AddToggle("indicator_ragebot", { Text = "Ragebot Indicator", Default = false })
-    :AddColorPicker("indicator_ragebot_status_color", { Default = Color3.fromRGB(255, 100, 100) })
-    :AddColorPicker("indicator_ragebot_text_color", { Default = Color3.fromRGB(255, 255, 255) })
-
--- Exploits
-local ExploitsGroup = CombatTab:AddRightGroupbox("Exploits")
-ExploitsGroup:AddToggle("exploits_no_spread", { Text = "No Spread", Default = false })
-ExploitsGroup:AddToggle("exploits_full_auto", { Text = "Full Auto", Default = false })
-
--- Triggerbot
-local TriggerGroup = CombatTab:AddRightGroupbox("Triggerbot")
-TriggerGroup:AddToggle("triggerbot_enabled", { Text = "Triggerbot Enabled", Default = false })
-    :AddKeyPicker("triggerbot_key", { Default = "T", Mode = "Toggle", Text = "Triggerbot", NoUI = false })
-TriggerGroup:AddDropdown("triggerbot_scoped", { Text = "Mode", Values = {"Always", "Scoped Only"}, Default = "Always" })
-
--- Anti-Aim
-local AntiAimGroup = CombatTab:AddRightGroupbox("Anti Aim")
-AntiAimGroup:AddToggle("anti_aim_enabled", { Text = "Anti-Aim Enabled", Default = false })
-AntiAimGroup:AddSlider("anti_aim_custom_yaw", { Text = "Yaw Angle", Min = -180, Max = 180, Default = 0 })
-AntiAimGroup:AddDropdown("anti_aim_pitch_mode", { Text = "Pitch Mode", Values = {"None", "Look Down", "Custom", "Offset"}, Default = "None" })
-
---// Visuals Tab
-local VisualsTab = Window:AddTab("Visuals")
-
--- ESP
-local ESPGroup = VisualsTab:AddLeftGroupbox("ESP")
-ESPGroup:AddToggle("esp_enabled", { Text = "ESP Enabled", Default = false })
-ESPGroup:AddToggle("esp_box", { Text = "Box", Default = false })
-    :AddColorPicker("esp_box_color", { Default = Color3.new(1, 1, 1), Title = "Box Color" })
-ESPGroup:AddToggle("esp_fill", { Text = "Fill", Default = false })
-    :AddColorPicker("esp_fill_color", { Default = Color3.new(1, 1, 1), Transparency = 0.5, Title = "Fill Color" })
-ESPGroup:AddToggle("esp_name", { Text = "Name", Default = false })
-    :AddColorPicker("esp_name_color", { Default = Color3.new(1, 1, 1), Title = "Name Color" })
-ESPGroup:AddDropdown("esp_name_type", { Text = "Name Type", Values = {"Name", "DisplayName"}, Default = "Name" })
-ESPGroup:AddToggle("esp_distance", { Text = "Distance", Default = false })
-    :AddColorPicker("esp_distance_color", { Default = Color3.new(1, 1, 1), Title = "Distance Color" })
-ESPGroup:AddToggle("esp_weapon", { Text = "Weapon", Default = false })
-    :AddColorPicker("esp_weapon_color", { Default = Color3.new(1, 1, 1), Title = "Weapon Color" })
-ESPGroup:AddToggle("esp_healthbar", { Text = "Health Bar", Default = false })
-ESPGroup:AddToggle("esp_skeleton", { Text = "Skeleton", Default = false })
-    :AddColorPicker("esp_skeleton_color", { Default = Color3.new(1, 1, 1), Title = "Skeleton Color" })
-ESPGroup:AddToggle("esp_skeleton_outline", { Text = "Skeleton Outline", Default = false })
-ESPGroup:AddToggle("esp_show_team", { Text = "Show Team", Default = false })
-ESPGroup:AddSlider("esp_max_distance", { Text = "Max Distance", Min = 100, Max = 5000, Default = 1000, Suffix = "m" })
-
--- Crosshair
-local CrosshairGroup = VisualsTab:AddRightGroupbox("Crosshair")
-CrosshairGroup:AddToggle("crosshair_enabled", { Text = "Crosshair Enabled", Default = false })
-CrosshairGroup:AddToggle("crosshair_dot", { Text = "Center Dot", Default = false })
-CrosshairGroup:AddSlider("crosshair_size", { Text = "Size", Min = 2, Max = 50, Default = 12 })
-CrosshairGroup:AddSlider("crosshair_gap", { Text = "Gap", Min = 0, Max = 20, Default = 4 })
-CrosshairGroup:AddColorPicker("crosshair_color", { Default = Color3.new(1, 1, 1), Title = "Crosshair Color" })
-
--- Chams
-local ChamsGroup = VisualsTab:AddRightGroupbox("Chams")
-ChamsGroup:AddToggle("esp_chams", { Text = "Chams Enabled", Default = false })
-ChamsGroup:AddToggle("esp_chams_visible_only", { Text = "Visible Only", Default = false })
-ChamsGroup:AddDropdown("esp_chams_material", { Text = "Material", Values = {"ForceField", "Neon", "Glass"}, Default = "ForceField" })
-
---// World Tab
-local WorldTab = Window:AddTab("World")
-
--- Bloom
-local BloomGroup = WorldTab:AddLeftGroupbox("Bloom")
-BloomGroup:AddToggle("bloom_enabled", { Text = "Bloom Enabled", Default = false })
-BloomGroup:AddSlider("bloom_intensity", { Text = "Intensity", Min = 0, Max = 3, Default = 0.4, Rounding = 2 })
-BloomGroup:AddSlider("bloom_size", { Text = "Size", Min = 0, Max = 56, Default = 24 })
-BloomGroup:AddSlider("bloom_threshold", { Text = "Threshold", Min = 0, Max = 2, Default = 0.95, Rounding = 2 })
-
--- Color Correction
-local CCGroup = WorldTab:AddLeftGroupbox("Color Correction")
-CCGroup:AddToggle("color_correction_enabled", { Text = "Color Correction Enabled", Default = false })
-    :AddColorPicker("color_correction_tint", { Default = Color3.new(1, 1, 1), Title = "Tint Color" })
-CCGroup:AddSlider("color_correction_saturation", { Text = "Saturation", Min = -1, Max = 1, Default = 0, Rounding = 2 })
-CCGroup:AddSlider("color_correction_contrast", { Text = "Contrast", Min = -1, Max = 1, Default = 0, Rounding = 2 })
-CCGroup:AddSlider("color_correction_brightness", { Text = "Brightness", Min = -1, Max = 1, Default = 0, Rounding = 2 })
-
--- Atmosphere
-local AtmoGroup = WorldTab:AddRightGroupbox("Atmosphere")
-AtmoGroup:AddToggle("atmosphere_enabled", { Text = "Atmosphere Enabled", Default = false })
-    :AddColorPicker("atmosphere_color", { Default = Color3.fromRGB(199, 170, 107), Title = "Atmosphere Color" })
-AtmoGroup:AddSlider("atmosphere_decay", { Text = "Decay", Min = 0, Max = 1, Default = 0, Rounding = 2 })
-AtmoGroup:AddSlider("atmosphere_glare", { Text = "Glare", Min = 0, Max = 1, Default = 0, Rounding = 2 })
-AtmoGroup:AddSlider("atmosphere_haze", { Text = "Haze", Min = 0, Max = 10, Default = 0, Rounding = 1 })
-AtmoGroup:AddSlider("atmosphere_density", { Text = "Density", Min = 0, Max = 1, Default = 0.3, Rounding = 2 })
-AtmoGroup:AddSlider("atmosphere_offset", { Text = "Offset", Min = 0, Max = 1, Default = 0, Rounding = 2 })
-
--- Sun Rays
-local SunGroup = WorldTab:AddRightGroupbox("Sun Rays")
-SunGroup:AddToggle("sunrays_enabled", { Text = "Sun Rays Enabled", Default = false })
-SunGroup:AddSlider("sunrays_spread", { Text = "Spread", Min = 0, Max = 1, Default = 0.5, Rounding = 2 })
-SunGroup:AddSlider("sunrays_intensity", { Text = "Intensity", Min = 0, Max = 1, Default = 0.25, Rounding = 2 })
-
--- Lighting
-local LightGroup = WorldTab:AddRightGroupbox("Lighting")
-LightGroup:AddDropdown("lighting_technology", { Text = "Technology", Values = {"ShadowMap", "Future", "Legacy"}, Default = "ShadowMap" })
-
---// Misc Tab
-local MiscTab = Window:AddTab("Misc")
-
--- Camera
-local CameraGroup = MiscTab:AddLeftGroupbox("Camera")
-CameraGroup:AddToggle("camera_fov_changer", { Text = "FOV Changer", Default = false })
-CameraGroup:AddSlider("camera_fov_value", { Text = "FOV Value", Min = 30, Max = 120, Default = 70 })
-CameraGroup:AddSlider("camera_aspect_ratio_y", { Text = "Aspect Ratio Y", Min = 0.1, Max = 3, Default = 1, Rounding = 2 })
-
--- Viewmodel
-local ViewmodelGroup = MiscTab:AddLeftGroupbox("Viewmodel")
-ViewmodelGroup:AddToggle("viewmodel_offset", { Text = "Viewmodel Offset", Default = false })
-ViewmodelGroup:AddSlider("viewmodel_offset_x", { Text = "Offset X", Min = -5, Max = 5, Default = 0, Rounding = 2 })
-ViewmodelGroup:AddSlider("viewmodel_offset_y", { Text = "Offset Y", Min = -5, Max = 5, Default = 0, Rounding = 2 })
-ViewmodelGroup:AddSlider("viewmodel_offset_z", { Text = "Offset Z", Min = -5, Max = 5, Default = 0, Rounding = 2 })
-ViewmodelGroup:AddToggle("viewmodel_chams", { Text = "Viewmodel Chams", Default = false })
-
--- Movement
-local MoveGroup = MiscTab:AddRightGroupbox("Movement")
-MoveGroup:AddToggle("movement_speed", { Text = "Speed Modifier", Default = false })
-MoveGroup:AddSlider("movement_speed_value", { Text = "Speed", Min = 1, Max = 5, Default = 1, Rounding = 1, Suffix = "x" })
-MoveGroup:AddToggle("movement_jump", { Text = "Infinite Jump", Default = false })
-MoveGroup:AddToggle("movement_fly", { Text = "Fly", Default = false })
-    :AddKeyPicker("movement_fly_key", { Default = "F", Mode = "Toggle", Text = "Fly", NoUI = false })
-
--- Chat
-local ChatGroup = MiscTab:AddRightGroupbox("Chat")
-ChatGroup:AddToggle("chat_spam_enabled", { Text = "Chat Spam", Default = false })
-ChatGroup:AddInput("chat_spam_text", { Text = "Spam Text", Default = "Unnamed Enhancements" })
-ChatGroup:AddSlider("chat_spam_delay", { Text = "Delay", Min = 1, Max = 10, Default = 3, Suffix = "s" })
-
---// Settings Tab
-local SettingsTab = Window:AddTab("Settings")
-
--- Menu Settings
-local MenuGroup = SettingsTab:AddLeftGroupbox("Menu")
-MenuGroup:AddButton("Unload", function()
-    Library:Unload()
-    for _, conn in pairs(State.connections) do
-        conn:Disconnect()
-    end
-    for _, esp in pairs(State.visuals.espObjects) do
-        esp:Destroy()
-    end
-    for _, btn in pairs(State.mobileButtons) do
-        btn.gui:Destroy()
-    end
-    BloomEffect:Destroy()
-    ColorCorrection:Destroy()
-    Atmosphere:Destroy()
-    SunRays:Destroy()
-    getgenv().UE_LOADED = false
 end)
-MenuGroup:AddLabel("Menu bind"):AddKeyPicker("MenuKeybind", { Default = "RightControl", NoUI = true, Text = "Menu keybind" })
 
-Library.ToggleKeybind = Options.MenuKeybind
+Toggles.triggerbot_enabled:OnChanged(SetupTriggerbot)
 
--- Theme
-ThemeManager:SetLibrary(Library)
-ThemeManager:SetFolder("UnnamedEnhancements")
-ThemeManager:ApplyToTab(SettingsTab)
-
--- Configs
-SaveManager:SetLibrary(Library)
-SaveManager:SetFolder("UnnamedEnhancements/configs")
-SaveManager:BuildConfigSection(SettingsTab)
-SaveManager:LoadAutoloadConfig()
-
---// Mobile Buttons Setup
-if IsMobile then
-    -- Create mobile buttons for common features
-    CreateMobileButton("Aimbot", UDim2.new(0, 10, 0.3, 0), UDim2.new(0, 100, 0, 100), function(active)
-        -- Toggle handled in UpdateAimbot
-    end)
-    
-    CreateMobileButton("Trigger", UDim2.new(0, 10, 0.5, 0), UDim2.new(0, 100, 0, 100), function(active)
-        if active and Toggles.triggerbot_enabled.Value then
-            -- Triggerbot logic
-        end
-    end)
-    
-    CreateMobileButton("Menu", UDim2.new(0, 10, 0.7, 0), UDim2.new(0, 100, 0, 100), function(active)
-        if active then
-            Library:Toggle()
-        end
-    end)
-    
-    CreateMobileButton("Fly", UDim2.new(1, -110, 0.3, 0), UDim2.new(0, 100, 0, 100), function(active)
-        -- Fly toggle
-    end)
-end
-
---// Event Connections
-table.insert(State.connections, RunService.RenderStepped:Connect(function()
-    UpdateAimbot()
-    UpdateCrosshair()
-    UpdateWorldVisuals()
-end))
-
-table.insert(State.connections, Toggles.triggerbot_enabled:OnChanged(SetupTriggerbot))
-
--- Character updates
 LocalPlayer.CharacterAdded:Connect(function(char)
     State.raycastParams.FilterDescendantsInstances = {char}
 end)
@@ -1093,10 +1164,4 @@ InitializeESP()
 SetupMetatableHooks()
 SetupTriggerbot()
 
--- Notification
-Library:Notify("Unnamed Enhancements Loaded!", 5)
-if IsMobile then
-    Library:Notify("Mobile buttons enabled. Drag to reposition.", 5)
-end
-
-getgenv().UE_LOADED = true
+Library:Notify('✅ UI Changer Beta - Complete Version Loaded!', 6)

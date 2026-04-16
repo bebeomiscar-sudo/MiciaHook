@@ -1,7 +1,7 @@
 --[[
-    RIVALS TOOL — Fixed Target Parts Edition + Triggerbot
+    RIVALS TOOL — Fixed Triggerbot Edition (All Weapons Support)
     Features: Aimbot, Silent Aim, Manipulation, Ragebot, Triggerbot, AC Bypass, World Visuals, Hit Numbers/Sounds
-    Fixes: All target parts available, proper priority fallback for combined selections
+    Fixes: Triggerbot now works with all weapons including Assault Rifle, SMG, etc.
 ]]
 
 -- ═══════════════════════════════════════════
@@ -115,7 +115,7 @@ local RageCFG = {
 local GunCFG = {NoRecoil = false, NoSpread = false, FastShoot = false}
 
 -- ═══════════════════════════════════════════
--- TRIGGERBOT CONFIGURATION
+-- TRIGGERBOT CONFIGURATION - FIXED
 -- ═══════════════════════════════════════════
 local TriggerbotCFG = {
     On = false,
@@ -126,6 +126,8 @@ local TriggerbotCFG = {
     TargetPart = "Head",
     MaxDistance = 1000,
     TriggerOnAim = false,
+    AutoFire = true,
+    BurstCount = 1,
 }
 
 -- ═══════════════════════════════════════════
@@ -229,7 +231,6 @@ end
 
 -- ═══════════════════════════════════════════
 -- FIXED TARGET PART SYSTEM
--- All available parts with proper priority fallback
 -- ═══════════════════════════════════════════
 local ALL_TARGET_PARTS = {
     "Head",
@@ -251,7 +252,6 @@ local ALL_TARGET_PARTS = {
     "RightFoot",
 }
 
--- Combined presets with proper priority order
 local TARGET_PART_PRESETS = {
     ["Head"]              = {"Head"},
     ["HumanoidRootPart"]  = {"HumanoidRootPart"},
@@ -463,10 +463,51 @@ local function applyFOVStyle(circle, style)
 end
 
 -- ═══════════════════════════════════════════
--- TRIGGERBOT SYSTEM
+-- TRIGGERBOT SYSTEM - FIXED FOR ALL WEAPONS
 -- ═══════════════════════════════════════════
 local triggerbotConn = nil
 local lastTriggerTime = 0
+local isFiring = false
+local fireStartTime = 0
+
+-- Weapon type detection
+local function getWeaponType(item)
+    if not item then return "unknown" end
+    
+    local itemData = nil
+    pcall(function()
+        itemData = item:Get("ItemData") or item.ItemData
+    end)
+    
+    if not itemData then
+        local name = ""
+        pcall(function() name = item:Get("Name") or item.Name or "" end)
+        
+        local autoWeapons = {
+            ["Assault Rifle"] = true, ["SMG"] = true, ["Minigun"] = true,
+            ["Flamethrower"] = true, ["Freeze Ray"] = true
+        }
+        local semiWeapons = {
+            ["Pistol"] = true, ["Revolver"] = true, ["Deagle"] = true,
+            ["Shotgun"] = true, ["Sniper"] = true, ["Crossbow"] = true,
+            ["Bow"] = true, ["RPG"] = true, ["Grenade Launcher"] = true
+        }
+        
+        if autoWeapons[name] then return "automatic" end
+        if semiWeapons[name] then return "semi" end
+        return "unknown"
+    end
+    
+    if itemData.ShootCooldown then
+        if itemData.ShootCooldown < 0.1 then
+            return "automatic"
+        else
+            return "semi"
+        end
+    end
+    
+    return "unknown"
+end
 
 local function isPlayerValidForTrigger(target)
     if not target then return false end
@@ -489,13 +530,138 @@ local function isPlayerValidForTrigger(target)
     return true, part
 end
 
+-- FIXED: Proper weapon firing for all weapon types
+local function fireWeapon(item, weaponType)
+    if not item then return end
+    
+    pcall(function()
+        if item.StartShooting then
+            item:StartShooting()
+        end
+        
+        if item.Shoot then
+            if weaponType == "automatic" then
+                if not isFiring then
+                    isFiring = true
+                    fireStartTime = tick()
+                    
+                    task.spawn(function()
+                        while isFiring and TriggerbotCFG.On do
+                            pcall(function()
+                                item:Shoot()
+                                rs.Remotes.Replication.Fighter.UseItem:FireServer(
+                                    item:Get("ObjectID"),
+                                    enums_mod and enums_mod:ToEnum("StartShooting") or 1,
+                                    {},
+                                    nil
+                                )
+                            end)
+                            task.wait(0.05)
+                        end
+                    end)
+                end
+            else
+                for i = 1, TriggerbotCFG.BurstCount do
+                    item:Shoot()
+                    task.wait(0.05)
+                end
+            end
+        elseif item.Fire then
+            item:Fire()
+        end
+        
+        local objectId = nil
+        pcall(function() objectId = item:Get("ObjectID") end)
+        
+        if objectId and enums_mod then
+            rs.Remotes.Replication.Fighter.UseItem:FireServer(
+                objectId,
+                enums_mod:ToEnum("StartShooting"),
+                {},
+                nil
+            )
+            
+            if weaponType == "automatic" and TriggerbotCFG.AutoFire then
+                task.spawn(function()
+                    local startTime = tick()
+                    while tick() - startTime < 0.3 and TriggerbotCFG.On do
+                        rs.Remotes.Replication.Fighter.UseItem:FireServer(
+                            objectId,
+                            enums_mod:ToEnum("Shooting"),
+                            {},
+                            nil
+                        )
+                        task.wait(0.05)
+                    end
+                    
+                    rs.Remotes.Replication.Fighter.UseItem:FireServer(
+                        objectId,
+                        enums_mod:ToEnum("StopShooting"),
+                        {},
+                        nil
+                    )
+                end)
+            else
+                task.wait(0.05)
+                rs.Remotes.Replication.Fighter.UseItem:FireServer(
+                    objectId,
+                    enums_mod:ToEnum("StopShooting"),
+                    {},
+                    nil
+                )
+            end
+        end
+    end)
+end
+
+local function stopFiring(item)
+    isFiring = false
+    
+    pcall(function()
+        if item and item.StopShooting then
+            item:StopShooting()
+        end
+        
+        local objectId = nil
+        pcall(function() objectId = item:Get("ObjectID") end)
+        
+        if objectId and enums_mod then
+            rs.Remotes.Replication.Fighter.UseItem:FireServer(
+                objectId,
+                enums_mod:ToEnum("StopShooting"),
+                {},
+                nil
+            )
+        end
+    end)
+end
+
 local function startTriggerbot()
     if triggerbotConn then triggerbotConn:Disconnect() end
     
     triggerbotConn = RunService.Heartbeat:Connect(function()
-        if not TriggerbotCFG.On then return end
+        if not TriggerbotCFG.On then 
+            if isFiring then
+                pcall(function()
+                    if fighter_mod and fighter_mod.LocalFighter and fighter_mod.LocalFighter.EquippedItem then
+                        stopFiring(fighter_mod.LocalFighter.EquippedItem)
+                    end
+                end)
+            end
+            return 
+        end
         
-        if not LP.Character or not LP.Character:FindFirstChild("HumanoidRootPart") then return end
+        if not LP.Character or not LP.Character:FindFirstChild("HumanoidRootPart") then 
+            if isFiring then
+                pcall(function()
+                    if fighter_mod and fighter_mod.LocalFighter and fighter_mod.LocalFighter.EquippedItem then
+                        stopFiring(fighter_mod.LocalFighter.EquippedItem)
+                    end
+                end)
+            end
+            return 
+        end
+        
         local myHum = LP.Character:FindFirstChildOfClass("Humanoid")
         if not myHum or myHum.Health <= 0 then return end
         
@@ -506,54 +672,88 @@ local function startTriggerbot()
                     isAiming = fighter_mod.LocalFighter.IsAiming or false
                 end
             end)
-            if not isAiming then return end
+            if not isAiming then 
+                if isFiring then
+                    pcall(function()
+                        if fighter_mod and fighter_mod.LocalFighter and fighter_mod.LocalFighter.EquippedItem then
+                            stopFiring(fighter_mod.LocalFighter.EquippedItem)
+                        end
+                    end)
+                end
+                return 
+            end
         end
         
         if TriggerbotCFG.Mode == "On Aimbot Target" and not lockedTarget then
+            if isFiring then
+                pcall(function()
+                    if fighter_mod and fighter_mod.LocalFighter and fighter_mod.LocalFighter.EquippedItem then
+                        stopFiring(fighter_mod.LocalFighter.EquippedItem)
+                    end
+                end)
+            end
             return
         end
         
-        local ray = camera:ViewportPointToRay(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2)
+        local equippedItem = nil
+        local weaponType = "unknown"
+        pcall(function()
+            if fighter_mod and fighter_mod.LocalFighter then
+                equippedItem = fighter_mod.LocalFighter.EquippedItem
+                weaponType = getWeaponType(equippedItem)
+            end
+        end)
+        
+        local rayOrigin = camera.CFrame.Position
+        local rayDirection = camera.CFrame.LookVector * TriggerbotCFG.MaxDistance
+        
         local raycastParams = RaycastParams.new()
         raycastParams.FilterType = Enum.RaycastFilterType.Exclude
         raycastParams.FilterDescendantsInstances = {LP.Character}
+        raycastParams.IgnoreWater = true
         
-        local result = workspace:Raycast(ray.Origin, ray.Direction * TriggerbotCFG.MaxDistance, raycastParams)
-        if not result then return end
+        local result = workspace:Raycast(rayOrigin, rayDirection, raycastParams)
         
-        local hitModel = result.Instance:FindFirstAncestorOfClass("Model")
-        if not hitModel then return end
+        local shouldFire = false
+        local hitPlayer = nil
         
-        local hitPlayer = Players:GetPlayerFromCharacter(hitModel)
-        if not hitPlayer or hitPlayer == LP then return end
-        
-        local valid, targetPart = isPlayerValidForTrigger(hitPlayer)
-        if not valid then return end
-        
-        local currentTime = tick()
-        if (currentTime - lastTriggerTime) * 1000 < TriggerbotCFG.Delay then return end
-        
-        lastTriggerTime = currentTime
-        
-        pcall(function()
-            if fighter_mod and fighter_mod.LocalFighter and fighter_mod.LocalFighter.EquippedItem then
-                local item = fighter_mod.LocalFighter.EquippedItem
-                if item.StartShooting then
-                    item:StartShooting()
-                elseif item.Shoot then
-                    item:Shoot()
-                elseif item.Fire then
-                    item:Fire()
+        if result then
+            local hitModel = result.Instance:FindFirstAncestorOfClass("Model")
+            if hitModel then
+                hitPlayer = Players:GetPlayerFromCharacter(hitModel)
+                if hitPlayer and hitPlayer ~= LP then
+                    local valid, targetPart = isPlayerValidForTrigger(hitPlayer)
+                    if valid then
+                        local partPos = targetPart.Position
+                        local screenPos, onScreen = camera:WorldToViewportPoint(partPos)
+                        
+                        if onScreen then
+                            local center = getScreenCenter()
+                            local distFromCenter = (Vector2.new(screenPos.X, screenPos.Y) - center).Magnitude
+                            
+                            if distFromCenter < 50 then
+                                shouldFire = true
+                            end
+                        end
+                    end
                 end
-                
-                rs.Remotes.Replication.Fighter.UseItem:FireServer(
-                    item:Get("ObjectID"),
-                    enums_mod and enums_mod:ToEnum("StartShooting") or 1,
-                    {},
-                    nil
-                )
             end
-        end)
+        end
+        
+        if shouldFire then
+            local currentTime = tick()
+            if (currentTime - lastTriggerTime) * 1000 >= TriggerbotCFG.Delay then
+                lastTriggerTime = currentTime
+                
+                if equippedItem then
+                    fireWeapon(equippedItem, weaponType)
+                end
+            end
+        else
+            if isFiring and equippedItem then
+                stopFiring(equippedItem)
+            end
+        end
     end)
 end
 
@@ -562,6 +762,16 @@ local function stopTriggerbot()
         triggerbotConn:Disconnect()
         triggerbotConn = nil
     end
+    
+    if isFiring then
+        pcall(function()
+            if fighter_mod and fighter_mod.LocalFighter and fighter_mod.LocalFighter.EquippedItem then
+                stopFiring(fighter_mod.LocalFighter.EquippedItem)
+            end
+        end)
+    end
+    
+    isFiring = false
 end
 
 -- ═══════════════════════════════════════════
@@ -1207,7 +1417,6 @@ end
 -- UI SETUP
 -- ═══════════════════════════════════════════
 
--- All target part options for dropdown
 local ALL_TARGET_OPTIONS = {
     "Head",
     "HumanoidRootPart",
@@ -1409,7 +1618,7 @@ LB_F:AddToggle("AimbotDynFOV", {
     end
 })
 
--- TRIGGERBOT UI
+-- TRIGGERBOT UI - FIXED
 LB_T:AddToggle("TriggerOn", {
     Text = "Enabled",
     Default = false,
@@ -1477,6 +1686,27 @@ LB_T:AddToggle("TriggerVis", {
     Default = false,
     Callback = function(v)
         TriggerbotCFG.VisibleCheck = v
+    end
+})
+
+-- NEW: Auto Fire toggle for automatic weapons
+LB_T:AddToggle("TriggerAuto", {
+    Text = "Auto Fire (Hold for Auto Weapons)",
+    Default = true,
+    Callback = function(v)
+        TriggerbotCFG.AutoFire = v
+    end
+})
+
+-- NEW: Burst count for semi-auto weapons
+LB_T:AddSlider("TriggerBurst", {
+    Text = "Burst Count (Semi-Auto)",
+    Default = 1,
+    Min = 1,
+    Max = 10,
+    Rounding = 0,
+    Callback = function(v)
+        TriggerbotCFG.BurstCount = v
     end
 })
 
@@ -2056,7 +2286,7 @@ end)
 -- ═══════════════════════════════════════════
 -- LOAD COMPLETE
 -- ═══════════════════════════════════════════
-Library:Notify("Rivals Tool loaded — " .. (IsMobile and "MOBILE" or "PC") .. " | Triggerbot Added", 6)
+Library:Notify("Rivals Tool loaded — " .. (IsMobile and "MOBILE" or "PC") .. " | Triggerbot Fixed", 6)
 print("[RIVALS TOOL] " .. (IsMobile and "MOBILE" or "PC"))
-print("[FIX] All target parts available with proper priority fallback")
-print("[NEW] Triggerbot added with 3 modes: Always, Scoped Only, On Aimbot Target")
+print("[FIX] Triggerbot now works with all weapons including Assault Rifle")
+print("[NEW] Auto Fire mode for automatic weapons, Burst mode for semi-auto")

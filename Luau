@@ -1,6 +1,7 @@
 --[[
-    RIVALS TOOL — Anti-Cheat Safe Edition
-    Fixes: Removed Player:GetMouse() references, added cloneref bypasses, safer hooking
+    RIVALS TOOL — Anti-Cheat Safe Edition with Enhanced Ragebot
+    Features: Aimbot, Silent Aim, Ragebot (All Weapons), Triggerbot, AC Bypass, 
+              Infinite Double Jump, Jump Power, World Visuals, Hit Numbers/Sounds
 ]]
 
 -- ═══════════════════════════════════════════
@@ -10,11 +11,10 @@ local cloneref = cloneref or function(obj) return obj end
 
 local Players           = cloneref(game:GetService("Players"))
 local RunService        = cloneref(game:GetService("RunService"))
-local UIS               = cloneref(game:GetService("UserInputService")) -- Use this for mouse location!
+local UIS               = cloneref(game:GetService("UserInputService"))
 local ReplicatedStorage = cloneref(game:GetService("ReplicatedStorage"))
 local Lighting          = cloneref(game:GetService("Lighting"))
 local TweenService      = cloneref(game:GetService("TweenService"))
-local ReplicatedFirst   = cloneref(game:GetService("ReplicatedFirst"))
 local Workspace         = cloneref(game:GetService("Workspace"))
 
 local LP       = Players.LocalPlayer
@@ -27,13 +27,11 @@ local camera   = Workspace.CurrentCamera
 if hookmetamethod then
     if not game:IsLoaded() then game.Loaded:Wait() end
     
-    -- Safer GC hook that doesn't trigger kick detection
     pcall(function()
         for _, v in getgc() do
             if typeof(v) == "function" then
                 local ok, s = pcall(debug.info, v, "s")
                 if ok and s and string.find(s, "AnalyticsPipelineController") then
-                    -- Use task.wait instead of returning to avoid kick detection
                     hookfunction(v, function() 
                         while true do
                             task.wait(9e9)
@@ -46,34 +44,12 @@ if hookmetamethod then
 end
 
 -- ═══════════════════════════════════════════
--- MOUSE POSITION - Using UIS:GetMouseLocation() instead of Player:GetMouse()
--- ═══════════════════════════════════════════
-local function getMousePosition()
-    -- SAFE: Using UserInputService:GetMouseLocation() instead of Player:GetMouse()
-    return UIS:GetMouseLocation()
-end
-
--- ═══════════════════════════════════════════
--- LINORIA LIBRARY - Need to verify it doesn't use Player:GetMouse()
+-- LINORIA LIBRARY
 -- ═══════════════════════════════════════════
 local repo         = "https://raw.githubusercontent.com/mstudio45/LinoriaLib/main/"
 local Library      = loadstring(game:HttpGet(repo .. "Library.lua"))()
 local ThemeManager = loadstring(game:HttpGet(repo .. "addons/ThemeManager.lua"))()
 local SaveManager  = loadstring(game:HttpGet(repo .. "addons/SaveManager.lua"))()
-
--- Patch Library to use UIS:GetMouseLocation() if needed
-if Library and Library.GetMouse then
-    -- Replace with safe version
-    Library.GetMouse = function()
-        return {
-            X = UIS:GetMouseLocation().X,
-            Y = UIS:GetMouseLocation().Y,
-            Hit = Workspace.CurrentCamera.CFrame * CFrame.new(0, 0, -10),
-            Target = nil,
-            UnitRay = Workspace.CurrentCamera:ViewportPointToRay(UIS:GetMouseLocation().X, UIS:GetMouseLocation().Y)
-        }
-    end
-end
 
 Library.ShowToggleFrameInKeybinds = true
 
@@ -87,18 +63,14 @@ local Window = Library:CreateWindow({
     NotifySide           = "Left",
     TabPadding           = 8,
     MenuFadeTime         = 0.2,
-    Size                 = UDim2.fromOffset(480, 560),
+    Size                 = UDim2.fromOffset(480, 600),
 })
 
 local Tabs = {
-    Legitbot    = Window:AddTab("Legitbot"),
-    SilentAim   = Window:AddTab("Silent Aim"),
-    Ragebot     = Window:AddTab("Ragebot"),
-    Gun         = Window:AddTab("Gun"),
-    Visuals     = Window:AddTab("Visuals"),
-    World       = Window:AddTab("World"),
-    Misc        = Window:AddTab("Misc"),
-    Settings    = Window:AddTab("Settings"),
+    Combat    = Window:AddTab("Combat"),
+    Visuals   = Window:AddTab("Visual"),
+    Misc      = Window:AddTab("Misc"),
+    Settings  = Window:AddTab("Settings"),
 }
 
 -- ═══════════════════════════════════════════
@@ -136,12 +108,26 @@ local SAHookCFG = {
     Manipulation    = false,
 }
 
+-- ═══════════════════════════════════════════
+-- ENHANCED RAGEBOT CONFIGURATION
+-- ═══════════════════════════════════════════
 local RageCFG = {
     On              = false,
     FOV             = 360,
     MaxDist         = 999,
     TeamCheck       = false,
     VisibleCheck    = false,
+    
+    -- Weapon Support
+    SupportGuns     = true,
+    SupportBow      = true,
+    SupportDagger   = true,
+    SupportSlingshot = true,
+    
+    -- Weapon-specific Settings
+    BowChargeTime   = 0.8,
+    DaggerRange     = 12,
+    SlingshotSpeed  = 150,
 }
 
 local GunCFG = {NoRecoil = false, NoSpread = false, FastShoot = false}
@@ -163,6 +149,14 @@ local TriggerbotCFG = {
 }
 
 -- ═══════════════════════════════════════════
+-- MOVEMENT ENHANCEMENT CONFIGURATION
+-- ═══════════════════════════════════════════
+local MovementCFG = {
+    InfiniteDoubleJump = false,
+    JumpPowerMultiplier = 1,
+}
+
+-- ═══════════════════════════════════════════
 -- CHARACTER SETUP
 -- ═══════════════════════════════════════════
 local character        = LP.Character or LP.CharacterAdded:Wait()
@@ -176,7 +170,7 @@ LP.CharacterAdded:Connect(function(nc)
 end)
 
 -- ═══════════════════════════════════════════
--- MODULES - Using cloneref for safe access
+-- MODULES
 -- ═══════════════════════════════════════════
 local CameraController = nil
 pcall(function()
@@ -191,12 +185,10 @@ pcall(function()
     end
 end)
 
--- Safe references using cloneref
 local rs      = cloneref(game:GetService("ReplicatedStorage"))
 local players = cloneref(game:GetService("Players"))
 local ws      = cloneref(game:GetService("Workspace"))
 
--- Load modules
 local sa_util_mod    = nil
 local sa_enums_mod   = nil
 local sa_fighter_mod = nil
@@ -204,11 +196,13 @@ local gun_mod        = nil
 local util_mod       = nil
 local enums_mod      = nil
 local fighter_mod    = nil
+local mechanic_mod   = nil
 
 pcall(function()
     sa_util_mod    = require(rs.Modules.Utility)
     sa_enums_mod   = require(rs.Modules.EnumLibrary)
     sa_fighter_mod = require(LP.PlayerScripts.Controllers.FighterController)
+    mechanic_mod   = require(LP.PlayerScripts.Controllers.MechanicsController)
 end)
 
 pcall(function()
@@ -216,10 +210,11 @@ pcall(function()
     util_mod    = require(rs.Modules.Utility)
     enums_mod   = require(rs.Modules.EnumLibrary)
     fighter_mod = require(LP.PlayerScripts.Controllers.FighterController)
+    mechanic_mod = require(LP.PlayerScripts.Controllers.MechanicsController)
 end)
 
 -- ═══════════════════════════════════════════
--- UTILITY FUNCTIONS - All using safe methods
+-- UTILITY FUNCTIONS
 -- ═══════════════════════════════════════════
 local function getScreenCenter()
     return Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2)
@@ -331,15 +326,6 @@ local function getBestPart(char, setting)
     return nil
 end
 
-local function getAllAvailableParts(char)
-    local available = {}
-    for _, partName in ipairs(ALL_TARGET_PARTS) do
-        local p = char:FindFirstChild(partName)
-        if p then table.insert(available, p) end
-    end
-    return available
-end
-
 local function getEffectiveFOV()
     local f = AimbotCFG.MaxFOV
     if AimbotCFG.DynamicFOV then 
@@ -348,9 +334,6 @@ local function getEffectiveFOV()
     return f
 end
 
--- ═══════════════════════════════════════════
--- AIMBOT FOV CHECK
--- ═══════════════════════════════════════════
 local function isInAimbotFOV(targetPart)
     if not targetPart then return false end
     local sp, onScreen = camera:WorldToViewportPoint(targetPart.Position)
@@ -495,49 +478,31 @@ local function applyFOVStyle(circle, style)
 end
 
 -- ═══════════════════════════════════════════
--- TRIGGERBOT SYSTEM - FIXED FOR ALL WEAPONS
+-- TRIGGERBOT SYSTEM
 -- ═══════════════════════════════════════════
 local triggerbotConn = nil
 local lastTriggerTime = 0
 local isFiring = false
 local fireStartTime = 0
 
--- Weapon type detection
 local function getWeaponType(item)
     if not item then return "unknown" end
     
-    local itemData = nil
-    pcall(function()
-        itemData = item:Get("ItemData") or item.ItemData
-    end)
+    local name = ""
+    pcall(function() name = item:Get("Name") or item.Name or "" end)
     
-    if not itemData then
-        local name = ""
-        pcall(function() name = item:Get("Name") or item.Name or "" end)
-        
-        local autoWeapons = {
-            ["Assault Rifle"] = true, ["SMG"] = true, ["Minigun"] = true,
-            ["Flamethrower"] = true, ["Freeze Ray"] = true
-        }
-        local semiWeapons = {
-            ["Pistol"] = true, ["Revolver"] = true, ["Deagle"] = true,
-            ["Shotgun"] = true, ["Sniper"] = true, ["Crossbow"] = true,
-            ["Bow"] = true, ["RPG"] = true, ["Grenade Launcher"] = true
-        }
-        
-        if autoWeapons[name] then return "automatic" end
-        if semiWeapons[name] then return "semi" end
-        return "unknown"
-    end
+    local autoWeapons = {
+        ["Assault Rifle"] = true, ["SMG"] = true, ["Minigun"] = true,
+        ["Flamethrower"] = true, ["Freeze Ray"] = true
+    }
+    local semiWeapons = {
+        ["Pistol"] = true, ["Revolver"] = true, ["Deagle"] = true,
+        ["Shotgun"] = true, ["Sniper"] = true, ["Crossbow"] = true,
+        ["Bow"] = true, ["RPG"] = true, ["Grenade Launcher"] = true
+    }
     
-    if itemData.ShootCooldown then
-        if itemData.ShootCooldown < 0.1 then
-            return "automatic"
-        else
-            return "semi"
-        end
-    end
-    
+    if autoWeapons[name] then return "automatic" end
+    if semiWeapons[name] then return "semi" end
     return "unknown"
 end
 
@@ -562,7 +527,6 @@ local function isPlayerValidForTrigger(target)
     return true, part
 end
 
--- FIXED: Proper weapon firing for all weapon types
 local function fireWeapon(item, weaponType)
     if not item then return end
     
@@ -747,12 +711,11 @@ local function startTriggerbot()
         local result = Workspace:Raycast(rayOrigin, rayDirection, raycastParams)
         
         local shouldFire = false
-        local hitPlayer = nil
         
         if result then
             local hitModel = result.Instance:FindFirstAncestorOfClass("Model")
             if hitModel then
-                hitPlayer = Players:GetPlayerFromCharacter(hitModel)
+                local hitPlayer = Players:GetPlayerFromCharacter(hitModel)
                 if hitPlayer and hitPlayer ~= LP then
                     local valid, targetPart = isPlayerValidForTrigger(hitPlayer)
                     if valid then
@@ -807,7 +770,7 @@ local function stopTriggerbot()
 end
 
 -- ═══════════════════════════════════════════
--- SILENT AIM - Safe hooking
+-- SILENT AIM
 -- ═══════════════════════════════════════════
 local saHookTarget    = nil
 local saHookApplied   = false
@@ -924,7 +887,6 @@ local function updateSATarget()
     saCurrentTargetChar = bestChar
 end
 
--- Safe hook using newcclosure
 local function startSAHook()
     if not saHookApplied then
         local ok = pcall(function()
@@ -1070,36 +1032,55 @@ local function stopSAHook()
 end
 
 -- ═══════════════════════════════════════════
--- RAGEBOT
+-- ENHANCED RAGEBOT - All Weapons Support
 -- ═══════════════════════════════════════════
-local silentConn     = nil
-local reloadCooldown = 0
-local SA_PEEK_OFFSETS_RB = {
-    Vector3.new(0, 12, 0), Vector3.new(0, 16, 0), Vector3.new(0, 20, 0),
-    Vector3.new(0, 24, 0), Vector3.new(0, 28, 0), Vector3.new(0, 32, 0),
-    Vector3.new(0, 36, 0), Vector3.new(0, 40, 0),
-}
-local ray_params_sa = RaycastParams.new()
+local ragebotConn = nil
+local rageReloadCooldown = 0
 
-local function sa_getClosest()
+local function detectWeaponType(item)
+    if not item then return "Gun" end
+    
+    local name = ""
+    pcall(function() name = item:Get("Name") or item.Name or "" end)
+    
+    if name:find("Bow") or name:find("Crossbow") then return "Bow" end
+    if name:find("Dagger") or name:find("Knife") or name:find("Fist") then return "Dagger" end
+    if name:find("Slingshot") or name:find("Sling") then return "Slingshot" end
+    
+    return "Gun"
+end
+
+local function rageGetTarget(weaponType)
     if not LP.Character or not LP.Character:FindFirstChild("HumanoidRootPart") then 
         return nil, nil 
     end
     
-    local target, tchar, dist = nil, nil, RageCFG.MaxDist
+    local maxDist = RageCFG.MaxDist
+    if weaponType == "Dagger" then
+        maxDist = math.min(maxDist, RageCFG.DaggerRange)
+    elseif weaponType == "Bow" then
+        maxDist = math.min(maxDist, 300)
+    elseif weaponType == "Slingshot" then
+        maxDist = math.min(maxDist, 200)
+    end
+    
+    local target, tchar, dist = nil, nil, maxDist
     
     for _, v in next, players:GetPlayers() do
         if v == LP then continue end
         if RageCFG.TeamCheck and isSameTeamRivals(v) then continue end
-        if not v.Character or not v.Character:FindFirstChild("Head") then continue end
+        if not v.Character then continue end
         
         local hum = v.Character:FindFirstChildOfClass("Humanoid")
         if not hum or hum.Health <= 0 then continue end
         
-        local mag = (LP.Character.HumanoidRootPart.Position - v.Character.Head.Position).Magnitude
+        local head = v.Character:FindFirstChild("Head")
+        if not head then continue end
+        
+        local mag = (LP.Character.HumanoidRootPart.Position - head.Position).Magnitude
         if mag < dist then 
             dist = mag
-            target = v.Character.Head
+            target = head
             tchar = v.Character 
         end
     end
@@ -1107,29 +1088,129 @@ local function sa_getClosest()
     return target, tchar
 end
 
-local function sa_calcPoint(origin, target_pos, target_char)
-    ray_params_sa.FilterDescendantsInstances = {LP.Character, target_char}
-    ray_params_sa.FilterType = Enum.RaycastFilterType.Exclude
+local function fireRageWeapon(item, target, tchar, weaponType)
+    if not item or not target then return end
     
-    if not RageCFG.VisibleCheck then 
-        return origin, nil 
-    end
-    
-    if not ws:Raycast(origin, target_pos - origin, ray_params_sa) then 
-        return origin, nil 
-    end
-    
-    for _, offset in next, SA_PEEK_OFFSETS_RB do
-        local sp = origin + offset
-        if not ws:Raycast(sp, target_pos - sp, ray_params_sa) then 
-            return sp, offset.Y 
+    pcall(function()
+        local objectId = item:Get("ObjectID")
+        local targetPos = target.Position
+        
+        if weaponType == "Bow" and RageCFG.SupportBow then
+            local aimOffset = Vector3.new(0, 0.5, 0)
+            targetPos = targetPos + aimOffset
+            
+            pcall(function() item:StartCharging() end)
+            task.wait(RageCFG.BowChargeTime)
+            
+            local cd = {}
+            cd[utf8.char(1)] = {
+                [utf8.char(0)] = util_mod:EncodeCFrame(CFrame.new(Workspace.CurrentCamera.CFrame.Position)),
+                [utf8.char(1)] = util_mod:EncodeCFrame(CFrame.new(targetPos)),
+                [utf8.char(2)] = target,
+                [utf8.char(3)] = util_mod:EncodeCFrame(target.CFrame:ToObjectSpace(CFrame.new(targetPos))),
+            }
+            
+            rs.Remotes.Replication.Fighter.UseItem:FireServer(
+                objectId,
+                enums_mod:ToEnum("ReleaseCharge"),
+                cd,
+                nil
+            )
+            
+        elseif weaponType == "Dagger" and RageCFG.SupportDagger then
+            for i = 1, 3 do
+                local slashDir = (targetPos - LP.Character.HumanoidRootPart.Position).Unit
+                
+                rs.Remotes.Replication.Fighter.UseItem:FireServer(
+                    objectId,
+                    enums_mod:ToEnum("Slash"),
+                    {slashDir},
+                    nil
+                )
+                task.wait(0.08)
+            end
+            
+        elseif weaponType == "Slingshot" and RageCFG.SupportSlingshot then
+            local velocity = target.AssemblyLinearVelocity or Vector3.new(0, 0, 0)
+            local timeToHit = (targetPos - LP.Character.HumanoidRootPart.Position).Magnitude / RageCFG.SlingshotSpeed
+            targetPos = targetPos + (velocity * timeToHit) + Vector3.new(0, 0.3, 0)
+            
+            local cd = {}
+            cd[utf8.char(1)] = {
+                [utf8.char(0)] = util_mod:EncodeCFrame(CFrame.new(LP.Character.HumanoidRootPart.Position)),
+                [utf8.char(1)] = util_mod:EncodeCFrame(CFrame.new(targetPos)),
+                [utf8.char(2)] = target,
+            }
+            
+            rs.Remotes.Replication.Fighter.UseItem:FireServer(
+                objectId,
+                enums_mod:ToEnum("Shoot"),
+                cd,
+                nil
+            )
+            
+        elseif RageCFG.SupportGuns then
+            local ray_params_sa = RaycastParams.new()
+            ray_params_sa.FilterDescendantsInstances = {LP.Character, tchar}
+            ray_params_sa.FilterType = Enum.RaycastFilterType.Exclude
+            
+            local SA_PEEK_OFFSETS_RB = {
+                Vector3.new(0, 12, 0), Vector3.new(0, 16, 0), Vector3.new(0, 20, 0),
+                Vector3.new(0, 24, 0), Vector3.new(0, 28, 0), Vector3.new(0, 32, 0),
+                Vector3.new(0, 36, 0), Vector3.new(0, 40, 0),
+            }
+            
+            local cam = Workspace.CurrentCamera.CFrame
+            local manip, height
+            
+            if not RageCFG.VisibleCheck then 
+                manip = cam.Position
+            elseif not Workspace:Raycast(cam.Position, targetPos - cam.Position, ray_params_sa) then 
+                manip = cam.Position
+            else
+                for _, offset in next, SA_PEEK_OFFSETS_RB do
+                    local sp = cam.Position + offset
+                    if not Workspace:Raycast(sp, targetPos - sp, ray_params_sa) then 
+                        manip = sp
+                        height = offset.Y
+                        break
+                    end
+                end
+            end
+            
+            if not manip then return end
+            
+            local sp   = (height == nil and manip) or cam.Position
+            local cd   = {}
+            cd[utf8.char(1)] = {
+                [utf8.char(0)] = util_mod:EncodeCFrame(
+                    CFrame.new(sp.X, sp.Y + (height or 0), sp.Z)
+                    * CFrame.Angles(CFrame.lookAt(sp, targetPos):ToOrientation())
+                ),
+                [utf8.char(1)] = height and
+                    util_mod:EncodeCFrame(
+                        CFrame.new(targetPos)
+                        * CFrame.Angles(CFrame.lookAt(sp, targetPos):ToOrientation())
+                    ) or
+                    util_mod:EncodeCFrame(
+                        CFrame.new(sp.X, sp.Y + (height or 0), sp.Z)
+                        * CFrame.Angles(CFrame.lookAt(sp, targetPos):ToOrientation())
+                    ),
+                [utf8.char(2)] = target,
+                [utf8.char(3)] = util_mod:EncodeCFrame(target.CFrame:ToObjectSpace(CFrame.new(targetPos))),
+            }
+            
+            rs.Remotes.Replication.Fighter.UseItem:FireServer(
+                objectId,
+                enums_mod:ToEnum("StartShooting"),
+                cd,
+                nil
+            )
         end
-    end
-    
-    return nil, nil
+    end)
 end
 
-local function tryRagebotReload(item)
+local function tryRageReload(item)
     if not item then return end
     pcall(function()
         rs.Remotes.Replication.Fighter.UseItem:FireServer(
@@ -1138,8 +1219,6 @@ local function tryRagebotReload(item)
             {}, 
             nil
         )
-    end)
-    pcall(function()
         rs.Remotes.Replication.Fighter.UseItem:FireServer(
             item:Get("ObjectID"), 
             enums_mod:ToEnum("StartReloading"), 
@@ -1149,12 +1228,12 @@ local function tryRagebotReload(item)
     end)
 end
 
-local function startRagebot()
-    if silentConn then 
-        silentConn:Disconnect() 
+local function startEnhancedRagebot()
+    if ragebotConn then 
+        ragebotConn:Disconnect() 
     end
     
-    silentConn = RunService.Heartbeat:Connect(function(dt)
+    ragebotConn = RunService.Heartbeat:Connect(function(dt)
         if not RageCFG.On or not LP.Character then return end
         if not LP.Character:FindFirstChild("HumanoidRootPart") then return end
         if not fighter_mod or not fighter_mod.LocalFighter then return end
@@ -1162,62 +1241,114 @@ local function startRagebot()
         local item = fighter_mod.LocalFighter.EquippedItem
         if not item then return end
         
-        reloadCooldown = reloadCooldown - dt
-        local ammo = nil
-        pcall(function() 
-            ammo = item:Get("CurrentAmmo") 
-        end)
+        local weaponType = detectWeaponType(item)
         
-        if ammo ~= nil and ammo <= 0 and reloadCooldown <= 0 then
-            tryRagebotReload(item)
-            reloadCooldown = 2.0
-            return
+        if weaponType == "Bow" and not RageCFG.SupportBow then return end
+        if weaponType == "Dagger" and not RageCFG.SupportDagger then return end
+        if weaponType == "Slingshot" and not RageCFG.SupportSlingshot then return end
+        if weaponType == "Gun" and not RageCFG.SupportGuns then return end
+        
+        if weaponType == "Gun" then
+            rageReloadCooldown = rageReloadCooldown - dt
+            local ammo = nil
+            pcall(function() 
+                ammo = item:Get("CurrentAmmo") 
+            end)
+            
+            if ammo ~= nil and ammo <= 0 and rageReloadCooldown <= 0 then
+                tryRageReload(item)
+                rageReloadCooldown = 2.0
+                return
+            end
         end
         
-        local tp, tc = sa_getClosest()
+        local tp, tc = rageGetTarget(weaponType)
         if not tp or not tc then return end
         
-        local cam           = ws.CurrentCamera.CFrame
-        local manip, height = sa_calcPoint(cam.Position, tp.Position, tc)
-        
-        if not manip then return end
-        
-        local sp   = (height == nil and manip) or cam.Position
-        local cd   = {}
-        cd[utf8.char(1)] = {
-            [utf8.char(0)] = util_mod:EncodeCFrame(
-                CFrame.new(sp.X, sp.Y + (height or 0), sp.Z)
-                * CFrame.Angles(CFrame.lookAt(sp, tp.Position):ToOrientation())
-            ),
-            [utf8.char(1)] = height and
-                util_mod:EncodeCFrame(
-                    CFrame.new(tp.Position)
-                    * CFrame.Angles(CFrame.lookAt(sp, tp.Position):ToOrientation())
-                ) or
-                util_mod:EncodeCFrame(
-                    CFrame.new(sp.X, sp.Y + (height or 0), sp.Z)
-                    * CFrame.Angles(CFrame.lookAt(sp, tp.Position):ToOrientation())
-                ),
-            [utf8.char(2)] = tp,
-            [utf8.char(3)] = util_mod:EncodeCFrame(tp.CFrame:ToObjectSpace(CFrame.new(tp.Position))),
-        }
-        
-        pcall(function()
-            rs.Remotes.Replication.Fighter.UseItem:FireServer(
-                item:Get("ObjectID"), 
-                enums_mod:ToEnum("StartShooting"), 
-                cd, 
-                nil
-            )
-        end)
+        fireRageWeapon(item, tp, tc, weaponType)
     end)
 end
 
-local function stopRagebot()
-    if silentConn then 
-        silentConn:Disconnect()
-        silentConn = nil 
+local function stopEnhancedRagebot()
+    if ragebotConn then 
+        ragebotConn:Disconnect()
+        ragebotConn = nil 
     end
+end
+
+-- ═══════════════════════════════════════════
+-- MOVEMENT ENHANCEMENT FEATURES
+-- ═══════════════════════════════════════════
+local doubleJumpConn = nil
+local jumpPowerConn = nil
+
+local function enableInfiniteDoubleJump()
+    if doubleJumpConn then doubleJumpConn:Disconnect() end
+    
+    local success, mechanic = pcall(function()
+        return require(LP.PlayerScripts.Controllers.MechanicsController)
+    end)
+    
+    if not success or not mechanic then
+        warn("[DOUBLE JUMP] Failed to load MechanicsController")
+        return
+    end
+    
+    doubleJumpConn = RunService.Heartbeat:Connect(function()
+        pcall(function()
+            if mechanic._double_jumps_used then
+                table.clear(mechanic._double_jumps_used)
+            end
+        end)
+    end)
+    
+    Library:Notify("Infinite Double Jump enabled", 3)
+end
+
+local function disableInfiniteDoubleJump()
+    if doubleJumpConn then
+        doubleJumpConn:Disconnect()
+        doubleJumpConn = nil
+    end
+    Library:Notify("Infinite Double Jump disabled", 3)
+end
+
+local function enableJumpPowerModifier()
+    local success, mechanic = pcall(function()
+        return require(LP.PlayerScripts.Controllers.MechanicsController)
+    end)
+    
+    if not success or not mechanic then
+        warn("[JUMP POWER] Failed to load MechanicsController")
+        return
+    end
+    
+    if not mechanic._original_jump_power_stored then
+        mechanic._original_jump_power_backup = mechanic._original_jump_power or 1
+        mechanic._original_jump_power_stored = true
+    end
+    
+    jumpPowerConn = RunService.Heartbeat:Connect(function()
+        pcall(function()
+            mechanic._original_jump_power = MovementCFG.JumpPowerMultiplier
+        end)
+    end)
+    
+    Library:Notify("Jump Power set to " .. MovementCFG.JumpPowerMultiplier .. "x", 3)
+end
+
+local function disableJumpPowerModifier()
+    if jumpPowerConn then
+        jumpPowerConn:Disconnect()
+        jumpPowerConn = nil
+    end
+    
+    pcall(function()
+        local mechanic = require(LP.PlayerScripts.Controllers.MechanicsController)
+        mechanic._original_jump_power = mechanic._original_jump_power_backup or 1
+    end)
+    
+    Library:Notify("Jump Power reset to normal", 3)
 end
 
 -- ═══════════════════════════════════════════
@@ -1468,15 +1599,16 @@ local ALL_TARGET_OPTIONS = {
     "Random"
 }
 
--- Legitbot Tab
-local LB_L = Tabs.Legitbot:AddLeftGroupbox("Aimbot")
-local LB_R = Tabs.Legitbot:AddRightGroupbox("Delay Position")
-local LB_F = Tabs.Legitbot:AddLeftGroupbox("FOV Settings")
-local LB_T = Tabs.Legitbot:AddRightGroupbox("Triggerbot")
+-- ═══════════════════════════════════════════
+-- COMBAT TAB (Aimbot, Silent Aim, Ragebot, Triggerbot, Gun Mods)
+-- ═══════════════════════════════════════════
 
-LB_L:AddLabel("CameraController: " .. (CameraController and "Connected" or "Not Found"))
+-- Aimbot Section (Left)
+local Combat_Aimbot_L = Tabs.Combat:AddLeftGroupbox("Aimbot")
 
-LB_L:AddToggle("AimbotOn", {
+Combat_Aimbot_L:AddLabel("CameraController: " .. (CameraController and "Connected" or "Not Found"))
+
+Combat_Aimbot_L:AddToggle("AimbotOn", {
     Text = "Enabled",
     Default = false,
     Callback = function(v)
@@ -1489,7 +1621,7 @@ LB_L:AddToggle("AimbotOn", {
     end
 })
 
-LB_L:AddSlider("AimbotSmooth", {
+Combat_Aimbot_L:AddSlider("AimbotSmooth", {
     Text = "Smoothness",
     Default = 10,
     Min = 1,
@@ -1499,9 +1631,9 @@ LB_L:AddSlider("AimbotSmooth", {
         AimbotCFG.Smoothness = v 
     end,
 })
-LB_L:AddLabel("Higher = slower / more legit aim")
+Combat_Aimbot_L:AddLabel("Higher = slower / more legit aim")
 
-LB_L:AddSlider("AimbotReaction", {
+Combat_Aimbot_L:AddSlider("AimbotReaction", {
     Text = "Reaction Time (ms)",
     Default = 100,
     Min = 0,
@@ -1512,7 +1644,7 @@ LB_L:AddSlider("AimbotReaction", {
     end,
 })
 
-LB_L:AddSlider("AimbotForgot", {
+Combat_Aimbot_L:AddSlider("AimbotForgot", {
     Text = "Forgot Time (s)",
     Default = 3,
     Min = 1,
@@ -1523,7 +1655,7 @@ LB_L:AddSlider("AimbotForgot", {
     end,
 })
 
-LB_L:AddToggle("AimbotTeam", {
+Combat_Aimbot_L:AddToggle("AimbotTeam", {
     Text = "Team Check",
     Default = false,
     Callback = function(v) 
@@ -1531,7 +1663,7 @@ LB_L:AddToggle("AimbotTeam", {
     end
 })
 
-LB_L:AddToggle("AimbotVis", {
+Combat_Aimbot_L:AddToggle("AimbotVis", {
     Text = "Visible Check",
     Default = false,
     Callback = function(v) 
@@ -1539,7 +1671,7 @@ LB_L:AddToggle("AimbotVis", {
     end
 })
 
-LB_L:AddDropdown("AimbotPart", {
+Combat_Aimbot_L:AddDropdown("AimbotPart", {
     Text = "Target Part",
     Default = "Head",
     Values = ALL_TARGET_OPTIONS,
@@ -1548,12 +1680,14 @@ LB_L:AddDropdown("AimbotPart", {
     end,
 })
 
--- Delay Position
-LB_R:AddLabel("Adds lag to which position aimbot aims at")
-LB_R:AddLabel("0 = instant   1 = maximum delay")
-LB_R:AddLabel("")
+-- Aimbot Delay Position (Right)
+local Combat_Aimbot_R = Tabs.Combat:AddRightGroupbox("Delay Position")
 
-LB_R:AddSlider("AimbotXSmooth", {
+Combat_Aimbot_R:AddLabel("Adds lag to which position aimbot aims at")
+Combat_Aimbot_R:AddLabel("0 = instant   1 = maximum delay")
+Combat_Aimbot_R:AddLabel("")
+
+Combat_Aimbot_R:AddSlider("AimbotXSmooth", {
     Text = "X Smooth (horizontal)",
     Default = 0,
     Min = 0,
@@ -1565,7 +1699,7 @@ LB_R:AddSlider("AimbotXSmooth", {
     end,
 })
 
-LB_R:AddSlider("AimbotYSmooth", {
+Combat_Aimbot_R:AddSlider("AimbotYSmooth", {
     Text = "Y Smooth (vertical)",
     Default = 0,
     Min = 0,
@@ -1577,7 +1711,7 @@ LB_R:AddSlider("AimbotYSmooth", {
     end,
 })
 
-LB_R:AddSlider("AimbotJumpSmooth", {
+Combat_Aimbot_R:AddSlider("AimbotJumpSmooth", {
     Text = "Jump Smooth",
     Default = 0,
     Min = 0,
@@ -1589,7 +1723,7 @@ LB_R:AddSlider("AimbotJumpSmooth", {
     end,
 })
 
-LB_R:AddButton({
+Combat_Aimbot_R:AddButton({
     Text = "Reset Delay Position",
     Func = function()
         AimbotCFG.XSmooth = 0
@@ -1609,8 +1743,10 @@ LB_R:AddButton({
     end
 })
 
--- FOV Settings
-LB_F:AddSlider("AimbotFOV", {
+-- Aimbot FOV Settings (Left)
+local Combat_FOV_L = Tabs.Combat:AddLeftGroupbox("FOV Settings")
+
+Combat_FOV_L:AddSlider("AimbotFOV", {
     Text = "Max FOV",
     Default = 150,
     Min = 0,
@@ -1624,7 +1760,7 @@ LB_F:AddSlider("AimbotFOV", {
     end
 })
 
-LB_F:AddToggle("AimbotDrawFOV", {
+Combat_FOV_L:AddToggle("AimbotDrawFOV", {
     Text = "Draw FOV",
     Default = false,
     Callback = function(v)
@@ -1633,7 +1769,7 @@ LB_F:AddToggle("AimbotDrawFOV", {
     end
 })
 
-LB_F:AddDropdown("AimbotFOVStyle", {
+Combat_FOV_L:AddDropdown("AimbotFOVStyle", {
     Text = "FOV Style",
     Default = "Half",
     Values = {"Half", "Filled", "Invisible"},
@@ -1643,7 +1779,7 @@ LB_F:AddDropdown("AimbotFOVStyle", {
     end
 })
 
-LB_F:AddToggle("AimbotDynFOV", {
+Combat_FOV_L:AddToggle("AimbotDynFOV", {
     Text = "Dynamic FOV",
     Default = false,
     Callback = function(v) 
@@ -1651,8 +1787,10 @@ LB_F:AddToggle("AimbotDynFOV", {
     end
 })
 
--- TRIGGERBOT UI
-LB_T:AddToggle("TriggerOn", {
+-- Triggerbot (Right)
+local Combat_Trigger_R = Tabs.Combat:AddRightGroupbox("Triggerbot")
+
+Combat_Trigger_R:AddToggle("TriggerOn", {
     Text = "Enabled",
     Default = false,
     Callback = function(v)
@@ -1666,7 +1804,7 @@ LB_T:AddToggle("TriggerOn", {
     end
 })
 
-LB_T:AddDropdown("TriggerMode", {
+Combat_Trigger_R:AddDropdown("TriggerMode", {
     Text = "Mode",
     Default = "Always",
     Values = {"Always", "Scoped Only", "On Aimbot Target"},
@@ -1675,7 +1813,7 @@ LB_T:AddDropdown("TriggerMode", {
     end
 })
 
-LB_T:AddSlider("TriggerDelay", {
+Combat_Trigger_R:AddSlider("TriggerDelay", {
     Text = "Delay (ms)",
     Default = 0,
     Min = 0,
@@ -1686,7 +1824,7 @@ LB_T:AddSlider("TriggerDelay", {
     end
 })
 
-LB_T:AddSlider("TriggerDist", {
+Combat_Trigger_R:AddSlider("TriggerDist", {
     Text = "Max Distance",
     Default = 1000,
     Min = 10,
@@ -1697,7 +1835,7 @@ LB_T:AddSlider("TriggerDist", {
     end
 })
 
-LB_T:AddDropdown("TriggerPart", {
+Combat_Trigger_R:AddDropdown("TriggerPart", {
     Text = "Target Part",
     Default = "Head",
     Values = ALL_TARGET_OPTIONS,
@@ -1706,7 +1844,7 @@ LB_T:AddDropdown("TriggerPart", {
     end
 })
 
-LB_T:AddToggle("TriggerTeam", {
+Combat_Trigger_R:AddToggle("TriggerTeam", {
     Text = "Team Check",
     Default = true,
     Callback = function(v)
@@ -1714,7 +1852,7 @@ LB_T:AddToggle("TriggerTeam", {
     end
 })
 
-LB_T:AddToggle("TriggerVis", {
+Combat_Trigger_R:AddToggle("TriggerVis", {
     Text = "Visible Check",
     Default = false,
     Callback = function(v)
@@ -1722,7 +1860,7 @@ LB_T:AddToggle("TriggerVis", {
     end
 })
 
-LB_T:AddToggle("TriggerAuto", {
+Combat_Trigger_R:AddToggle("TriggerAuto", {
     Text = "Auto Fire (Hold for Auto Weapons)",
     Default = true,
     Callback = function(v)
@@ -1730,7 +1868,7 @@ LB_T:AddToggle("TriggerAuto", {
     end
 })
 
-LB_T:AddSlider("TriggerBurst", {
+Combat_Trigger_R:AddSlider("TriggerBurst", {
     Text = "Burst Count (Semi-Auto)",
     Default = 1,
     Min = 1,
@@ -1741,14 +1879,12 @@ LB_T:AddSlider("TriggerBurst", {
     end
 })
 
--- Silent Aim Tab
-local SA_L = Tabs.SilentAim:AddLeftGroupbox("Main")
-local SA_R = Tabs.SilentAim:AddRightGroupbox("FOV & Targeting")
-local SA_M = Tabs.SilentAim:AddLeftGroupbox("Server Manipulation")
+-- Silent Aim Section (Left)
+local Combat_SA_L = Tabs.Combat:AddLeftGroupbox("Silent Aim")
 
-SA_L:AddLabel("Hook: " .. (hookmetamethod and "Supported" or "NOT SUPPORTED"))
+Combat_SA_L:AddLabel("Hook: " .. (hookmetamethod and "Supported" or "NOT SUPPORTED"))
 
-SA_L:AddToggle("SAOn", {
+Combat_SA_L:AddToggle("SAOn", {
     Text = "Enabled",
     Default = false,
     Callback = function(v)
@@ -1761,7 +1897,7 @@ SA_L:AddToggle("SAOn", {
     end
 })
 
-SA_L:AddToggle("SAVis", {
+Combat_SA_L:AddToggle("SAVis", {
     Text = "Visible Check",
     Default = false,
     Callback = function(v) 
@@ -1769,7 +1905,7 @@ SA_L:AddToggle("SAVis", {
     end
 })
 
-SA_L:AddSlider("SAHit", {
+Combat_SA_L:AddSlider("SAHit", {
     Text = "Hit Chance (%)",
     Default = 100,
     Min = 0,
@@ -1780,7 +1916,7 @@ SA_L:AddSlider("SAHit", {
     end
 })
 
-SA_L:AddToggle("SATeam", {
+Combat_SA_L:AddToggle("SATeam", {
     Text = "Team Check",
     Default = true,
     Callback = function(v) 
@@ -1788,7 +1924,10 @@ SA_L:AddToggle("SATeam", {
     end
 })
 
-SA_R:AddToggle("SAIgnFOV", {
+-- Silent Aim FOV & Targeting (Right)
+local Combat_SA_R = Tabs.Combat:AddRightGroupbox("SA FOV & Targeting")
+
+Combat_SA_R:AddToggle("SAIgnFOV", {
     Text = "Ignore FOV",
     Default = false,
     Callback = function(v)
@@ -1799,7 +1938,7 @@ SA_R:AddToggle("SAIgnFOV", {
     end
 })
 
-SA_R:AddSlider("SAFOVSize", {
+Combat_SA_R:AddSlider("SAFOVSize", {
     Text = "FOV Size (px)",
     Default = 600,
     Min = 10,
@@ -1813,7 +1952,7 @@ SA_R:AddSlider("SAFOVSize", {
     end
 })
 
-SA_R:AddToggle("SADrawFOV", {
+Combat_SA_R:AddToggle("SADrawFOV", {
     Text = "Draw FOV",
     Default = true,
     Callback = function(v)
@@ -1824,7 +1963,7 @@ SA_R:AddToggle("SADrawFOV", {
     end
 })
 
-SA_R:AddToggle("SADynFOV", {
+Combat_SA_R:AddToggle("SADynFOV", {
     Text = "Dynamic FOV",
     Default = false,
     Callback = function(v) 
@@ -1832,7 +1971,7 @@ SA_R:AddToggle("SADynFOV", {
     end
 })
 
-SA_R:AddDropdown("SATargetParts", {
+Combat_SA_R:AddDropdown("SATargetParts", {
     Text = "Target Parts",
     Default = "Head, Body",
     Values = ALL_TARGET_OPTIONS,
@@ -1841,7 +1980,7 @@ SA_R:AddDropdown("SATargetParts", {
     end,
 })
 
-SA_R:AddDropdown("SATargeting", {
+Combat_SA_R:AddDropdown("SATargeting", {
     Text = "Targeting Mode",
     Default = "Closest",
     Values = {"Closest", "Furthest", "Random"},
@@ -1850,7 +1989,7 @@ SA_R:AddDropdown("SATargeting", {
     end,
 })
 
-SA_R:AddToggle("SAPreferRand", {
+Combat_SA_R:AddToggle("SAPreferRand", {
     Text = "Prefer Random Hitpart",
     Default = false,
     Callback = function(v) 
@@ -1858,13 +1997,15 @@ SA_R:AddToggle("SAPreferRand", {
     end
 })
 
--- Server Manipulation
-SA_M:AddLabel("Hook Mode: Spoofs ViewportSize (client-side)")
-SA_M:AddLabel("Manipulation Mode: Sends shot data to server")
-SA_M:AddLabel("Use both together for maximum reliability")
-SA_M:AddLabel("")
+-- Silent Aim Server Manipulation (Left)
+local Combat_SA_M = Tabs.Combat:AddLeftGroupbox("SA Manipulation")
 
-SA_M:AddToggle("SAManip", {
+Combat_SA_M:AddLabel("Hook Mode: Spoofs ViewportSize (client-side)")
+Combat_SA_M:AddLabel("Manipulation Mode: Sends shot data to server")
+Combat_SA_M:AddLabel("Use both together for maximum reliability")
+Combat_SA_M:AddLabel("")
+
+Combat_SA_M:AddToggle("SAManip", {
     Text = "Enable Server Manipulation",
     Default = false,
     Callback = function(v)
@@ -1882,29 +2023,28 @@ SA_M:AddToggle("SAManip", {
     end,
 })
 
-SA_M:AddLabel("Modules: " .. (sa_util_mod and sa_enums_mod and sa_fighter_mod and "Loaded" or "FAILED"))
+Combat_SA_M:AddLabel("Modules: " .. (sa_util_mod and sa_enums_mod and sa_fighter_mod and "Loaded" or "FAILED"))
 
--- Ragebot Tab
-local RB_L = Tabs.Ragebot:AddLeftGroupbox("Ragebot")
-local RB_R = Tabs.Ragebot:AddRightGroupbox("Filters & Reload")
+-- RAGEBOT SECTION (Right Side)
+local Combat_RB_R = Tabs.Combat:AddRightGroupbox("Ragebot")
 
 local saModsOk = util_mod and enums_mod and fighter_mod
-RB_L:AddLabel("Modules: " .. (saModsOk and "Loaded" or "FAILED"))
+Combat_RB_R:AddLabel("Modules: " .. (saModsOk and "Loaded" or "FAILED"))
 
-RB_L:AddToggle("RBOn", {
+Combat_RB_R:AddToggle("RBOn", {
     Text = "Enabled",
     Default = false,
     Callback = function(v)
         RageCFG.On = v
         if v then 
-            startRagebot() 
+            startEnhancedRagebot() 
         else 
-            stopRagebot() 
+            stopEnhancedRagebot() 
         end
     end
 })
 
-RB_L:AddSlider("RBFOV", {
+Combat_RB_R:AddSlider("RBFOV", {
     Text = "Field Of View",
     Default = 360,
     Min = 0,
@@ -1915,7 +2055,7 @@ RB_L:AddSlider("RBFOV", {
     end
 })
 
-RB_R:AddSlider("RBDist", {
+Combat_RB_R:AddSlider("RBDist", {
     Text = "Max Distance",
     Default = 999,
     Min = 10,
@@ -1926,7 +2066,7 @@ RB_R:AddSlider("RBDist", {
     end
 })
 
-RB_R:AddToggle("RBTeam", {
+Combat_RB_R:AddToggle("RBTeam", {
     Text = "Team Check",
     Default = false,
     Callback = function(v) 
@@ -1934,7 +2074,7 @@ RB_R:AddToggle("RBTeam", {
     end
 })
 
-RB_R:AddToggle("RBVis", {
+Combat_RB_R:AddToggle("RBVis", {
     Text = "Visible Check",
     Default = false,
     Callback = function(v) 
@@ -1942,383 +2082,381 @@ RB_R:AddToggle("RBVis", {
     end
 })
 
-RB_R:AddButton({
+Combat_RB_R:AddButton({
     Text = "Force Reload Now",
     Func = function()
         if not fighter_mod or not fighter_mod.LocalFighter then return end
         local item = fighter_mod.LocalFighter.EquippedItem
         if item then 
-            tryRagebotReload(item) 
+            tryRageReload(item) 
         end
         Library:Notify("Reload fired", 2)
     end
 })
 
--- Gun Tab
-local GN_L = Tabs.Gun:AddLeftGroupbox("Gun Modifiers")
-GN_L:AddLabel("Excludes: Sniper, Bow, RPG, Crossbow")
+-- Ragebot Weapon Settings (Left)
+local Combat_RB_Settings_L = Tabs.Combat:AddLeftGroupbox("RB Weapon Settings")
 
-GN_L:AddToggle("GunRecoil", {
-    Text = "No Recoil",
-    Default = false,
-    Callback = function(v) 
-        GunCFG.NoRecoil = v
-        patchGun() 
-    end
-})
-
-GN_L:AddToggle("GunSpread", {
-    Text = "No Spread",
-    Default = false,
-    Callback = function(v) 
-        GunCFG.NoSpread = v
-        patchGun() 
-    end
-})
-
-GN_L:AddToggle("GunFast", {
-    Text = "Fast Shoot (0.05s)",
-    Default = false,
-    Callback = function(v) 
-        GunCFG.FastShoot = v
-        patchGun() 
-    end
-})
-
-GN_L:AddButton({
-    Text = "Apply Now",
-    Func = function() 
-        patchGun()
-        Library:Notify("Gun mods applied", 2) 
-    end
-})
-
-GN_L:AddButton({
-    Text = "Restore Originals",
-    Func = function()
-        GunCFG.NoRecoil = false
-        GunCFG.NoSpread = false
-        GunCFG.FastShoot = false
-        patchGun()
-        Library:Notify("Gun values restored", 3)
-    end
-})
-
--- Visuals Tab
-local VS_L = Tabs.Visuals:AddLeftGroupbox("Crosshair")
-local VS_R = Tabs.Visuals:AddRightGroupbox("Hit Numbers")
-
-local crosshairGui = Instance.new("ScreenGui")
-crosshairGui.Name = "CustomCrosshair"
-crosshairGui.ResetOnSpawn = false
-crosshairGui.IgnoreGuiInset = true
-crosshairGui.Parent = LP:WaitForChild("PlayerGui")
-
-local crosshairImg = Instance.new("ImageLabel", crosshairGui)
-crosshairImg.BackgroundTransparency = 1
-crosshairImg.AnchorPoint = Vector2.new(0.5, 0.5)
-crosshairImg.Position = UDim2.new(0.5, 0, 0.5, 0)
-crosshairImg.Size = UDim2.new(0, 24, 0, 24)
-crosshairImg.Image = "rbxassetid://97119437608195"
-crosshairImg.ImageTransparency = 1
-
-VS_L:AddToggle("CrossOn", {
-    Text = "Enable Crosshair",
-    Default = false,
+Combat_RB_Settings_L:AddSlider("BowCharge", {
+    Text = "Bow Charge Time",
+    Default = 0.8,
+    Min = 0.1,
+    Max = 2.0,
+    Rounding = 1,
     Callback = function(v)
-        crosshairImg.ImageTransparency = v and 0 or 1
-        UIS.MouseIconEnabled = not v
+        RageCFG.BowChargeTime = v
     end
 })
 
-VS_L:AddSlider("CrossSize", {
-    Text = "Size",
-    Default = 24,
-    Min = 8,
-    Max = 64,
+Combat_RB_Settings_L:AddSlider("DaggerRange", {
+    Text = "Dagger Slash Range",
+    Default = 12,
+    Min = 5,
+    Max = 25,
     Rounding = 0,
     Callback = function(v)
-        crosshairImg.Size = UDim2.new(0, v, 0, v)
+        RageCFG.DaggerRange = v
     end
 })
 
-VS_R:AddToggle("HitNumOn", {
-    Text = "Enable Hit Numbers",
-    Default = true,
-    Callback = function(v) 
-        hitEnabled = v 
+Combat_RB_Settings_L:AddSlider("SlingSpeed", {
+    Text = "Slingshot Proj. Speed",
+    Default = 150,
+    Min = 50,
+    Max = 500,
+    Rounding = 0,
+    Callback = function(v)
+        RageCFG.SlingshotSpeed = v
     end
 })
 
-VS_R:AddLabel("Color"):AddColorPicker("HitNumColor", {
-    Default = Color3.fromRGB(255, 20, 147),
-    Callback = function(v) 
-        hitColor = v 
-    end
-})
+-- Gun Mods Section (Right)
+local Combat_Gun_R = Tabs.Combat:AddRightGroupbox("Gun Mods")
 
-VS_R:AddSlider("HitNumDur", {
-    Text = "Duration (s)",
-    Default = 5,
-    Min = 1,
-    Max = 10,
-    Rounding = 1,
-    Callback = function(v) 
-        hitStayTime = v 
-    end
-})
-
--- World Tab
-local WD_L = Tabs.World:AddLeftGroupbox("Sky & Snow")
-local WD_R = Tabs.World:AddRightGroupbox("World Effects")
-local WD_S = Tabs.World:AddLeftGroupbox("Sounds")
-
-WD_L:AddToggle("SkyOn", {
-    Text = "Enable Custom Sky",
+Combat_Gun_R:AddToggle("NoRecoil", {
+    Text = "No Recoil",
     Default = false,
     Callback = function(v)
-        if v then 
-            applySky() 
-        else 
-            removeSky() 
+        GunCFG.NoRecoil = v
+        patchGun()
+    end
+})
+
+Combat_Gun_R:AddToggle("NoSpread", {
+    Text = "No Spread",
+    Default = false,
+    Callback = function(v)
+        GunCFG.NoSpread = v
+        patchGun()
+    end
+})
+
+Combat_Gun_R:AddToggle("FastShoot", {
+    Text = "Rapid Fire",
+    Default = false,
+    Callback = function(v)
+        GunCFG.FastShoot = v
+        patchGun()
+    end
+})
+
+-- ═══════════════════════════════════════════
+-- VISUAL TAB (World, Hit Numbers, Hit Sounds)
+-- ═══════════════════════════════════════════
+
+-- World Visuals (Left)
+local Visual_World_L = Tabs.Visuals:AddLeftGroupbox("World")
+
+Visual_World_L:AddToggle("CustomSky", {
+    Text = "Custom Skybox",
+    Default = false,
+    Callback = function(v)
+        if v then
+            applySky()
+        else
+            removeSky()
         end
     end
 })
 
-WD_L:AddButton({
-    Text = "Enable Dark Sky + Snow",
-    Func = function()
-        local DARK_SKY_ID = "rbxassetid://16553660713"
-        local sky = Lighting:FindFirstChildOfClass("Sky")
-        if not sky then 
-            sky = Instance.new("Sky")
-            sky.Name = "CustomSky"
-            sky.Parent = Lighting 
+Visual_World_L:AddToggle("Snow", {
+    Text = "Snow Particles",
+    Default = false,
+    Callback = function(v)
+        if v then
+            enableSnow()
+        else
+            if snowPart then
+                snowPart:Destroy()
+                snowPart = nil
+            end
         end
-        for _, prop in ipairs({"SkyboxBk","SkyboxDn","SkyboxFt","SkyboxLf","SkyboxRt","SkyboxUp"}) do
-            sky[prop] = DARK_SKY_ID
-        end
-        enableSnow()
-        Library:Notify("Dark Sky + Snow enabled", 4)
     end
 })
 
-WD_R:AddLabel("Screen Tint"):AddColorPicker("WorldTint", {
-    Default = Color3.fromRGB(255, 255, 255),
-    Callback = function(v) 
-        colorCorrection.TintColor = v 
-    end
-})
-
-WD_R:AddSlider("WorldSat", {
+Visual_World_L:AddSlider("Saturation", {
     Text = "Saturation",
     Default = 0,
     Min = -1,
     Max = 1,
-    Rounding = 1,
-    Callback = function(v) 
-        colorCorrection.Saturation = v 
+    Rounding = 2,
+    Callback = function(v)
+        colorCorrection.Saturation = v
     end
 })
 
-WD_R:AddSlider("WorldCon", {
+Visual_World_L:AddSlider("Contrast", {
     Text = "Contrast",
-    Default = 0,
+    Default = 0.1,
     Min = -1,
     Max = 1,
-    Rounding = 1,
-    Callback = function(v) 
-        colorCorrection.Contrast = v 
+    Rounding = 2,
+    Callback = function(v)
+        colorCorrection.Contrast = v
     end
 })
 
-WD_R:AddSlider("WorldBlur", {
-    Text = "Blur",
+Visual_World_L:AddSlider("Blur", {
+    Text = "Blur Size",
     Default = 0,
     Min = 0,
     Max = 24,
     Rounding = 0,
-    Callback = function(v) 
-        blurEffect.Size = v 
+    Callback = function(v)
+        blurEffect.Size = v
     end
 })
 
-WD_R:AddSlider("WorldBright", {
-    Text = "Brightness",
-    Default = 1,
-    Min = 0,
-    Max = 5,
-    Rounding = 1,
-    Callback = function(v) 
-        Lighting.Brightness = v 
+-- Hit Numbers (Right)
+local Visual_Hits_R = Tabs.Visuals:AddRightGroupbox("Hit Indicators")
+
+Visual_Hits_R:AddToggle("HitNumbers", {
+    Text = "Show Hit Numbers",
+    Default = true,
+    Callback = function(v)
+        hitEnabled = v
     end
 })
 
-WD_S:AddButton({
-    Text = "Enable Hit Sounds",
-    Func = function() 
-        enableHitSounds() 
+Visual_Hits_R:AddColorPicker("HitColor", {
+    Text = "Hit Number Color",
+    Default = Color3.fromRGB(255, 20, 147),
+    Callback = function(v)
+        hitColor = v
     end
 })
 
--- Misc Tab
-local MS_L = Tabs.Misc:AddLeftGroupbox("AC Bypass Info")
-MS_L:AddLabel("AC Bypass: Active on load")
-MS_L:AddLabel("Method: No Player:GetMouse() + cloneref")
+Visual_Hits_R:AddSlider("HitStayTime", {
+    Text = "Display Duration",
+    Default = 5,
+    Min = 1,
+    Max = 10,
+    Rounding = 0,
+    Suffix = "s",
+    Callback = function(v)
+        hitStayTime = v
+    end
+})
 
--- Settings Tab
-local ST_R = Tabs.Settings:AddRightGroupbox("Stop All")
-
-ST_R:AddButton({
-    Text = "Stop All Features",
-    Func = function()
-        AimbotCFG.On = false
-        lockedTarget = nil
-        lockTimer = 0
-        resetDelayedPos()
-        
-        SAHookCFG.On = false
-        stopSAHook()
-        
-        RageCFG.On = false
-        stopRagebot()
-        
-        TriggerbotCFG.On = false
-        stopTriggerbot()
-        
-        GunCFG.NoRecoil = false
-        GunCFG.NoSpread = false
-        GunCFG.FastShoot = false
-        patchGun()
-        
-        removeSky()
-        colorCorrection.Saturation = 0
-        colorCorrection.Contrast = 0.1
-        blurEffect.Size = 0
-        Lighting.Brightness = 1
-        
-        if fovCircle then 
-            fovCircle.Visible = false 
+Visual_Hits_R:AddToggle("HitSounds", {
+    Text = "Custom Hit Sounds",
+    Default = false,
+    Callback = function(v)
+        if v then
+            enableHitSounds()
         end
-        if saFovCircle then 
-            saFovCircle.Visible = false 
-        end
-        
-        crosshairImg.ImageTransparency = 1
-        UIS.MouseIconEnabled = true
-        
-        Library:Notify("All features stopped", 3)
     end
 })
 
-ST_R:AddButton({
-    Text = "Unload UI",
-    Func = function() 
-        Library:Unload() 
-    end
-})
-
--- Theme & Save Manager
-ThemeManager:SetLibrary(Library)
-SaveManager:SetLibrary(Library)
-SaveManager:IgnoreThemeSettings()
-SaveManager:SetIgnoreIndexes({})
-ThemeManager:SetFolder("RivalsTool")
-SaveManager:SetFolder("RivalsTool")
-SaveManager:BuildConfigSection(Tabs.Settings)
-ThemeManager:ApplyToTab(Tabs.Settings)
-SaveManager:LoadAutoloadConfig()
+Visual_Hits_R:AddLabel("Replaces default hit sounds with custom ones")
 
 -- ═══════════════════════════════════════════
--- MAIN LOOP
+-- MISC TAB (Movement, Other Features)
 -- ═══════════════════════════════════════════
-RunService.RenderStepped:Connect(function(dt)
-    camera = Workspace.CurrentCamera
-    local center = getScreenCenter()
 
-    crosshairImg.Position = UDim2.new(0.5, 0, 0.5, 0)
+-- Movement (Left)
+local Misc_Move_L = Tabs.Misc:AddLeftGroupbox("Movement")
 
-    if fovCircle then
-        fovCircle.Position = center
-        fovCircle.Radius = AimbotCFG.MaxFOV
-        if AimbotCFG.FOVStyle ~= "Invisible" then
-            fovCircle.Visible = AimbotCFG.DrawFOV and AimbotCFG.On
+Misc_Move_L:AddToggle("InfDoubleJump", {
+    Text = "Infinite Double Jump",
+    Default = false,
+    Callback = function(v)
+        MovementCFG.InfiniteDoubleJump = v
+        if v then
+            enableInfiniteDoubleJump()
         else
-            fovCircle.Visible = false
+            disableInfiniteDoubleJump()
         end
     end
-    
-    if saFovCircle then
-        saFovCircle.Position = center
-        saFovCircle.Radius = SAHookCFG.IgnoreFOV and 0 or saGetEffectiveFOV()
-        saFovCircle.Visible = SAHookCFG.DrawFOV and SAHookCFG.On and not SAHookCFG.IgnoreFOV
-    end
+})
 
-    if AimbotCFG.On and CameraController then
-        if isInReaction then
-            reactionTimer = reactionTimer - dt
-            if reactionTimer <= 0 then 
-                isInReaction = false 
-            end
+Misc_Move_L:AddSlider("JumpPower", {
+    Text = "Jump Power Multiplier",
+    Default = 1,
+    Min = 1,
+    Max = 3,
+    Rounding = 1,
+    Callback = function(v)
+        MovementCFG.JumpPowerMultiplier = v
+        if MovementCFG.InfiniteDoubleJump then
+            enableJumpPowerModifier()
         end
+    end
+})
+
+Misc_Move_L:AddButton({
+    Text = "Reset Jump Power",
+    Func = function()
+        MovementCFG.JumpPowerMultiplier = 1
+        if Options.JumpPower then
+            Options.JumpPower:SetValue(1)
+        end
+        disableJumpPowerModifier()
+    end
+})
+
+-- Other Features (Right)
+local Misc_Other_R = Tabs.Misc:AddRightGroupbox("Other")
+
+Misc_Other_R:AddButton({
+    Text = "Rejoin Server",
+    Func = function()
+        game:GetService("TeleportService"):Teleport(game.PlaceId, LP)
+    end
+})
+
+Misc_Other_R:AddButton({
+    Text = "Server Hop",
+    Func = function()
+        local HttpService = game:GetService("HttpService")
+        local TeleportService = game:GetService("TeleportService")
+        local ApiUrl = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
         
-        if not isInReaction then
-            if lockedTarget and not isTargetStillValid(lockedTarget) then
-                lockedTarget = nil
-                lockTimer = 0
-                resetDelayedPos()
-            end
-            
-            if not lockedTarget then
-                local newT = findNewAimbotTarget()
-                if newT then
-                    lockedTarget = newT
-                    lockTimer = 0
-                    resetDelayedPos()
-                    isInReaction = true
-                    reactionTimer = AimbotCFG.ReactionTime / 1000
-                end
-            end
-            
-            if lockedTarget then
-                lockTimer = lockTimer + dt
-                if lockTimer > AimbotCFG.ForgotTime then
-                    lockedTarget = nil
-                    lockTimer = 0
-                    resetDelayedPos()
-                else
-                    if isInAimbotFOV(lockedTarget) then
-                        local aimPos = getDelayedPos(lockedTarget, dt)
-                        if aimPos then
-                            local sm = math.clamp(1 / math.max(AimbotCFG.Smoothness, 0.1), 0.01, 1)
-                            pcall(function()
-                                local cp  = camera.CFrame.Position
-                                local du  = (aimPos - cp).Unit
-                                local tP  = math.asin(math.clamp(du.Y, -1, 1))
-                                local tY  = math.atan2(-du.X, -du.Z)
-                                local cur = CameraController.Rotation
-                                CameraController:SetRotation(Vector2.new(
-                                    cur.X + (tP - cur.X) * sm,
-                                    cur.Y + angleDiff(cur.Y, tY) * sm
-                                ))
-                            end)
-                        end
-                    else
-                        lockedTarget = nil
-                        lockTimer = 0
-                        resetDelayedPos()
+        local success, result = pcall(function()
+            return game:HttpGet(ApiUrl)
+        end)
+        
+        if success then
+            local data = HttpService:JSONDecode(result)
+            if data and data.data then
+                for _, server in ipairs(data.data) do
+                    if server.id ~= game.JobId and server.playing < server.maxPlayers then
+                        TeleportService:TeleportToPlaceInstance(game.PlaceId, server.id, LP)
+                        break
                     end
                 end
             end
         end
     end
-end)
+})
 
 -- ═══════════════════════════════════════════
--- LOAD COMPLETE
+-- SETTINGS TAB (Theme Manager, Save Manager)
 -- ═══════════════════════════════════════════
-Library:Notify("Rivals Tool loaded — " .. (IsMobile and "MOBILE" or "PC") .. " | AC Safe", 6)
-print("[RIVALS TOOL] " .. (IsMobile and "MOBILE" or "PC"))
-print("[AC] Using UserInputService:GetMouseLocation() instead of Player:GetMouse()")
-print("[AC] All services cloned with cloneref")
-print("[FIX] Triggerbot works with all weapons")
+
+local MenuGroup = Tabs.Settings:AddLeftGroupbox("Menu")
+
+MenuGroup:AddButton("Unload", function() Library:Unload() end)
+MenuGroup:AddLabel("Menu bind"):AddKeyPicker("MenuKeybind", { Default = "RightShift", NoUI = true, Text = "Menu keybind" })
+
+Library.ToggleKeybind = Options.MenuKeybind
+
+ThemeManager:SetLibrary(Library)
+SaveManager:SetLibrary(Library)
+
+SaveManager:IgnoreThemeSettings()
+SaveManager:SetIgnoreIndexes({ "MenuKeybind" })
+
+ThemeManager:SetFolder("RivalsTool")
+SaveManager:SetFolder("RivalsTool/main")
+
+SaveManager:BuildConfigSection(Tabs.Settings)
+ThemeManager:ApplyToTab(Tabs.Settings)
+
+SaveManager:LoadAutoloadConfig()
+
+-- ═══════════════════════════════════════════
+-- MAIN LOOPS
+-- ═══════════════════════════════════════════
+
+RunService.RenderStepped:Connect(function()
+    local dt = RunService.Heartbeat:Wait()
+    
+    -- Update FOV Circles
+    local center = getScreenCenter()
+    
+    fovCircle.Position = center
+    fovCircle.Radius = getEffectiveFOV()
+    applyFOVStyle(fovCircle, AimbotCFG.FOVStyle)
+    
+    saFovCircle.Position = center
+    saFovCircle.Radius = saGetEffectiveFOV()
+    if SAHookCFG.DrawFOV and SAHookCFG.On and not SAHookCFG.IgnoreFOV then
+        saFovCircle.Visible = true
+    else
+        saFovCircle.Visible = false
+    end
+    
+    -- Aimbot Logic
+    if AimbotCFG.On then
+        if not lockedTarget or not isTargetStillValid(lockedTarget) then
+            lockTimer = lockTimer + dt
+            if lockTimer >= (AimbotCFG.ForgotTime / 10) then
+                lockedTarget = findNewAimbotTarget()
+                lockTimer = 0
+                reactionTimer = 0
+                isInReaction = true
+                resetDelayedPos()
+            end
+        else
+            lockTimer = 0
+        end
+        
+        if lockedTarget and lockedTarget.Parent then
+            if isInReaction then
+                reactionTimer = reactionTimer + (dt * 1000)
+                if reactionTimer >= AimbotCFG.ReactionTime then
+                    isInReaction = false
+                end
+            else
+                local delayedPos = getDelayedPos(lockedTarget, dt)
+                if delayedPos and CameraController then
+                    local targetCFrame = CFrame.new(camera.CFrame.Position, delayedPos)
+                    local smoothFactor = math.clamp(AimbotCFG.Smoothness / 100, 0.01, 1)
+                    local newRotation = camera.CFrame:Lerp(targetCFrame, smoothFactor)
+                    CameraController:SetRotation(newRotation.Rotation)
+                end
+            end
+        end
+    else
+        lockedTarget = nil
+        lockTimer = 0
+        reactionTimer = 0
+        isInReaction = false
+        resetDelayedPos()
+    end
+end)
+
+-- Cleanup on error/close
+game:GetService("CoreGui").ChildRemoved:Connect(function(child)
+    if child.Name == "RivalsTool" then
+        fovCircle:Remove()
+        saFovCircle:Remove()
+        stopTriggerbot()
+        stopSAHook()
+        stopEnhancedRagebot()
+        disableInfiniteDoubleJump()
+        disableJumpPowerModifier()
+        removeSky()
+        if snowPart then
+            snowPart:Destroy()
+        end
+        colorCorrection:Destroy()
+        blurEffect:Destroy()
+        hitNumberGui:Destroy()
+    end
+end)
+
+-- Initial notification
+Library:Notify("Rivals Tool Loaded Successfully!", 5)
+Library:Notify("Press RightShift to toggle menu", 5)

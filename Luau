@@ -1,7 +1,7 @@
 --[[
     RIVALS TOOL — Anti-Cheat Safe Edition
     Fixes: Removed Player:GetMouse() references, added cloneref bypasses, safer hooking
-    Added: Infinite Double Jump, Jump Power, Slide Boost, Skin Changer + Animation Hook
+    Added: Infinite Double Jump, Jump Power, Slide Boost, New Skin Changer + Material Changer
 ]]
 
 -- ═══════════════════════════════════════════
@@ -15,7 +15,7 @@ local UIS               = cloneref(game:GetService("UserInputService"))
 local ReplicatedStorage = cloneref(game:GetService("ReplicatedStorage"))
 local Lighting          = cloneref(game:GetService("Lighting"))
 local TweenService      = cloneref(game:GetService("TweenService"))
-local ReplicatedFirst   = cloneref(game:GetService("ReplicatedFirst"))
+local HttpService        = cloneref(game:GetService("HttpService"))
 local Workspace         = cloneref(game:GetService("Workspace"))
 
 local LP       = Players.LocalPlayer
@@ -25,20 +25,12 @@ local camera   = Workspace.CurrentCamera
 -- ═══════════════════════════════════════════
 -- ANTI-CHEAT BYPASS
 -- ═══════════════════════════════════════════
-if hookmetamethod then
-    if not game:IsLoaded() then game.Loaded:Wait() end
-    pcall(function()
-        for _, v in getgc() do
-            if typeof(v) == "function" then
-                local ok, s = pcall(debug.info, v, "s")
-                if ok and s and string.find(s, "AnalyticsPipelineController") then
-                    hookfunction(v, function()
-                        while true do task.wait(9e9) end
-                    end)
-                end
-            end
-        end
-    end)
+for v53, v54 in getgc() do
+    if ((typeof(v54) == 'function') and string.find(debug.info(v54, 's'), 'AnalyticsPipelineController')) then
+        hookfunction(v54, function()
+            return task.wait(8999999488)
+        end)
+    end
 end
 
 -- ═══════════════════════════════════════════
@@ -120,7 +112,435 @@ local TriggerbotCFG = {
 }
 
 local MechCFG = {InfDoubleJump = false, JumpPower = 1, SlideBoost = false}
-local SkinChangerCFG = {On = false}
+
+-- ═══════════════════════════════════════════
+-- SKIN CHANGER CONFIG & STATE
+-- ═══════════════════════════════════════════
+local SC_FOLDER        = 'WeaponSkinsConfigs'
+local SC_DEFAULT_FILE  = 'default.json'
+local localPlayerName  = LP.Name
+local viewModels       = LP.PlayerScripts.Assets.ViewModels
+
+local skinConfig = {
+    AutoLoadConfig   = true,
+    LastLoadedConfig = 'default',
+    ActiveSkins      = {},
+    CurrentMaterial  = 'None',
+    MaterialEnabled  = false,
+    Transparency     = 0,
+}
+
+local activeSkinMap    = {}
+local currentWeaponSel = nil
+local skinDropdown     = nil
+local weaponDropdown   = nil
+local materialToggle   = nil
+local materialDropdown = nil
+local transparencySlider = nil
+local autoLoadToggle   = nil
+
+-- ═══════════════════════════════════════════
+-- SKIN CHANGER — WEAPON/SKIN TABLE
+-- ═══════════════════════════════════════════
+local WEAPON_SKINS = {
+    ['Assault Rifle'] = {
+        'AK-47','AUG','Tommy Gun','Phoenix Rifle','Boneclaw Rifle',
+        '10B Visits','AKEY-47','Soul Rifle','Glorious Assault Rifle',
+    },
+    Bow = {
+        'Compound Bow','Raven Bow','Dream Bow','Bat Bow',
+        'Frostbite Bow','Key Bow','Glorious Bow',
+    },
+    ['Burst Rifle'] = {
+        'Aqua Burst','Electro Rifle','FAMAS','Pine Burst',
+        'Spectral Burst','Pixel Burst','Keyst Rifle','Glorious Burst Rifle',
+    },
+    Chainsaw = {
+        'Blobsaw','Handsaws','Mega Drill','Buzzsaw','Glorious Chainsaw',
+    },
+    RPG = {
+        'Nuke Launcher','RPKEY','Spaceship Launcher','Pencil Launcher',
+        'Squid Launcher','Pumpkin Launcher','Showball Launcher','Glorious RPG',
+    },
+    Exogun = {
+        'Singularity','Wondergun','Exogourd','Ray Gun',
+        'Repulsor','Midnight Festive Exogun','Glorious Exogun',
+    },
+    Fists = {
+        'Boxing Gloves','Brass Knuckles','Fists of Hurt',
+        'Festive Fists','Pumpkin Claws','Glorious Fists',
+    },
+    Flamethrower = {
+        'Lamethrower','Pixel Flamethrower','Glitterthrower',
+        "Jack O' Thrower",'Snowblower','Glorious Flamethrower',
+    },
+    ['Flare Gun'] = {
+        'Dynamite Gun','Firework Gun','Banana Flare',
+        'Wrapped Flare Gun','Glorious Flare Gun',
+    },
+    ['Freeze Ray'] = {
+        'Bubble Ray','Temporal Ray','Gum Ray',
+        'Wrapped Freeze Ray','Glorious Freeze Ray',
+    },
+    Grenade = {
+        'Water Balloon','Whoopee Cushion','Dynamite','Frozen Grenade',
+        'Spooky Grenade','Soul Grenade','Keynade','Glorious Grenade',
+    },
+    ['Grenade Launcher'] = {
+        'Swashbuckler','Uranium Launcher',
+        'Gearnade Launcher','Glorious Grenade Launcher',
+    },
+    Handgun = {
+        'Blaster','Gumball Handgun','Pumpkin Handgun','Towerstone Handgun',
+        'Warp Handgun','Gingerbread Handgun','Pixel Handgun',
+        'Snowball Gun','Glorious Handgun',
+    },
+    Katana = {
+        'Lightning Bolt','Saber','Stellar Katana','Ice Katana','Pixel Katana',
+        'New Years Katana','Arch Katana','Keytana','Glorious Katana',
+    },
+    Minigun = {
+        'Lasergun 3000','Pixel Minigun','Fighter Jet',
+        'Pumpkin Minigun','Wrapped Minigun','Glorious Minigun',
+    },
+    ['Paintball Gun'] = {
+        'Boba Gun','Slime Gun','Ketchup Gun','Glorious Paintball Gun',
+    },
+    Revolver = {
+        'Sheriff','Desert Eagle','Peppergun',
+        'Boneclaw Revolver','Keyvolver','Glorious Revolver',
+    },
+    Slingshot = {
+        'Goalpost','Stick','Harp','Boneshot',
+        'Reindeer Slingshot','Glorious Slingshot',
+    },
+    ['Subspace Tripmine'] = {
+        "Don't Press",'Spring','DIY Tripmine',
+        'Trick or Treat','Glorious Subspace Tripmine',
+    },
+    Uzi = {
+        'Electro Uzi','Water Uzi','Money Gun',
+        'Pine Uzi','Keyzi','Glorious Uzi',
+    },
+    Sniper = {
+        'Pixel Sniper','Hyper Sniper','Event Horizon','Eyething Sniper',
+        'Gingerbread Sniper','Keyper','Glorious Sniper',
+    },
+    Knife = {
+        'Karambit','Chancla','Balisong','Machete',
+        'Keyrambit','Keylisong','Glorious Knife',
+    },
+    Shotgun = {
+        'Balloon Shotgun','Cactus Shotgun','Wrapped Shotgun',
+        'Broomstick Shotgun','Hyper Shotgun','Shotkey','Glorious Shotgun',
+    },
+    Crossbow = {
+        'Pixel Crossbow','Violin Crossbow','Crossbone','Harpoon Crossbow',
+        'Frostbite Crossbow','Arch Crossbow','Glorious Crossbow',
+    },
+    Daggers = {
+        'Aces','Paper Planes','Shurikens','Bat Daggers',
+        'Cookies','Keynais','Glorious Daggers',
+    },
+    Distortion = {
+        'Plasma Distortion','Cyber Distortion','Magma Distortion',
+        'Electropunk Distortion','Sleighstortion','Glorious Distortion',
+    },
+    ['Energy Rifle'] = {
+        'Hacker Rifle','Void Rifle','New Year Energy Rifle',
+        'Apex Rifle','Hydro Rifle','Glorious Energy Rifle',
+    },
+    ['Energy Pistols'] = {
+        'Void Pistols','Hydro Pistols','New Years Energy Pistols',
+        'Soul Pistols','Glorious Energy Pistols',
+    },
+    Gunblade = {
+        'Hyper Gunblade','Gunsaw','Boneblade',
+        "Crude Gunblade","Elf's Gunblade",'Glorious Gunblade',
+    },
+    ['Battle Axe'] = {
+        'The Shred','Ban Axe','Cerulean Axe',
+        'Nordic Axe','Keytle Axe','Glorious Battleaxe',
+    },
+    ['Riot Shield'] = {
+        'Door','Masterpiece','Sled',
+        'Tombstone Shield','Glorious Riot Shield',
+    },
+    Scythe = {
+        'Scythe of Death','Sakura Scythe','Bat Scythe',
+        'Keythe','Glorious Scythe',
+    },
+    Trowel = {
+        'Plastic Shovel','Paintbrush','Snow Shovel','Glorious Trowel',
+    },
+    Medkit = {
+        'Sandwich','Medkitty','Coffee','Glorious Medkit',
+    },
+    Molotov = {
+        'Coffee','Torch','Lava Lamp','Glorious Molotov',
+    },
+    Satchel = {
+        "Bag O' Money",'Notebook Satchel','Suspicious Gift',
+        'Advanced Satchel','Glorious Satchel',
+    },
+    ['Smoke Grenade'] = {
+        'Emoji Cloud','Balance','Hourglass','Glorious Smoke Grenade',
+    },
+    ['War Horn'] = {
+        'Trumpet','Air Horn','Megaphone','Mammoth Horn',
+        'Boneclaw Horn','Glorious War Horn',
+    },
+    Warpstone = {
+        'Cyber Warpstone','Bonestone','Electropunk Warpstone',
+        'Warpbone','Glorious Warpstone',
+    },
+    Flashbang = {'Pixel Flashbang','Glorious Flashbang'},
+    ['Jump Pad'] = {'Glorious Jump Pad'},
+    Warper = {'Glorious Warper'},
+}
+
+local MATERIAL_LIST = {
+    'Plastic','SmoothPlastic','Neon','Metal','Wood','WoodPlanks','Marble',
+    'Slate','Concrete','Granite','Brick','Pebble','Cobblestone','CorrodedMetal',
+    'DiamondPlate','Foil','Glass','Grass','Ice','Sand','Fabric','ForceField',
+}
+
+-- ═══════════════════════════════════════════
+-- SKIN CHANGER — CORE FUNCTIONS
+-- ═══════════════════════════════════════════
+
+-- Apply a skin to a weapon by swapping children in ViewModels
+local function SC_ApplySkin(weaponName, skinName, enable)
+    if not weaponName then return end
+
+    -- Find weapon folder in ViewModels
+    local weaponFolder = nil
+    for _, v in ipairs(viewModels:GetDescendants()) do
+        if v.Name == weaponName then
+            weaponFolder = v
+            break
+        end
+    end
+    if not weaponFolder then return end
+
+    if enable then
+        if not skinName then return end
+
+        -- Find skin folder
+        local skinFolder = nil
+        for _, v in ipairs(viewModels:GetDescendants()) do
+            if v.Name == skinName then
+                skinFolder = v
+                break
+            end
+        end
+        if not skinFolder then return end
+
+        -- Swap children
+        weaponFolder:ClearAllChildren()
+        for _, child in ipairs(skinFolder:GetChildren()) do
+            child:Clone().Parent = weaponFolder
+        end
+
+        activeSkinMap[weaponName]             = skinName
+        skinConfig.ActiveSkins[weaponName]    = skinName
+    else
+        activeSkinMap[weaponName]          = nil
+        skinConfig.ActiveSkins[weaponName] = nil
+    end
+end
+
+-- Apply material to all visible parts of active viewmodels
+local function SC_ApplyMaterial(materialName)
+    if not skinConfig.MaterialEnabled then return end
+    skinConfig.CurrentMaterial = materialName
+
+    local tempVMs = ReplicatedStorage.Assets.Temp.ViewModels
+    for _, child in ipairs(tempVMs:GetChildren()) do
+        if string.find(child.Name, localPlayerName .. ' -', 1, true) == 1 then
+            local itemVisual = child:FindFirstChild('ItemVisual')
+            if itemVisual then
+                for _, part in ipairs(itemVisual:GetDescendants()) do
+                    if (part:IsA('MeshPart') or part:IsA('BasePart') or part:IsA('Part'))
+                        and not string.find(string.lower(part.Name), 'primary') then
+                        part.Material = Enum.Material[materialName]
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- Apply transparency to all visible parts of active viewmodels
+local function SC_ApplyTransparency(pct)
+    if not skinConfig.MaterialEnabled then return end
+    skinConfig.Transparency = pct
+
+    local tempVMs = ReplicatedStorage.Assets.Temp.ViewModels
+    for _, child in ipairs(tempVMs:GetChildren()) do
+        if string.find(child.Name, localPlayerName .. ' -', 1, true) == 1 then
+            local itemVisual = child:FindFirstChild('ItemVisual')
+            if itemVisual then
+                for _, part in ipairs(itemVisual:GetDescendants()) do
+                    if (part:IsA('MeshPart') or part:IsA('BasePart') or part:IsA('Part'))
+                        and not string.find(string.lower(part.Name), 'primary') then
+                        part.Transparency = pct / 100
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- Watch for new viewmodel items being added/removed and re-apply material/transparency
+local function SC_WatchViewModels()
+    local tempVMs = ReplicatedStorage.Assets.Temp.ViewModels
+
+    tempVMs.ChildAdded:Connect(function(child)
+        if not skinConfig.MaterialEnabled then return end
+        task.wait(0.1)
+        if string.find(child.Name, localPlayerName .. ' -', 1, true) == 1 then
+            local itemVisual = child:FindFirstChild('ItemVisual')
+            if itemVisual then
+                SC_ApplyMaterial(skinConfig.CurrentMaterial)
+                SC_ApplyTransparency(skinConfig.Transparency)
+            end
+        end
+    end)
+
+    tempVMs.ChildRemoved:Connect(function(child)
+        if not skinConfig.MaterialEnabled then return end
+        task.wait(0.1)
+        if string.find(child.Name, localPlayerName .. ' -', 1, true) == 1 then
+            local itemVisual = child:FindFirstChild('ItemVisual')
+            if itemVisual then
+                SC_ApplyMaterial(skinConfig.CurrentMaterial)
+                SC_ApplyTransparency(skinConfig.Transparency)
+            end
+        end
+    end)
+end
+
+-- ═══════════════════════════════════════════
+-- SKIN CHANGER — CONFIG SYSTEM
+-- ═══════════════════════════════════════════
+
+local function SC_GetConfigList()
+    if not isfolder(SC_FOLDER) then return {} end
+    local list = {}
+    local ok, files = pcall(listfiles, SC_FOLDER)
+    if ok and files then
+        for _, path in pairs(files) do
+            local name = path:match('([^/\\]+)%.json$')
+            if name then table.insert(list, name) end
+        end
+    end
+    return list
+end
+
+local function SC_SaveConfig(configName)
+    if not configName or configName == '' then configName = 'default' end
+    if not isfolder(SC_FOLDER) then makefolder(SC_FOLDER) end
+
+    local path = SC_FOLDER .. '/' .. configName .. '.json'
+    local data = {
+        AutoLoadConfig   = skinConfig.AutoLoadConfig,
+        LastLoadedConfig = configName,
+        ActiveSkins      = skinConfig.ActiveSkins,
+        CurrentMaterial  = skinConfig.CurrentMaterial,
+        MaterialEnabled  = skinConfig.MaterialEnabled,
+        Transparency     = skinConfig.Transparency,
+    }
+    local ok, err = pcall(writefile, path, HttpService:JSONEncode(data))
+    if ok then
+        Library:Notify("Config '" .. configName .. "' saved!", 2)
+        return true
+    else
+        Library:Notify('Failed to save config: ' .. tostring(err), 3)
+        return false
+    end
+end
+
+local function SC_LoadConfig(configName)
+    if not configName or configName == '' then configName = 'default' end
+    local path = SC_FOLDER .. '/' .. configName .. '.json'
+
+    if not isfile(path) then
+        Library:Notify("Config '" .. configName .. "' not found!", 2)
+        return false
+    end
+
+    local readOk, raw = pcall(readfile, path)
+    if not readOk then Library:Notify('Failed to read config: ' .. tostring(raw), 3); return false end
+
+    local decodeOk, data = pcall(function() return HttpService:JSONDecode(raw) end)
+    if not decodeOk or not data then Library:Notify('Failed to decode config: ' .. tostring(data), 3); return false end
+
+    skinConfig.AutoLoadConfig   = data.AutoLoadConfig or true
+    skinConfig.ActiveSkins      = data.ActiveSkins or {}
+    skinConfig.CurrentMaterial  = data.CurrentMaterial or 'SmoothPlastic'
+    skinConfig.MaterialEnabled  = data.MaterialEnabled or false
+    skinConfig.Transparency     = data.Transparency or 0
+    skinConfig.LastLoadedConfig = configName
+
+    -- Re-apply all skins
+    for weaponName, skinName in pairs(skinConfig.ActiveSkins) do
+        SC_ApplySkin(weaponName, skinName, true)
+    end
+
+    -- Re-apply material/transparency
+    if skinConfig.MaterialEnabled then
+        SC_ApplyMaterial(skinConfig.CurrentMaterial)
+        SC_ApplyTransparency(skinConfig.Transparency)
+    end
+
+    -- Sync UI toggles/dropdowns
+    if materialToggle   then materialToggle:SetValue(skinConfig.MaterialEnabled)   end
+    if materialDropdown then materialDropdown:SetValue(skinConfig.CurrentMaterial) end
+    if transparencySlider then transparencySlider:SetValue(skinConfig.Transparency) end
+    if autoLoadToggle   then autoLoadToggle:SetValue(skinConfig.AutoLoadConfig)    end
+
+    -- Sync weapon/skin dropdowns to first active skin
+    local firstWeapon, firstSkin = next(skinConfig.ActiveSkins)
+    if firstWeapon and firstSkin then
+        if weaponDropdown then weaponDropdown:SetValue(firstWeapon) end
+        if skinDropdown and WEAPON_SKINS[firstWeapon] then
+            skinDropdown:SetValues(WEAPON_SKINS[firstWeapon])
+            skinDropdown:SetValue(firstSkin)
+        end
+        currentWeaponSel = firstWeapon
+    end
+
+    Library:Notify("Config '" .. configName .. "' loaded!", 2)
+    return true
+end
+
+local function SC_DeleteConfig(configName)
+    if not configName or configName == '' or configName == 'default' then
+        Library:Notify('Cannot delete default config!', 2)
+        return false
+    end
+    local path = SC_FOLDER .. '/' .. configName .. '.json'
+    if not isfile(path) then Library:Notify("Config '" .. configName .. "' not found!", 2); return false end
+    local ok, err = pcall(delfile, path)
+    if ok then
+        Library:Notify("Config '" .. configName .. "' deleted!", 2)
+    else
+        Library:Notify('Failed to delete config: ' .. tostring(err), 3)
+    end
+    return ok
+end
+
+local function SC_AutoLoad()
+    if not isfolder(SC_FOLDER) then makefolder(SC_FOLDER) end
+    if skinConfig.AutoLoadConfig then
+        local target = skinConfig.LastLoadedConfig or 'default'
+        if isfile(SC_FOLDER .. '/' .. target .. '.json') then
+            SC_LoadConfig(target)
+            Library:Notify('Auto-loaded config: ' .. target, 2)
+        end
+    end
+end
 
 -- ═══════════════════════════════════════════
 -- CHARACTER SETUP
@@ -154,7 +574,6 @@ local ws      = cloneref(game:GetService("Workspace"))
 
 local sa_util_mod, sa_enums_mod, sa_fighter_mod = nil, nil, nil
 local gun_mod, util_mod, enums_mod, fighter_mod  = nil, nil, nil, nil
-local skinLib, animLib                           = nil, nil
 local MechanicsCtrl                              = nil
 
 pcall(function()
@@ -163,13 +582,10 @@ pcall(function()
     sa_fighter_mod = require(LP.PlayerScripts.Controllers.FighterController)
 end)
 pcall(function()
-    gun_mod    = require(LP.PlayerScripts.Modules.ItemTypes.Gun)
-    util_mod   = require(rs.Modules.Utility)
-    enums_mod  = require(rs.Modules.EnumLibrary)
+    util_mod    = require(rs.Modules.Utility)
+    enums_mod   = require(rs.Modules.EnumLibrary)
     fighter_mod = require(LP.PlayerScripts.Controllers.FighterController)
 end)
-pcall(function() skinLib = require(ReplicatedStorage.Modules.ItemLibrary)      end)
-pcall(function() animLib = require(ReplicatedStorage.Modules.AnimationLibrary) end)
 pcall(function() MechanicsCtrl = require(LP.PlayerScripts.Controllers.MechanicsController) end)
 
 -- ═══════════════════════════════════════════
@@ -217,345 +633,6 @@ LP.CharacterAdded:Connect(function()
     task.wait(1)
     if MechCFG.InfDoubleJump then startInfDoubleJump() end
     if MechCFG.JumpPower ~= 1 then setJumpPower(MechCFG.JumpPower) end
-end)
-
--- ═══════════════════════════════════════════
--- SKIN CHANGER — TABLES
--- ═══════════════════════════════════════════
-local WEAPON_TO_ANIM_PREFIX = {
-    ["Fists"]="fists",["Knife"]="knife",["Flare Gun"]="flaregun",
-    ["Assault Rifle"]="assaultrifle",["Handgun"]="handgun",["Burst Rifle"]="burstrifle",
-    ["Sniper"]="sniper",["RPG"]="rpg",["Medkit"]="medkit",["Shorty"]="shorty",
-    ["Shotgun"]="shotgun",["Chainsaw"]="chainsaw",["Bow"]="bow",["Katana"]="katana",
-    ["Scythe"]="scythe",["Uzi"]="uzi",["Revolver"]="revolver",["Grenade"]="grenade",
-    ["Molotov"]="molotov",["Flashbang"]="flashbang",["Paintball Gun"]="paintballgun",
-    ["Slingshot"]="slingshot",["Trowel"]="trowel",["Minigun"]="minigun",
-    ["Flamethrower"]="flamethrower",["Exogun"]="exogun",["Grenade Launcher"]="grenadelauncher",
-    ["Freeze Ray"]="freezeray",["Satchel"]="satchel",["Battle Axe"]="battleaxe",
-    ["Riot Shield"]="riotshield",["War Horn"]="warhorn",["Daggers"]="daggers",
-    ["Crossbow"]="crossbow",["Energy Rifle"]="energyrifle",["Energy Pistols"]="energypistols",
-    ["Spray"]="spray",["Gunblade"]="gunblade",["Warper"]="warper",["Distortion"]="distortion",
-    ["Warpstone"]="warpstone",["Subspace Tripmine"]="subspacetripmine",["Jump Pad"]="jumppad",
-    ["Maul"]="maul",["Permafrost"]="permafrost",
-}
-
-local SKIN_TO_ANIM_PREFIX = {
-    ["Karambit"]="karambit",["Balisong"]="balisong",["Caladbolg"]="caladbolg",
-    ["Keyrambit"]="keyrambit",["Keylisong"]="keylisong",["Armature.001"]="armature001",
-    ["Fist"]="fist",["Boxing Gloves"]="boxinggloves",["Fists of Hurt"]="fistsofhurt",
-    ["AUG"]="aug",["Gingerbread AUG"]="gingerbreadaug",["Tommy Gun"]="tommygun",["AKEY-47"]="akey47",
-    ["Hand Gun"]="handgun",["Pixel Handgun"]="pixelhandgun",["Pixel Burst"]="pixelburst",
-    ["FAMAS"]="famas",["Keyst Rifle"]="keystrifle",["Pixel Sniper"]="pixelsniper",
-    ["Event Horizon"]="eventhorizon",["Shotkey"]="shotkey",["Desert Eagle"]="deserteagle",
-    ["Sheriff"]="sheriff",["Peppermint Sheriff"]="peppermintsheriff",["Keyvolver"]="keyvolver",
-    ["Peppergun"]="peppergun",["Pixel Katana"]="pixelkatana",["Keytana"]="keytana",
-    ["Arch Katana"]="archkatana",["Crystal Katana"]="crystalkatana",["Bug Net"]="bugnet",
-    ["Crystal Scythe"]="crystalscythe",["Handsaws"]="handsaws",["Buzzsaw"]="buzzsaw",
-    ["Mega Drill"]="megadrill",["Key Bow"]="keybow",["Money Gun"]="moneygun",["Keyzi"]="keyzi",
-    ["Sandwich"]="sandwich",["Laptop"]="laptop",["Bucket of Candy"]="bucketofcandy",
-    ["Milk & Cookies"]="milkcookies",["Medkitty"]="medkitty",["Box of Chocolates"]="boxofchocolates",
-    ["Banana Flare"]="bananaflare",["Wrapped Flare Gun"]="wrappedflaregun",["Repulsor"]="repulsor",
-    ["Spider Ray"]="spiderray",["Wrapped Freeze Ray"]="wrappedfreezeray",["Bubble Ray"]="bubbleray",
-    ["Pixel Flamethrower"]="pixelflamethrower",["Snowblower"]="snowblower",["Keythrower"]="keythrower",
-    ["Pixel Minigun"]="pixelminigun",["Fighter Jet"]="fighterjet",["Wrapped Minigun"]="wrappedminigun",
-    ["Harpoon Crossbow"]="harpooncrossbow",["Arch Crossbow"]="archcrossbow",
-    ["Pixel Crossbow"]="pixelcrossbow",["Frostbite Crossbow"]="frostbitecrossbow",
-    ["Violin Crossbow"]="violincrossbow",["Keynade"]="keynade",["Cuddle Bomb"]="cuddlebomb",
-    ["Jingle Grenade"]="jinglegrenade",["Hot Coals"]="hotcoals",["Arch Molotov"]="archmolotov",
-    ["Crystal Daggers"]="crystaldaggers",["Keynais"]="keynais",["Harp"]="harp",
-    ["Gunsaw"]="gunsaw",["Warpeye"]="warpeye",["Teleport Disc"]="teleportdisc",["Warpstar"]="warpstar",
-    ["Hotel Bell"]="hotelbell",["Arcane Warper"]="arcanewarper",["Wrapped Shorty"]="wrappedshorty",
-    ["Balloon Shorty"]="balloonshorty",["Bat Bow"]="batbow",["Frostbite Bow"]="frostbitebow",
-    ["Dream Bow"]="dreambow",["Beloved Bow"]="belovedbow",["Balloon Bow"]="balloonbow",
-    ["Raven Bow"]="ravenbow",["Saber"]="saber",["Lightning Bolt"]="lightningbolt",
-    ["Linked Sword"]="linkedsword",["Keythe"]="keythe",["Bat Scythe"]="batscythe",
-    ["Cryo Scythe"]="cryoscythe",["Sakura Scythe"]="sakurascythe",
-    ["Snowball Launcher"]="snowballlauncher",["Gearnade Launcher"]="gearnadelauncher",
-    ["Skull Launcher"]="skulllauncher",["Balloon Launcher"]="balloonlauncher",
-    ["Keyttle Axe"]="keyttleaxe",["Balloon Shotgun"]="balloonshotgun",
-    ["Spray Bottle"]="spraybottle",["Key Spray"]="keyspray",["Hyper Gunblade"]="hypergunblade",
-    ["Crude Gunblade"]="crudegunblade",["Experiment D15"]="experimentd15",
-    ["Plasma Distortion"]="plasmadistortion",["Magma Distortion"]="magmadistortion",
-    ["Sleighstortion"]="sleighstortion",["Cyber Distortion"]="cyberdistortion",
-    ["Electropunk Distortion"]="electropunkdistortion",["Experiment W4"]="experimentw4",
-    ["Glitter Warper"]="glitterwarper",["Frost Warper"]="frostwarper",
-    ["Electropunk Warper"]="electropunkwarper",["Cyber Warpstone"]="cyberwarpstone",
-    ["Warpbone"]="warpbone",["Unstable Warpstone"]="unstablewarpstone",
-    ["Electropunk Warpstone"]="electropunkwarpstone",["Singularity"]="singularity",
-    ["Coffee"]="coffee",["Lava Lamp"]="lavalamp",["Suspicious Gift"]="suspiciousgift",
-    ["Advanced Satchel"]="advancedsatchel",["Potion Satchel"]="potionsatchel",
-    ["Temporal Ray"]="temporalray",["Water Uzi"]="wateruzi",["Electro Uzi"]="electrouzi",
-    ["Demon Uzi"]="demonuzi",["Pine Uzi"]="pineuzi",["Electro Rifle"]="electrorifle",
-    ["Aqua Burst"]="aquaburst",["Spectral Burst"]="spectralburst",["Pine Burst"]="pineburst",
-    ["Hyper Shotgun"]="hypershotgun",["Broomstick"]="broomstick",["Wrapped Shotgun"]="wrappedshotgun",
-    ["Cactus Shotgun"]="cactusshotgun",["Hyper Sniper"]="hypersniper",["Keyper"]="keyper",
-    ["Eyething Sniper"]="eyethingsniper",["Gingerbread Sniper"]="gingerbreadsniper",
-    ["Blaster"]="blaster",["Gumball Handgun"]="gumballhandgun",["Stealth Handgun"]="stealthhandgun",
-    ["Gingerbread Handgun"]="gingerbreadhandgun",["Pumpkin Handgun"]="pumpkinhandgun",
-    ["AK-47"]="ak47",["Boneclaw Rifle"]="boneclawrifle",["Phoenix Rifle"]="phoenixrifle",
-    ["Boneclaw Revolver"]="boneclawrevolver",["Trumpet"]="trumpet",["Mammoth Horn"]="mammothhorn",
-    ["Megaphone"]="megaphone",["Air Horn"]="airhorn",["Boneclaw Horn"]="boneclawhorn",
-    ["Vexed Candle"]="vexedcandle",["Aces"]="aces",["Paper Planes"]="paperplanes",
-    ["Shurikens"]="shurikens",["Bat Daggers"]="batdaggers",["Broken Hearts"]="brokenhearts",
-    ["Cookies"]="cookies",["RPKEY"]="rpkey",["Rocket Launcher"]="rocketlauncher",
-    ["Slime Gun"]="slimegun",["Boba Gun"]="bobagun",["Snowball Gun"]="snowballgun",
-    ["Ketchup Gun"]="ketchupgun",["Paintballoon Gun"]="paintballoongun",
-    ["Void Pistols"]="voidpistols",["Soul Pistols"]="soulpistols",
-    ["Hyperlaser Guns"]="hyperlaserguns",["Void Rifle"]="voidrifle",["Soul Rifle"]="soulrifle",
-    ["Hacker Rifle"]="hackerrifle",["Hydro Rifle"]="hydrorifle",
-    ["New Year Energy Rifle"]="newyearenergyrifle",["Hacker Pistols"]="hackerpistols",
-    ["Hydro Pistols"]="hydropistols",["Apex Pistols"]="apexpistols",
-    ["Dynamite Gun"]="dynamitegun",["Firework Gun"]="fireworkgun",["Vexed Flare Gun"]="vexedflaregun",
-    ["Sleigh Maul"]="sleighmaul",["Ban Hammer"]="banhammer",["Demon Shorty"]="demonshorty",
-    ["The Shred"]="theshred",["Cerulean Axe"]="ceruleanaxe",["Mimic Axe"]="mimicaxe",
-    ["Balloon Axe"]="balloonaxe",["Ban Axe"]="banaxe",["Nordic Axe"]="nordicaxe",
-    ["Energy Shield"]="energyshield",["Disco Ball"]="discoball",["Skullbang"]="skullbang",
-    ["Shining Star"]="shiningstar",["Camera"]="camera",["Nail Gun"]="nailgun",
-    ["Boneclaw Spray"]="boneclawspray",["Pine Spray"]="pinespray",
-    ["Experiment W4"]="experimentw4",["Cyber Warpstone"]="cyberwarpstone",
-    ["Jack O'Thrower"]="jackothrower",["Lamethrower"]="lamethrower",
-    ["Rainbowthrower"]="rainbowthrower",["Glitterthrower"]="glitterthrower",
-}
-
-local COSMETIC_SKIN_TABLE = {
-    ["AK-47"]="Assault Rifle",["AUG"]="Assault Rifle",["Tommy Gun"]="Assault Rifle",
-    ["Boneclaw Rifle"]="Assault Rifle",["Phoenix Rifle"]="Assault Rifle",
-    ["Glorious Assault Rifle"]="Assault Rifle",["10B Visits"]="Assault Rifle",
-    ["Saber"]="Katana",["Lightning Bolt"]="Katana",["Stellar Katana"]="Katana",
-    ["Pixel Katana"]="Katana",["Keytana"]="Katana",["Linked Sword"]="Katana",
-    ["New Year Katana"]="Katana",["Arch Katana"]="Katana",["Crystal Katana"]="Katana",
-    ["Evil Trident"]="Katana",["Glorious Katana"]="Katana",
-    ["Balloon Shotgun"]="Shotgun",["Hyper Shotgun"]="Shotgun",["Broomstick"]="Shotgun",
-    ["Cactus Shotgun"]="Shotgun",["Wrapped Shotgun"]="Shotgun",["Glorious Shotgun"]="Shotgun",
-    ["Pixel Sniper"]="Sniper",["Event Horizon"]="Sniper",["Hyper Sniper"]="Sniper",
-    ["Keyper"]="Sniper",["Eyething Sniper"]="Sniper",["Gingerbread Sniper"]="Sniper",
-    ["Glorious Sniper"]="Sniper",["Hand Gun"]="Handgun",["Blaster"]="Handgun",
-    ["Gumball Handgun"]="Handgun",["Pumpkin Handgun"]="Handgun",["Warp Handgun"]="Handgun",
-    ["Gingerbread Handgun"]="Handgun",["Towerstone Handgun"]="Handgun",
-    ["Glorious Handgun"]="Handgun",["Pixel Handgun"]="Handgun",
-    ["Sheriff"]="Revolver",["Desert Eagle"]="Revolver",["Peppergun"]="Revolver",
-    ["Peppermint Sheriff"]="Revolver",["Keyvolver"]="Revolver",
-    ["Boneclaw Revolver"]="Revolver",["Glorious Revolver"]="Revolver",
-    ["Karambit"]="Knife",["Balisong"]="Knife",["Caladbolg"]="Knife",["Chancla"]="Knife",
-    ["Machete"]="Knife",["Candy Cane"]="Knife",["Keyrambit"]="Knife",["Keylisong"]="Knife",
-    ["Glorious Knife"]="Knife",["Brass Knuckles"]="Fists",["Boxing Gloves"]="Fists",
-    ["Pumpkin Claws"]="Fists",["Festive Fists"]="Fists",["Fist"]="Fists",
-    ["Fists of Hurt"]="Fists",["Glorious Fists"]="Fists",
-    ["Hacker Rifle"]="Energy Rifle",["Hydro Rifle"]="Energy Rifle",
-    ["Apex Rifle"]="Energy Rifle",["Void Rifle"]="Energy Rifle",["Soul Rifle"]="Energy Rifle",
-    ["Glorious Energy Rifle"]="Energy Rifle",["Hacker Pistols"]="Energy Pistols",
-    ["Apex Pistols"]="Energy Pistols",["Void Pistols"]="Energy Pistols",
-    ["Soul Pistols"]="Energy Pistols",["Hyperlaser Guns"]="Energy Pistols",
-    ["Hydro Pistols"]="Energy Pistols",["Glorious Energy Pistols"]="Energy Pistols",
-    ["Scythe of Death"]="Scythe",["Sakura Scythe"]="Scythe",["Bat Scythe"]="Scythe",
-    ["Cryo Scythe"]="Scythe",["Anchor"]="Scythe",["Keythe"]="Scythe",
-    ["Bug Net"]="Scythe",["Crystal Scythe"]="Scythe",["Glorious Scythe"]="Scythe",
-    ["Handsaws"]="Chainsaw",["Buzzsaw"]="Chainsaw",["Mega Drill"]="Chainsaw",
-    ["Blobsaw"]="Chainsaw",["Festive Buzzsaw"]="Chainsaw",["Glorious Chainsaw"]="Chainsaw",
-    ["The Shred"]="Battle Axe",["Nordic Axe"]="Battle Axe",["Mimic Axe"]="Battle Axe",
-    ["Cerulean Axe"]="Battle Axe",["Ban Axe"]="Battle Axe",["Keyttle Axe"]="Battle Axe",
-    ["Balloon Axe"]="Battle Axe",["Glorious Battle Axe"]="Battle Axe",
-    ["Nuke Launcher"]="RPG",["Spaceship Launcher"]="RPG",["Squid Launcher"]="RPG",
-    ["Pumpkin Launcher"]="RPG",["Firework Launcher"]="RPG",["Pencil Launcher"]="RPG",
-    ["RPKEY"]="RPG",["Rocket Launcher"]="RPG",["Glorious RPG"]="RPG",
-    ["Singularity"]="Exogun",["Wondergun"]="Exogun",["Ray Gun"]="Exogun",
-    ["Repulsor"]="Exogun",["Exogourd"]="Exogun",["Glorious Exogun"]="Exogun",
-    ["Electro Uzi"]="Uzi",["Water Uzi"]="Uzi",["Money Gun"]="Uzi",
-    ["Demon Uzi"]="Uzi",["Pine Uzi"]="Uzi",["Keyzi"]="Uzi",["Glorious Uzi"]="Uzi",
-    ["Electro Rifle"]="Burst Rifle",["Aqua Burst"]="Burst Rifle",
-    ["Spectral Burst"]="Burst Rifle",["FAMAS"]="Burst Rifle",["Pine Burst"]="Burst Rifle",
-    ["Pixel Burst"]="Burst Rifle",["Keyst Rifle"]="Burst Rifle",
-    ["Glorious Burst Rifle"]="Burst Rifle",["Temporal Ray"]="Freeze Ray",
-    ["Spider Ray"]="Freeze Ray",["Bubble Ray"]="Freeze Ray",["Gum Ray"]="Freeze Ray",
-    ["Wrapped Freeze Ray"]="Freeze Ray",["Glorious Freeze Ray"]="Freeze Ray",
-    ["Pixel Flamethrower"]="Flamethrower",["Rainbowthrower"]="Flamethrower",
-    ["Glitterthrower"]="Flamethrower",["Snowblower"]="Flamethrower",
-    ["Lamethrower"]="Flamethrower",["Jack O'Thrower"]="Flamethrower",
-    ["Keythrower"]="Flamethrower",["Glorious Flamethrower"]="Flamethrower",
-    ["Firework Gun"]="Flare Gun",["Banana Flare"]="Flare Gun",["Dynamite Gun"]="Flare Gun",
-    ["Vexed Flare Gun"]="Flare Gun",["Wrapped Flare Gun"]="Flare Gun",
-    ["Glorious Flare Gun"]="Flare Gun",["Lasergun 3000"]="Minigun",
-    ["Fighter Jet"]="Minigun",["Pixel Minigun"]="Minigun",["Pumpkin Minigun"]="Minigun",
-    ["Wrapped Minigun"]="Minigun",["Glorious Minigun"]="Minigun",
-    ["Compound Bow"]="Bow",["Raven Bow"]="Bow",["Bat Bow"]="Bow",["Dream Bow"]="Bow",
-    ["Frostbite Bow"]="Bow",["Balloon Bow"]="Bow",["Beloved Bow"]="Bow",
-    ["Key Bow"]="Bow",["Glorious Bow"]="Bow",["Pixel Crossbow"]="Crossbow",
-    ["Harpoon Crossbow"]="Crossbow",["Frostbite Crossbow"]="Crossbow",
-    ["Violin Crossbow"]="Crossbow",["Arch Crossbow"]="Crossbow",
-    ["Crossbone"]="Crossbow",["Glorious Crossbow"]="Crossbow",
-    ["Aces"]="Daggers",["Paper Planes"]="Daggers",["Shurikens"]="Daggers",
-    ["Bat Daggers"]="Daggers",["Broken Hearts"]="Daggers",["Cookies"]="Daggers",
-    ["Crystal Daggers"]="Daggers",["Keynais"]="Daggers",["Glorious Daggers"]="Daggers",
-    ["Hyper Gunblade"]="Gunblade",["Gunsaw"]="Gunblade",["Boneblade"]="Gunblade",
-    ["Crude Gunblade"]="Gunblade",["Elf's Gunblade"]="Gunblade",["Glorious Gunblade"]="Gunblade",
-    ["Ban Hammer"]="Maul",["Ice Maul"]="Maul",["Sleigh Maul"]="Maul",["Glorious Maul"]="Maul",
-    ["Warpstar"]="Warpstone",["Teleport Disc"]="Warpstone",["Warpeye"]="Warpstone",
-    ["Warpbone"]="Warpstone",["Cyber Warpstone"]="Warpstone",
-    ["Unstable Warpstone"]="Warpstone",["Electropunk Warpstone"]="Warpstone",
-    ["Glorious Warpstone"]="Warpstone",["Experiment D15"]="Distortion",
-    ["Plasma Distortion"]="Distortion",["Magma Distortion"]="Distortion",
-    ["Sleighstortion"]="Distortion",["Cyber Distortion"]="Distortion",
-    ["Electropunk Distortion"]="Distortion",["Glorious Distortion"]="Distortion",
-    ["Hotel Bell"]="Warper",["Arcane Warper"]="Warper",["Experiment W4"]="Warper",
-    ["Glitter Warper"]="Warper",["Frost Warper"]="Warper",
-    ["Electropunk Warper"]="Warper",["Glorious Warper"]="Warper",
-    ["Sandwich"]="Medkit",["Briefcase"]="Medkit",["Laptop"]="Medkit",
-    ["Medkitty"]="Medkit",["Box of Chocolates"]="Medkit",["Milk & Cookies"]="Medkit",
-    ["Bucket of Candy"]="Medkit",["Glorious Medkit"]="Medkit",
-    ["Balloon Shorty"]="Shorty",["Demon Shorty"]="Shorty",["Too Shorty"]="Shorty",
-    ["Lovely Shorty"]="Shorty",["Wrapped Shorty"]="Shorty",["Glorious Shorty"]="Shorty",
-    ["Trumpet"]="War Horn",["Megaphone"]="War Horn",["Mammoth Horn"]="War Horn",
-    ["Air Horn"]="War Horn",["Boneclaw Horn"]="War Horn",["Glorious War Horn"]="War Horn",
-    ["Slime Gun"]="Paintball Gun",["Boba Gun"]="Paintball Gun",
-    ["Ketchup Gun"]="Paintball Gun",["Snowball Gun"]="Paintball Gun",
-    ["Paintballoon Gun"]="Paintball Gun",["Glorious Paintball Gun"]="Paintball Gun",
-    ["Harp"]="Slingshot",["Goalpost"]="Slingshot",["Stick"]="Slingshot",
-    ["Coffee"]="Molotov",["Torch"]="Molotov",["Lava Lamp"]="Molotov",
-    ["Vexed Candle"]="Molotov",["Hot Coals"]="Molotov",["Arch Molotov"]="Molotov",
-    ["Glorious Molotov"]="Molotov",["Disco Ball"]="Flashbang",["Skullbang"]="Flashbang",
-    ["Shining Star"]="Flashbang",["Camera"]="Flashbang",["Lightbulb"]="Flashbang",
-    ["Glorious Flashbang"]="Flashbang",["Spray Bottle"]="Spray",["Nail Gun"]="Spray",
-    ["Boneclaw Spray"]="Spray",["Key Spray"]="Spray",["Pine Spray"]="Spray",
-    ["Glorious Spray"]="Spray",["Spider Web"]="Jump Pad",["Trampoline"]="Jump Pad",
-    ["Bounce House"]="Jump Pad",["Glorious Jump Pad"]="Jump Pad",
-    ["Cuddle Bomb"]="Grenade",["Soul Grenade"]="Grenade",["Water Balloon"]="Grenade",
-    ["Jingle Grenade"]="Grenade",["Frozen Grenade"]="Grenade",["Dynamite"]="Grenade",
-    ["Keynade"]="Grenade",["Whoopee Cushion"]="Grenade",["Glorious Grenade"]="Grenade",
-    ["Gearnade Launcher"]="Grenade Launcher",["Skull Launcher"]="Grenade Launcher",
-    ["Balloon Launcher"]="Grenade Launcher",["Snowball Launcher"]="Grenade Launcher",
-    ["Glorious Grenade Launcher"]="Grenade Launcher",["Suspicious Gift"]="Satchel",
-    ["Advanced Satchel"]="Satchel",["Potion Satchel"]="Satchel",
-    ["Notebook Satchel"]="Satchel",["Bag o' Money"]="Satchel",
-    ["Glorious Satchel"]="Satchel",["Energy Shield"]="Riot Shield",
-    ["Tombstone Shield"]="Riot Shield",["Door"]="Riot Shield",["Sled"]="Riot Shield",
-    ["Glorious Riot Shield"]="Riot Shield",["Ice Permafrost"]="Permafrost",
-    ["Snowman Permafrost"]="Permafrost",["Glorious Permafrost"]="Permafrost",
-    ["Plastic Shovel"]="Trowel",["Garden Shovel"]="Trowel",["Pumpkin Carver"]="Trowel",
-    ["Paintbrush"]="Trowel",["Snow Shovel"]="Trowel",["Glorious Trowel"]="Trowel",
-    ["Balance"]="Smoke Grenade",["Glorious Smoke Grenade"]="Smoke Grenade",
-}
-
-local SKINS_PER_WEAPON = {}
-for skinName, weaponName in pairs(COSMETIC_SKIN_TABLE) do
-    SKINS_PER_WEAPON[weaponName] = SKINS_PER_WEAPON[weaponName] or {"Default"}
-    table.insert(SKINS_PER_WEAPON[weaponName], skinName)
-end
-for _, list in pairs(SKINS_PER_WEAPON) do table.sort(list) end
-
--- ═══════════════════════════════════════════
--- SKIN CHANGER — ANIMATION HOOK
--- ═══════════════════════════════════════════
-local originalAnimInfo  = {}
-local currentAnimWeapon = nil
-local currentAnimSkin   = nil
-local animHookActive    = false
-
-local function hasCustomAnims(weaponPrefix, skinPrefix)
-    if not animLib or not animLib.Info then return false end
-    local base = weaponPrefix .. "_" .. skinPrefix .. "_"
-    for k in pairs(animLib.Info) do
-        if string.sub(k, 1, #base) == base then return true end
-    end
-    return false
-end
-
-local function hookAnimations(weaponName, skinName)
-    if not animLib or not animLib.Info then return false end
-    local weaponPrefix = WEAPON_TO_ANIM_PREFIX[weaponName]
-    if not weaponPrefix then return false end
-    local skinPrefix = SKIN_TO_ANIM_PREFIX[skinName]
-    if not skinPrefix then return false end
-    if not hasCustomAnims(weaponPrefix, skinPrefix) then return false end
-
-    local overridePrefix    = weaponPrefix .. "_" .. skinPrefix .. "_"
-    local overridePrefixLen = #overridePrefix
-
-    for animKey, animData in pairs(animLib.Info) do
-        if string.sub(animKey, 1, overridePrefixLen) == overridePrefix then
-            local action  = string.sub(animKey, overridePrefixLen + 1)
-            local baseKey = weaponPrefix .. "_" .. action
-            if animLib.Info[baseKey] and not originalAnimInfo[baseKey] then
-                originalAnimInfo[baseKey] = animLib.Info[baseKey]
-            end
-            animLib.Info[baseKey] = animData
-        end
-    end
-
-    currentAnimWeapon = weaponName
-    currentAnimSkin   = skinName
-    animHookActive    = true
-    return true
-end
-
-local function unhookAnimations()
-    if not animLib or not animLib.Info then return end
-    for baseKey, originalData in pairs(originalAnimInfo) do
-        animLib.Info[baseKey] = originalData
-    end
-    originalAnimInfo  = {}
-    currentAnimWeapon = nil
-    currentAnimSkin   = nil
-    animHookActive    = false
-end
-
--- ═══════════════════════════════════════════
--- SKIN CHANGER — CORE
--- ═══════════════════════════════════════════
-local activeSkinSelections = {}
-local skinChangerConn      = nil
-local lastEquippedWeapon   = nil
-
-local function applyActiveSkin(weaponName, skinName)
-    if not SkinChangerCFG.On then return end
-    if skinName == "Default" or not skinName then
-        if currentAnimSkin and currentAnimWeapon == weaponName then unhookAnimations() end
-        return
-    end
-    if currentAnimWeapon == weaponName and currentAnimSkin == skinName then return end
-    if animHookActive then unhookAnimations() end
-    local hooked = hookAnimations(weaponName, skinName)
-    if hooked then
-        Library:Notify("Skin: " .. skinName .. " + custom anims ✓", 2)
-    else
-        Library:Notify("Skin: " .. skinName .. " applied (no custom anims)", 2)
-    end
-end
-
-local function startSkinChanger()
-    if skinChangerConn then skinChangerConn:Disconnect() end
-    skinChangerConn = RunService.Heartbeat:Connect(function()
-        if not SkinChangerCFG.On then return end
-        if not fighter_mod or not fighter_mod.LocalFighter then return end
-        local item = fighter_mod.LocalFighter.EquippedItem
-        if not item then
-            if lastEquippedWeapon then unhookAnimations(); lastEquippedWeapon = nil end
-            return
-        end
-        local weaponName = nil
-        pcall(function() weaponName = item:Get("Name") end)
-        if not weaponName then return end
-        if weaponName ~= lastEquippedWeapon then
-            if animHookActive then unhookAnimations() end
-            lastEquippedWeapon = weaponName
-            local selectedSkin = activeSkinSelections[weaponName]
-            if selectedSkin and selectedSkin ~= "Default" then
-                applyActiveSkin(weaponName, selectedSkin)
-            end
-        end
-    end)
-end
-
-local function stopSkinChanger()
-    SkinChangerCFG.On = false
-    if skinChangerConn then skinChangerConn:Disconnect(); skinChangerConn = nil end
-    unhookAnimations()
-    lastEquippedWeapon = nil
-end
-
-LP.CharacterAdded:Connect(function()
-    task.wait(1.5)
-    lastEquippedWeapon = nil
-    if SkinChangerCFG.On then startSkinChanger() end
 end)
 
 -- ═══════════════════════════════════════════
@@ -1205,7 +1282,7 @@ local function enableSnow()
 end
 
 -- ═══════════════════════════════════════════
--- TARGET OPTIONS
+-- TARGET OPTIONS LIST
 -- ═══════════════════════════════════════════
 local ALL_TARGET_OPTIONS = {
     "Head","HumanoidRootPart","Torso","UpperTorso","LowerTorso","Body","Arms","Legs",
@@ -1325,8 +1402,6 @@ GN_L:AddButton({Text="Restore Originals",Func=function() GunCFG.NoRecoil=false; 
 -- ═══════════════════════════════════════════
 local VS_L = Tabs.Visuals:AddLeftGroupbox("Crosshair")
 local VS_R = Tabs.Visuals:AddRightGroupbox("Hit Numbers")
-local SK_L = Tabs.Visuals:AddLeftGroupbox("Skin Changer")
-local SK_R = Tabs.Visuals:AddRightGroupbox("Weapon Skins")
 
 local crosshairGui = Instance.new("ScreenGui")
 crosshairGui.Name="CustomCrosshair"; crosshairGui.ResetOnSpawn=false
@@ -1343,79 +1418,150 @@ VS_R:AddToggle("HitNumOn",  {Text="Enable Hit Numbers", Default=true, Callback=f
 VS_R:AddLabel("Color"):AddColorPicker("HitNumColor", {Default=Color3.fromRGB(255,20,147), Callback=function(v) hitColor=v end})
 VS_R:AddSlider("HitNumDur", {Text="Duration (s)", Default=5, Min=1, Max=10, Rounding=1, Callback=function(v) hitStayTime=v end})
 
--- Skin Changer UI
-SK_L:AddLabel("ItemLib: "..(skinLib and "✓" or "✗").."  AnimLib: "..(animLib and "✓" or "✗"))
-SK_L:AddLabel("Custom anims auto-apply for supported skins")
-SK_L:AddLabel("(Karambit, Balisong, AUG, Keytana, etc.)")
+-- ═══════════════════════════════════════════
+-- SKIN CHANGER TAB (NEW — replaces old one)
+-- ═══════════════════════════════════════════
+local SC_Tab   = Window:AddTab("Skin Changer")
+local SC_Left  = SC_Tab:AddLeftGroupbox("Skin Selection")
+local SC_Right = SC_Tab:AddRightGroupbox("Skin Options")
+local SC_Mat   = SC_Tab:AddLeftGroupbox("Material / Transparency")
+local SC_Cfg   = SC_Tab:AddRightGroupbox("Config")
 
-SK_L:AddToggle("SkinChangerOn", {
-    Text    = "Enable Skin Changer",
-    Default = false,
-    Callback = function(v)
-        SkinChangerCFG.On=v
-        if v then startSkinChanger(); Library:Notify("Skin Changer enabled",2)
-        else stopSkinChanger(); Library:Notify("Skin Changer disabled",2) end
-    end,
-})
-
+-- Build sorted weapon list
 local weaponList = {}
-for w in pairs(SKINS_PER_WEAPON) do table.insert(weaponList,w) end
+for w in pairs(WEAPON_SKINS) do table.insert(weaponList, w) end
 table.sort(weaponList)
-local currentWeaponSelection = weaponList[1] or "Assault Rifle"
+currentWeaponSel = weaponList[1] or "Assault Rifle"
 
-SK_L:AddDropdown("SkinWeaponSelect", {
+-- Weapon dropdown
+weaponDropdown = SC_Left:AddDropdown("SC_WeaponSelect", {
     Text    = "Select Weapon",
-    Default = currentWeaponSelection,
+    Default = currentWeaponSel,
     Values  = weaponList,
     Callback = function(v)
-        currentWeaponSelection=v
-        local skins=SKINS_PER_WEAPON[v] or {"Default"}
-        if Options.SkinNameSelect then Options.SkinNameSelect:SetValues(skins); Options.SkinNameSelect:SetValue("Default") end
+        currentWeaponSel = v
+        if skinDropdown and WEAPON_SKINS[v] then
+            skinDropdown:SetValues(WEAPON_SKINS[v])
+            skinDropdown:SetValue(WEAPON_SKINS[v][1])
+        end
     end,
 })
 
-SK_L:AddButton({Text="Apply to Current Weapon Now", Func=function()
-    if not fighter_mod or not fighter_mod.LocalFighter then Library:Notify("No fighter module",2); return end
-    local item=fighter_mod.LocalFighter.EquippedItem; if not item then Library:Notify("No weapon equipped",2); return end
-    local wn=nil; pcall(function() wn=item:Get("Name") end); if not wn then return end
-    local skin=activeSkinSelections[wn]
-    if skin and skin~="Default" then if animHookActive then unhookAnimations() end; applyActiveSkin(wn,skin)
-    else Library:Notify("No skin selected for "..wn,2) end
-end})
-
-SK_L:AddButton({Text="Reset All Skins", Func=function()
-    activeSkinSelections={}; unhookAnimations(); lastEquippedWeapon=nil
-    Library:Notify("All skins reset",2)
-end})
-
-SK_R:AddDropdown("SkinNameSelect", {
+-- Skin dropdown (right side)
+skinDropdown = SC_Right:AddDropdown("SC_SkinSelect", {
     Text    = "Select Skin",
-    Default = "Default",
-    Values  = SKINS_PER_WEAPON[currentWeaponSelection] or {"Default"},
+    Default = WEAPON_SKINS[currentWeaponSel] and WEAPON_SKINS[currentWeaponSel][1] or "None",
+    Values  = WEAPON_SKINS[currentWeaponSel] or {},
     Callback = function(v)
-        activeSkinSelections[currentWeaponSelection]=v
-        local skinPrefix   = SKIN_TO_ANIM_PREFIX[v]
-        local weaponPrefix = WEAPON_TO_ANIM_PREFIX[currentWeaponSelection]
-        local hasAnims = skinPrefix and weaponPrefix and animLib and hasCustomAnims(weaponPrefix,skinPrefix)
-        Library:Notify(currentWeaponSelection.." → "..v..(hasAnims and " (has custom anims)" or ""),3)
+        if currentWeaponSel then
+            SC_ApplySkin(currentWeaponSel, v, true)
+            Library:Notify("Applied " .. v .. " to " .. currentWeaponSel, 2)
+        end
     end,
 })
 
-SK_R:AddButton({Text="Random Skin for Held Weapon", Func=function()
-    if not fighter_mod or not fighter_mod.LocalFighter then return end
-    local item=fighter_mod.LocalFighter.EquippedItem; if not item then Library:Notify("No weapon equipped",2); return end
-    local wn=nil; pcall(function() wn=item:Get("Name") end); if not wn then return end
-    local skins=SKINS_PER_WEAPON[wn]
-    if skins and #skins>1 then
-        local pick=skins[math.random(2,#skins)]
-        activeSkinSelections[wn]=pick; if animHookActive then unhookAnimations() end; applyActiveSkin(wn,pick)
-    end
-end})
+SC_Left:AddButton({
+    Text = "Remove Skin for Selected Weapon",
+    Func = function()
+        if currentWeaponSel then
+            SC_ApplySkin(currentWeaponSel, nil, false)
+            Library:Notify("Removed skin from " .. currentWeaponSel, 2)
+        end
+    end,
+})
 
-SK_R:AddButton({Text="Show Anim Hook Status", Func=function()
-    if animHookActive then Library:Notify("Hooked: "..(currentAnimWeapon or "?").." → "..(currentAnimSkin or "?"),4)
-    else Library:Notify("No anim hook active",2) end
-end})
+SC_Left:AddButton({
+    Text = "Remove All Skins",
+    Func = function()
+        for weaponName in pairs(activeSkinMap) do
+            SC_ApplySkin(weaponName, nil, false)
+        end
+        Library:Notify("All skins removed", 2)
+    end,
+})
+
+SC_Left:AddLabel("Active skins auto-save to config")
+
+-- Material changer
+materialToggle = SC_Mat:AddToggle("SC_MatEnabled", {
+    Text    = "Enable Material Override",
+    Default = false,
+    Callback = function(v)
+        skinConfig.MaterialEnabled = v
+        if v then
+            SC_ApplyMaterial(skinConfig.CurrentMaterial)
+            SC_ApplyTransparency(skinConfig.Transparency)
+        end
+    end,
+})
+
+materialDropdown = SC_Mat:AddDropdown("SC_MatSelect", {
+    Text    = "Select Material",
+    Default = "SmoothPlastic",
+    Values  = MATERIAL_LIST,
+    Callback = function(v)
+        skinConfig.CurrentMaterial = v
+        SC_ApplyMaterial(v)
+    end,
+})
+
+transparencySlider = SC_Mat:AddSlider("SC_Transparency", {
+    Text     = "Transparency %",
+    Default  = 0,
+    Min      = 0,
+    Max      = 100,
+    Rounding = 0,
+    Callback = function(v)
+        SC_ApplyTransparency(v)
+    end,
+})
+
+-- Config system
+local configNameInput = "default"
+
+SC_Cfg:AddInput("SC_ConfigName", {
+    Default     = "default",
+    Numeric     = false,
+    Finished    = false,
+    Text        = "Config Name",
+    Placeholder = "Enter config name...",
+    Callback    = function(v) configNameInput = v end,
+})
+
+SC_Cfg:AddButton({
+    Text = "Save Config",
+    Func = function() SC_SaveConfig(configNameInput) end,
+})
+
+SC_Cfg:AddButton({
+    Text = "Load Config",
+    Func = function() SC_LoadConfig(configNameInput) end,
+})
+
+SC_Cfg:AddButton({
+    Text        = "Delete Config",
+    Func        = function() SC_DeleteConfig(configNameInput) end,
+    DoubleClick = true,
+})
+
+SC_Cfg:AddButton({
+    Text = "List Configs (print to console)",
+    Func = function()
+        local list = SC_GetConfigList()
+        if #list > 0 then
+            Library:Notify("Found " .. #list .. " config(s) — see console", 2)
+            for _, name in pairs(list) do print("[SC Config] " .. name) end
+        else
+            Library:Notify("No configs found", 2)
+        end
+    end,
+})
+
+autoLoadToggle = SC_Cfg:AddToggle("SC_AutoLoad", {
+    Text    = "Auto-Load Config on Start",
+    Default = true,
+    Callback = function(v) skinConfig.AutoLoadConfig = v end,
+})
 
 -- ═══════════════════════════════════════════
 -- WORLD TAB
@@ -1494,8 +1640,8 @@ MC_R:AddLabel("MechanicsCtrl: "..(MechanicsCtrl and "Ready ✓" or "Not Loaded �
 -- MISC TAB
 -- ═══════════════════════════════════════════
 local MS_L = Tabs.Misc:AddLeftGroupbox("AC Bypass Info")
-MS_L:AddLabel("AC Bypass: Active on load")
-MS_L:AddLabel("Method: No Player:GetMouse() + cloneref")
+MS_L:AddLabel("AC Bypass: AnalyticsPipelineController hooked")
+MS_L:AddLabel("Method: cloneref + UIS mouse position")
 
 -- ═══════════════════════════════════════════
 -- SETTINGS TAB
@@ -1510,15 +1656,19 @@ ST_R:AddButton({
         RageCFG.On=false; stopRagebot()
         TriggerbotCFG.On=false; stopTriggerbot()
         GunCFG.NoRecoil=false; GunCFG.NoSpread=false; GunCFG.FastShoot=false; patchGun()
-        removeSky(); colorCorrection.Saturation=0; colorCorrection.Contrast=0.1; blurEffect.Size=0; Lighting.Brightness=1
+        removeSky()
+        colorCorrection.Saturation=0; colorCorrection.Contrast=0.1
+        blurEffect.Size=0; Lighting.Brightness=1
         if fovCircle   then fovCircle.Visible=false   end
         if saFovCircle then saFovCircle.Visible=false end
         crosshairImg.ImageTransparency=1; UIS.MouseIconEnabled=true
         MechCFG.InfDoubleJump=false; stopInfDoubleJump()
         MechCFG.SlideBoost=false;    stopSlideBoost()
         MechCFG.JumpPower=1;         setJumpPower(1)
-        if Options.JumpPower then Options.JumpPower:SetValue(1) end
-        stopSkinChanger()
+        if Options and Options.JumpPower then Options.JumpPower:SetValue(1) end
+        -- Remove all skins
+        for weaponName in pairs(activeSkinMap) do SC_ApplySkin(weaponName, nil, false) end
+        skinConfig.MaterialEnabled=false
         Library:Notify("All features stopped",3)
     end,
 })
@@ -1526,7 +1676,8 @@ ST_R:AddButton({
 ST_R:AddButton({
     Text="Unload UI",
     Func=function()
-        stopInfDoubleJump(); stopSlideBoost(); stopSkinChanger()
+        stopInfDoubleJump()
+        stopSlideBoost()
         Library:Unload()
     end,
 })
@@ -1596,11 +1747,16 @@ RunService.RenderStepped:Connect(function(dt)
 end)
 
 -- ═══════════════════════════════════════════
+-- INIT: Start ViewModel watcher + Auto-load
+-- ═══════════════════════════════════════════
+SC_WatchViewModels()
+SC_AutoLoad()
+
+-- ═══════════════════════════════════════════
 -- LOAD COMPLETE
 -- ═══════════════════════════════════════════
-Library:Notify("Rivals Tool loaded — "..(IsMobile and "MOBILE" or "PC").." | AC Safe",6)
+Library:Notify("Rivals Tool loaded — "..(IsMobile and "MOBILE" or "PC").." | New Skin Changer Active",6)
 print("[RIVALS TOOL] "..(IsMobile and "MOBILE" or "PC"))
-print("[AC] Using UserInputService:GetMouseLocation() instead of Player:GetMouse()")
-print("[AC] All services cloned with cloneref")
-print("[FIX] Triggerbot works with all weapons")
-print("[NEW] Infinite Double Jump + Jump Power + Slide Boost + Skin Changer + Anim Hook")
+print("[AC] AnalyticsPipelineController hooked via getgc")
+print("[SC] New skin changer loaded — viewmodel swap method")
+print("[SC] Config system ready — folder: WeaponSkinsConfigs/")

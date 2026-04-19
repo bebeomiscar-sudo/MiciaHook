@@ -2995,10 +2995,7 @@ SC_AutoLoad()
 -- ═══════════════════════════════════════════
 -- LOAD COMPLETE
 -- ═══════════════════════════════════════════
-Library:Notify(
-    "Rivals Tool — " .. (IsMobile and "MOBILE" or "PC") .. " | DELETE = Emergency Stop",
-    6
-)
+Library:Notify("Rivals Tool loaded — " .. (IsMobile and "MOBILE" or "PC") .. " | DELETE = Emergency Stop", 6)
 print("[RIVALS TOOL] " .. (IsMobile and "MOBILE" or "PC"))
 print("[AC BYPASS]  Kick hook ✓ | Mouse proxy ✓ | getfenv scrub ✓ | Pipeline pending")
 print("[AIMBOT]     CameraController: " .. (CameraController and "✓" or "✗"))

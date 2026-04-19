@@ -45,14 +45,10 @@ pcall(function()
         local cam  = game:GetService("Workspace").CurrentCamera
         return setmetatable({}, {
             __index = function(_, key)
-                if key == "X" then
-                    return UIS2:GetMouseLocation().X
-                elseif key == "Y" then
-                    return UIS2:GetMouseLocation().Y
-                elseif key == "Hit" then
-                    return cam.CFrame * CFrame.new(0,0,-10)
-                elseif key == "Target" then
-                    return nil
+                if key == "X" then return UIS2:GetMouseLocation().X
+                elseif key == "Y" then return UIS2:GetMouseLocation().Y
+                elseif key == "Hit" then return cam.CFrame * CFrame.new(0,0,-10)
+                elseif key == "Target" then return nil
                 elseif key == "UnitRay" then
                     local loc = UIS2:GetMouseLocation()
                     return cam:ViewportPointToRay(loc.X, loc.Y)
@@ -79,19 +75,13 @@ end)
 pcall(function()
     task.spawn(function()
         local RF = game:GetService("ReplicatedFirst")
-        local ok, APC = pcall(function()
-            return RF:WaitForChild("AnalyticsPipelineController", 10)
-        end)
+        local ok, APC = pcall(function() return RF:WaitForChild("AnalyticsPipelineController", 10) end)
         if not ok or not APC then return end
-        local ok2, AP = pcall(function()
-            return APC:WaitForChild("AnalyticsPipeline", 10)
-        end)
+        local ok2, AP = pcall(function() return APC:WaitForChild("AnalyticsPipeline", 10) end)
         if not ok2 or not AP then return end
         pcall(function()
             hookfunction(require, newcclosure(function(moduleScript)
-                if moduleScript == AP then
-                    return function(...) end
-                end
+                if moduleScript == AP then return function(...) end end
                 return require(moduleScript)
             end))
         end)
@@ -99,7 +89,335 @@ pcall(function()
     end)
 end)
 
+-- ═══════════════════════════════════════════
+-- SILENCE UNRELIABLE REMOTE WARNINGS
+-- ═══════════════════════════════════════════
+pcall(function()
+    local remotes = {
+        ReplicatedStorage.Remotes.Replication.Enemy.ReplicateUnreliable,
+        ReplicatedStorage.Remotes.Replication.Fighter.ReplicateUnreliable,
+    }
+    for _, remote in ipairs(remotes) do
+        pcall(function() remote.OnClientEvent:Connect(function() end) end)
+    end
+end)
+
 print("[BYPASS] AC bypass applied")
+
+-- ═══════════════════════════════════════════
+-- SKIN CHANGER (New — hooks CosmeticLibrary)
+-- ═══════════════════════════════════════════
+local constructingWeapon, viewingProfile = nil, nil
+local lastUsedWeapon = nil
+local SC_equipped, SC_favorites = {}, {}
+local SC_saveFile = "Symbol.gg/config.json"
+
+local SC_EnumLibrary     = nil
+local SC_CosmeticLibrary = nil
+local SC_ItemLibrary     = nil
+local SC_DataController  = nil
+
+pcall(function()
+    local playerScripts = LP.PlayerScripts
+    local controllers   = playerScripts.Controllers
+    SC_EnumLibrary     = require(ReplicatedStorage.Modules:WaitForChild("EnumLibrary", 10))
+    if SC_EnumLibrary then SC_EnumLibrary:WaitForEnumBuilder() end
+    SC_CosmeticLibrary = require(ReplicatedStorage.Modules:WaitForChild("CosmeticLibrary", 10))
+    SC_ItemLibrary     = require(ReplicatedStorage.Modules:WaitForChild("ItemLibrary", 10))
+    SC_DataController  = require(controllers:WaitForChild("PlayerDataController", 10))
+end)
+
+local function SC_cloneCosmetic(name, cosmeticType, options)
+    if not SC_CosmeticLibrary then return nil end
+    local base = SC_CosmeticLibrary.Cosmetics[name]
+    if not base then return nil end
+    local data = {}
+    for key, value in pairs(base) do data[key] = value end
+    data.Name = name
+    data.Type = data.Type or cosmeticType
+    data.Seed = data.Seed or math.random(1, 1000000)
+    if SC_EnumLibrary then
+        local success, enumId = pcall(SC_EnumLibrary.ToEnum, SC_EnumLibrary, name)
+        if success and enumId then data.Enum = enumId; data.ObjectID = data.ObjectID or enumId end
+    end
+    if options then
+        if options.inverted ~= nil then data.Inverted = options.inverted end
+        if options.favoritesOnly ~= nil then data.OnlyUseFavorites = options.favoritesOnly end
+    end
+    return data
+end
+
+local function SC_saveConfig()
+    if not writefile then return end
+    pcall(function()
+        local config = {equipped = {}, favorites = SC_favorites}
+        for weapon, cosmetics in pairs(SC_equipped) do
+            config.equipped[weapon] = {}
+            for cosmeticType, cosmeticData in pairs(cosmetics) do
+                if cosmeticData and cosmeticData.Name then
+                    config.equipped[weapon][cosmeticType] = {
+                        name = cosmeticData.Name,
+                        seed = cosmeticData.Seed,
+                        inverted = cosmeticData.Inverted
+                    }
+                end
+            end
+        end
+        makefolder("Symbol.gg")
+        writefile(SC_saveFile, HttpService:JSONEncode(config))
+    end)
+end
+
+local function SC_loadConfig()
+    if not readfile or not isfile or not isfile(SC_saveFile) then return end
+    pcall(function()
+        local config = HttpService:JSONDecode(readfile(SC_saveFile))
+        if config.equipped then
+            for weapon, cosmetics in pairs(config.equipped) do
+                SC_equipped[weapon] = {}
+                for cosmeticType, cosmeticData in pairs(cosmetics) do
+                    local cloned = SC_cloneCosmetic(cosmeticData.name, cosmeticType, {inverted = cosmeticData.inverted})
+                    if cloned then
+                        cloned.Seed = cosmeticData.seed
+                        SC_equipped[weapon][cosmeticType] = cloned
+                    end
+                end
+            end
+        end
+        SC_favorites = config.favorites or {}
+    end)
+end
+
+pcall(function()
+    SC_CosmeticLibrary.OwnsCosmeticNormally     = function() return true end
+    SC_CosmeticLibrary.OwnsCosmeticUniversally  = function() return true end
+    SC_CosmeticLibrary.OwnsCosmeticForWeapon    = function() return true end
+    local originalOwnsCosmetic = SC_CosmeticLibrary.OwnsCosmetic
+    SC_CosmeticLibrary.OwnsCosmetic = function(self, inventory, name, weapon)
+        if name:find("MISSING_") then return originalOwnsCosmetic(self, inventory, name, weapon) end
+        return true
+    end
+end)
+
+pcall(function()
+    local originalGet = SC_DataController.Get
+    SC_DataController.Get = function(self, key)
+        local data = originalGet(self, key)
+        if key == "CosmeticInventory" then
+            local proxy = {}
+            if data then for k, v in pairs(data) do proxy[k] = v end end
+            return setmetatable(proxy, {__index = function() return true end})
+        end
+        if key == "FavoritedCosmetics" then
+            local result = data and table.clone(data) or {}
+            for weapon, favs in pairs(SC_favorites) do
+                result[weapon] = result[weapon] or {}
+                for name, isFav in pairs(favs) do result[weapon][name] = isFav end
+            end
+            return result
+        end
+        return data
+    end
+
+    local originalGetWeaponData = SC_DataController.GetWeaponData
+    SC_DataController.GetWeaponData = function(self, weaponName)
+        local data = originalGetWeaponData(self, weaponName)
+        if not data then return nil end
+        local merged = {}
+        for key, value in pairs(data) do merged[key] = value end
+        merged.Name = weaponName
+        if SC_equipped[weaponName] then
+            for cosmeticType, cosmeticData in pairs(SC_equipped[weaponName]) do
+                merged[cosmeticType] = cosmeticData
+            end
+        end
+        return merged
+    end
+end)
+
+pcall(function()
+    local SC_FighterController = require(LP.PlayerScripts.Controllers:WaitForChild("FighterController", 10))
+    local remotes        = ReplicatedStorage:FindFirstChild("Remotes")
+    local dataRemotes    = remotes and remotes:FindFirstChild("Data")
+    local equipRemote    = dataRemotes and dataRemotes:FindFirstChild("EquipCosmetic")
+    local favoriteRemote = dataRemotes and dataRemotes:FindFirstChild("FavoriteCosmetic")
+    local replicationRemotes = remotes and remotes:FindFirstChild("Replication")
+    local fighterRemotes     = replicationRemotes and replicationRemotes:FindFirstChild("Fighter")
+    local useItemRemote      = fighterRemotes and fighterRemotes:FindFirstChild("UseItem")
+
+    if equipRemote and hookmetamethod then
+        local oldNamecall2
+        oldNamecall2 = hookmetamethod(game, "__namecall", function(self, ...)
+            if getnamecallmethod() ~= "FireServer" then return oldNamecall2(self, ...) end
+            local args = {...}
+            if useItemRemote and self == useItemRemote then
+                local objectID = args[1]
+                pcall(function()
+                    local fighter = SC_FighterController:GetFighter(LP)
+                    if fighter and fighter.Items then
+                        for _, item in pairs(fighter.Items) do
+                            if item:Get("ObjectID") == objectID then
+                                lastUsedWeapon = item.Name; break
+                            end
+                        end
+                    end
+                end)
+            end
+            if self == equipRemote then
+                local weaponName, cosmeticType, cosmeticName, options = args[1], args[2], args[3], args[4] or {}
+                if cosmeticName and cosmeticName ~= "None" and cosmeticName ~= "" then
+                    local inventory = SC_DataController:Get("CosmeticInventory")
+                    if inventory and rawget(inventory, cosmeticName) then return oldNamecall2(self, ...) end
+                end
+                SC_equipped[weaponName] = SC_equipped[weaponName] or {}
+                if not cosmeticName or cosmeticName == "None" or cosmeticName == "" then
+                    SC_equipped[weaponName][cosmeticType] = nil
+                    if not next(SC_equipped[weaponName]) then SC_equipped[weaponName] = nil end
+                else
+                    local cloned = SC_cloneCosmetic(cosmeticName, cosmeticType, {inverted = options.IsInverted, favoritesOnly = options.OnlyUseFavorites})
+                    if cloned then SC_equipped[weaponName][cosmeticType] = cloned end
+                end
+                task.defer(function()
+                    pcall(function() SC_DataController.CurrentData:Replicate("WeaponInventory") end)
+                    task.wait(0.2); SC_saveConfig()
+                end)
+                return
+            end
+            if self == favoriteRemote then
+                SC_favorites[args[1]] = SC_favorites[args[1]] or {}
+                SC_favorites[args[1]][args[2]] = args[3] or nil
+                SC_saveConfig()
+                task.spawn(function() pcall(function() SC_DataController.CurrentData:Replicate("FavoritedCosmetics") end) end)
+                return
+            end
+            return oldNamecall2(self, ...)
+        end)
+    end
+end)
+
+pcall(function()
+    local ClientItem = require(LP.PlayerScripts.Modules.ClientReplicatedClasses.ClientFighter.ClientItem)
+    if ClientItem and ClientItem._CreateViewModel then
+        local originalCreateViewModel = ClientItem._CreateViewModel
+        ClientItem._CreateViewModel = function(self, viewmodelRef)
+            local weaponName   = self.Name
+            local weaponPlayer = self.ClientFighter and self.ClientFighter.Player
+            constructingWeapon = (weaponPlayer == LP) and weaponName or nil
+            if weaponPlayer == LP and SC_equipped[weaponName] and SC_equipped[weaponName].Skin and viewmodelRef then
+                local dataKey, skinKey, nameKey = self:ToEnum("Data"), self:ToEnum("Skin"), self:ToEnum("Name")
+                if viewmodelRef[dataKey] then
+                    viewmodelRef[dataKey][skinKey] = SC_equipped[weaponName].Skin
+                    viewmodelRef[dataKey][nameKey] = SC_equipped[weaponName].Skin.Name
+                elseif viewmodelRef.Data then
+                    viewmodelRef.Data.Skin = SC_equipped[weaponName].Skin
+                    viewmodelRef.Data.Name = SC_equipped[weaponName].Skin.Name
+                end
+            end
+            local result = originalCreateViewModel(self, viewmodelRef)
+            constructingWeapon = nil
+            return result
+        end
+    end
+end)
+
+pcall(function()
+    local viewModelModule = LP.PlayerScripts.Modules.ClientReplicatedClasses.ClientFighter.ClientItem:FindFirstChild("ClientViewModel")
+    if not viewModelModule then return end
+    local ClientViewModel = require(viewModelModule)
+    if ClientViewModel.GetWrap then
+        local originalGetWrap = ClientViewModel.GetWrap
+        ClientViewModel.GetWrap = function(self)
+            local weaponName   = self.ClientItem and self.ClientItem.Name
+            local weaponPlayer = self.ClientItem and self.ClientItem.ClientFighter and self.ClientItem.ClientFighter.Player
+            if weaponName and weaponPlayer == LP and SC_equipped[weaponName] and SC_equipped[weaponName].Wrap then
+                return SC_equipped[weaponName].Wrap
+            end
+            return originalGetWrap(self)
+        end
+    end
+    local originalNew = ClientViewModel.new
+    ClientViewModel.new = function(replicatedData, clientItem)
+        local weaponPlayer = clientItem.ClientFighter and clientItem.ClientFighter.Player
+        local weaponName   = constructingWeapon or clientItem.Name
+        if weaponPlayer == LP and SC_equipped[weaponName] then
+            local ReplicatedClass = require(ReplicatedStorage.Modules.ReplicatedClass)
+            local dataKey = ReplicatedClass:ToEnum("Data")
+            replicatedData[dataKey] = replicatedData[dataKey] or {}
+            local cosmetics = SC_equipped[weaponName]
+            if cosmetics.Skin  then replicatedData[dataKey][ReplicatedClass:ToEnum("Skin")]    = cosmetics.Skin  end
+            if cosmetics.Wrap  then replicatedData[dataKey][ReplicatedClass:ToEnum("Wrap")]    = cosmetics.Wrap  end
+            if cosmetics.Charm then replicatedData[dataKey][ReplicatedClass:ToEnum("Charm")]   = cosmetics.Charm end
+        end
+        local result = originalNew(replicatedData, clientItem)
+        if weaponPlayer == LP and SC_equipped[weaponName] and SC_equipped[weaponName].Wrap and result._UpdateWrap then
+            result:_UpdateWrap()
+            task.delay(0.1, function() if not result._destroyed then result:_UpdateWrap() end end)
+        end
+        return result
+    end
+end)
+
+pcall(function()
+    local originalGetViewModelImage = SC_ItemLibrary.GetViewModelImageFromWeaponData
+    SC_ItemLibrary.GetViewModelImageFromWeaponData = function(self, weaponData, highRes)
+        if not weaponData then return originalGetViewModelImage(self, weaponData, highRes) end
+        local weaponName = weaponData.Name
+        local shouldShowSkin = (weaponData.Skin and SC_equipped[weaponName] and weaponData.Skin == SC_equipped[weaponName].Skin)
+            or (viewingProfile == LP and SC_equipped[weaponName] and SC_equipped[weaponName].Skin)
+        if shouldShowSkin and SC_equipped[weaponName] and SC_equipped[weaponName].Skin then
+            local skinInfo = self.ViewModels[SC_equipped[weaponName].Skin.Name]
+            if skinInfo then return skinInfo[highRes and "ImageHighResolution" or "Image"] or skinInfo.Image end
+        end
+        return originalGetViewModelImage(self, weaponData, highRes)
+    end
+end)
+
+pcall(function()
+    local ViewProfile = require(LP.PlayerScripts.Modules.Pages.ViewProfile)
+    if ViewProfile and ViewProfile.Fetch then
+        local originalFetch = ViewProfile.Fetch
+        ViewProfile.Fetch = function(self, targetPlayer)
+            viewingProfile = targetPlayer
+            return originalFetch(self, targetPlayer)
+        end
+    end
+end)
+
+pcall(function()
+    local ClientEntity = require(LP.PlayerScripts.Modules.ClientReplicatedClasses.ClientEntity)
+    if ClientEntity and ClientEntity.ReplicateFromServer then
+        local originalReplicateFromServer = ClientEntity.ReplicateFromServer
+        ClientEntity.ReplicateFromServer = function(self, action, ...)
+            if action == "FinisherEffect" then
+                local args = {...}
+                local killerName = args[3]
+                local decodedKiller = killerName
+                if type(killerName) == "userdata" and SC_EnumLibrary and SC_EnumLibrary.FromEnum then
+                    local ok, decoded = pcall(SC_EnumLibrary.FromEnum, SC_EnumLibrary, killerName)
+                    if ok and decoded then decodedKiller = decoded end
+                end
+                local isOurKill = tostring(decodedKiller) == LP.Name
+                    or tostring(decodedKiller):lower() == LP.Name:lower()
+                if isOurKill and lastUsedWeapon and SC_equipped[lastUsedWeapon] and SC_equipped[lastUsedWeapon].Finisher then
+                    local finisherData = SC_equipped[lastUsedWeapon].Finisher
+                    local finisherEnum = finisherData.Enum
+                    if not finisherEnum and SC_EnumLibrary then
+                        local ok, result = pcall(SC_EnumLibrary.ToEnum, SC_EnumLibrary, finisherData.Name)
+                        if ok and result then finisherEnum = result end
+                    end
+                    if finisherEnum then
+                        args[1] = finisherEnum
+                        return originalReplicateFromServer(self, action, table.unpack(args))
+                    end
+                end
+            end
+            return originalReplicateFromServer(self, action, ...)
+        end
+    end
+end)
+
+SC_loadConfig()
+print("[SKIN CHANGER] Loaded — config: " .. SC_saveFile)
 
 -- ═══════════════════════════════════════════
 -- LINORIA LIBRARY
@@ -146,7 +464,6 @@ local Tabs = {
     Ragebot      = Window:AddTab("Ragebot"),
     Gun          = Window:AddTab("Gun"),
     ProjectileTP = Window:AddTab("Projectile TP"),
-    SkinChanger  = Window:AddTab("Skin Changer"),
     Visuals      = Window:AddTab("Visuals"),
     World        = Window:AddTab("World"),
     Mechanics    = Window:AddTab("Mechanics"),
@@ -322,193 +639,6 @@ local SafetyCFG = {
 }
 
 -- ═══════════════════════════════════════════
--- SKIN CHANGER CONFIG
--- ═══════════════════════════════════════════
-local SC_FOLDER       = "WeaponSkinsConfigs"
-local localPlayerName = LP.Name
-
-local skinConfig = {
-    AutoLoadConfig   = true,
-    LastLoadedConfig = "default",
-    ActiveSkins      = {},
-    CurrentMaterial  = "SmoothPlastic",
-    MaterialEnabled  = false,
-    Transparency     = 0,
-}
-
-local activeSkinMap      = {}
-local currentWeaponSel   = nil
-local skinDropdown       = nil
-local weaponDropdown     = nil
-local materialToggle     = nil
-local materialDropdown   = nil
-local transparencySlider = nil
-local autoLoadToggle     = nil
-
-local WEAPON_SKINS = {
-    ["Assault Rifle"] = {
-        "AK-47","AUG","Tommy Gun","Phoenix Rifle","Boneclaw Rifle",
-        "10B Visits","AKEY-47","Soul Rifle","Glorious Assault Rifle",
-    },
-    Bow = {
-        "Compound Bow","Raven Bow","Dream Bow","Bat Bow",
-        "Frostbite Bow","Key Bow","Glorious Bow",
-    },
-    ["Burst Rifle"] = {
-        "Aqua Burst","Electro Rifle","FAMAS","Pine Burst",
-        "Spectral Burst","Pixel Burst","Keyst Rifle","Glorious Burst Rifle",
-    },
-    Chainsaw = {
-        "Blobsaw","Handsaws","Mega Drill","Buzzsaw","Glorious Chainsaw",
-    },
-    RPG = {
-        "Nuke Launcher","RPKEY","Spaceship Launcher","Pencil Launcher",
-        "Squid Launcher","Pumpkin Launcher","Showball Launcher","Glorious RPG",
-    },
-    Exogun = {
-        "Singularity","Wondergun","Exogourd","Ray Gun",
-        "Repulsor","Midnight Festive Exogun","Glorious Exogun",
-    },
-    Fists = {
-        "Boxing Gloves","Brass Knuckles","Fists of Hurt",
-        "Festive Fists","Pumpkin Claws","Glorious Fists",
-    },
-    Flamethrower = {
-        "Lamethrower","Pixel Flamethrower","Glitterthrower",
-        "Jack O' Thrower","Snowblower","Glorious Flamethrower",
-    },
-    ["Flare Gun"] = {
-        "Dynamite Gun","Firework Gun","Banana Flare",
-        "Wrapped Flare Gun","Glorious Flare Gun",
-    },
-    ["Freeze Ray"] = {
-        "Bubble Ray","Temporal Ray","Gum Ray",
-        "Wrapped Freeze Ray","Glorious Freeze Ray",
-    },
-    Grenade = {
-        "Water Balloon","Whoopee Cushion","Dynamite","Frozen Grenade",
-        "Spooky Grenade","Soul Grenade","Keynade","Glorious Grenade",
-    },
-    ["Grenade Launcher"] = {
-        "Swashbuckler","Uranium Launcher",
-        "Gearnade Launcher","Glorious Grenade Launcher",
-    },
-    Handgun = {
-        "Blaster","Gumball Handgun","Pumpkin Handgun","Towerstone Handgun",
-        "Warp Handgun","Gingerbread Handgun","Pixel Handgun",
-        "Snowball Gun","Glorious Handgun",
-    },
-    Katana = {
-        "Lightning Bolt","Saber","Stellar Katana","Ice Katana","Pixel Katana",
-        "New Years Katana","Arch Katana","Keytana","Glorious Katana",
-    },
-    Minigun = {
-        "Lasergun 3000","Pixel Minigun","Fighter Jet",
-        "Pumpkin Minigun","Wrapped Minigun","Glorious Minigun",
-    },
-    ["Paintball Gun"] = {
-        "Boba Gun","Slime Gun","Ketchup Gun","Glorious Paintball Gun",
-    },
-    Revolver = {
-        "Sheriff","Desert Eagle","Peppergun",
-        "Boneclaw Revolver","Keyvolver","Glorious Revolver",
-    },
-    Slingshot = {
-        "Goalpost","Stick","Harp","Boneshot",
-        "Reindeer Slingshot","Glorious Slingshot",
-    },
-    ["Subspace Tripmine"] = {
-        "Don't Press","Spring","DIY Tripmine",
-        "Trick or Treat","Glorious Subspace Tripmine",
-    },
-    Uzi = {
-        "Electro Uzi","Water Uzi","Money Gun",
-        "Pine Uzi","Keyzi","Glorious Uzi",
-    },
-    Sniper = {
-        "Pixel Sniper","Hyper Sniper","Event Horizon","Eyething Sniper",
-        "Gingerbread Sniper","Keyper","Glorious Sniper",
-    },
-    Knife = {
-        "Karambit","Chancla","Balisong","Machete",
-        "Keyrambit","Keylisong","Glorious Knife",
-    },
-    Shotgun = {
-        "Balloon Shotgun","Cactus Shotgun","Wrapped Shotgun",
-        "Broomstick Shotgun","Hyper Shotgun","Shotkey","Glorious Shotgun",
-    },
-    Crossbow = {
-        "Pixel Crossbow","Violin Crossbow","Crossbone","Harpoon Crossbow",
-        "Frostbite Crossbow","Arch Crossbow","Glorious Crossbow",
-    },
-    Daggers = {
-        "Aces","Paper Planes","Shurikens","Bat Daggers",
-        "Cookies","Keynais","Glorious Daggers",
-    },
-    Distortion = {
-        "Plasma Distortion","Cyber Distortion","Magma Distortion",
-        "Electropunk Distortion","Sleighstortion","Glorious Distortion",
-    },
-    ["Energy Rifle"] = {
-        "Hacker Rifle","Void Rifle","New Year Energy Rifle",
-        "Apex Rifle","Hydro Rifle","Glorious Energy Rifle",
-    },
-    ["Energy Pistols"] = {
-        "Void Pistols","Hydro Pistols","New Years Energy Pistols",
-        "Soul Pistols","Glorious Energy Pistols",
-    },
-    Gunblade = {
-        "Hyper Gunblade","Gunsaw","Boneblade",
-        "Crude Gunblade","Elf's Gunblade","Glorious Gunblade",
-    },
-    ["Battle Axe"] = {
-        "The Shred","Ban Axe","Cerulean Axe",
-        "Nordic Axe","Keytle Axe","Glorious Battleaxe",
-    },
-    ["Riot Shield"] = {
-        "Door","Masterpiece","Sled",
-        "Tombstone Shield","Glorious Riot Shield",
-    },
-    Scythe = {
-        "Scythe of Death","Sakura Scythe","Bat Scythe",
-        "Keythe","Glorious Scythe",
-    },
-    Trowel = {
-        "Plastic Shovel","Paintbrush","Snow Shovel","Glorious Trowel",
-    },
-    Medkit = {
-        "Sandwich","Medkitty","Coffee","Glorious Medkit",
-    },
-    Molotov = {
-        "Coffee","Torch","Lava Lamp","Glorious Molotov",
-    },
-    Satchel = {
-        "Bag O' Money","Notebook Satchel","Suspicious Gift",
-        "Advanced Satchel","Glorious Satchel",
-    },
-    ["Smoke Grenade"] = {
-        "Emoji Cloud","Balance","Hourglass","Glorious Smoke Grenade",
-    },
-    ["War Horn"] = {
-        "Trumpet","Air Horn","Megaphone","Mammoth Horn",
-        "Boneclaw Horn","Glorious War Horn",
-    },
-    Warpstone = {
-        "Cyber Warpstone","Bonestone","Electropunk Warpstone",
-        "Warpbone","Glorious Warpstone",
-    },
-    Flashbang  = {"Pixel Flashbang","Glorious Flashbang"},
-    ["Jump Pad"] = {"Glorious Jump Pad"},
-    Warper     = {"Glorious Warper"},
-}
-
-local MATERIAL_LIST = {
-    "Plastic","SmoothPlastic","Neon","Metal","Wood","WoodPlanks","Marble",
-    "Slate","Concrete","Granite","Brick","Pebble","Cobblestone","CorrodedMetal",
-    "DiamondPlate","Foil","Glass","Grass","Ice","Sand","Fabric","ForceField",
-}
-
--- ═══════════════════════════════════════════
 -- STATE VARIABLES
 -- ═══════════════════════════════════════════
 local lockedTarget     = nil
@@ -560,9 +690,9 @@ local reloadPatchedOrig   = {}
 local raknetHookActive    = false
 local raknetHookRef       = nil
 
-local tripmineConns    = {}
+local tripmineConns     = {}
 local tripmineVisualMap = {}
-local backstabConn     = nil
+local backstabConn      = nil
 
 local Connections = {}
 
@@ -626,7 +756,6 @@ local ExplosionEffectFn  = nil
 local TracerEffectModule = nil
 local PlayAnimFn         = nil
 local MobileController   = nil
-local viewModels         = nil
 
 pcall(function()
     ExplosionEffectFn = safeRequire(LP.PlayerScripts.Modules.Functions:WaitForChild("ExplosionEffect"))
@@ -639,9 +768,6 @@ pcall(function()
 end)
 pcall(function()
     MobileController = safeRequire(LP.PlayerScripts.Controllers:WaitForChild("MobileController"))
-end)
-pcall(function()
-    viewModels = LP.PlayerScripts.Assets.ViewModels
 end)
 
 local SOUND_IDS = {
@@ -813,193 +939,6 @@ end
 
 local function CacheEnemies()
     EnemyCache = GetEnemiesSorted(ProjectileTPCFG)
-end
-
--- ═══════════════════════════════════════════
--- SKIN CHANGER FUNCTIONS
--- ═══════════════════════════════════════════
-local function SC_ApplySkin(weaponName, skinName, enable)
-    if not weaponName or not viewModels then return end
-    local weaponFolder = nil
-    for _, v in ipairs(viewModels:GetDescendants()) do
-        if v.Name == weaponName then weaponFolder = v; break end
-    end
-    if not weaponFolder then return end
-    if enable then
-        if not skinName then return end
-        local skinFolder = nil
-        for _, v in ipairs(viewModels:GetDescendants()) do
-            if v.Name == skinName then skinFolder = v; break end
-        end
-        if not skinFolder then return end
-        weaponFolder:ClearAllChildren()
-        for _, child in ipairs(skinFolder:GetChildren()) do
-            child:Clone().Parent = weaponFolder
-        end
-        activeSkinMap[weaponName]          = skinName
-        skinConfig.ActiveSkins[weaponName] = skinName
-    else
-        activeSkinMap[weaponName]          = nil
-        skinConfig.ActiveSkins[weaponName] = nil
-    end
-end
-
-local function SC_ApplyMaterial(materialName)
-    if not skinConfig.MaterialEnabled then return end
-    skinConfig.CurrentMaterial = materialName
-    local tempVMs = nil
-    pcall(function() tempVMs = ReplicatedStorage.Assets.Temp.ViewModels end)
-    if not tempVMs then return end
-    for _, child in ipairs(tempVMs:GetChildren()) do
-        if string.find(child.Name, localPlayerName .. " -", 1, true) == 1 then
-            local itemVisual = child:FindFirstChild("ItemVisual")
-            if itemVisual then
-                for _, part in ipairs(itemVisual:GetDescendants()) do
-                    if (part:IsA("MeshPart") or part:IsA("BasePart") or part:IsA("Part"))
-                        and not string.find(string.lower(part.Name), "primary") then
-                        pcall(function() part.Material = Enum.Material[materialName] end)
-                    end
-                end
-            end
-        end
-    end
-end
-
-local function SC_ApplyTransparency(pct)
-    if not skinConfig.MaterialEnabled then return end
-    skinConfig.Transparency = pct
-    local tempVMs = nil
-    pcall(function() tempVMs = ReplicatedStorage.Assets.Temp.ViewModels end)
-    if not tempVMs then return end
-    for _, child in ipairs(tempVMs:GetChildren()) do
-        if string.find(child.Name, localPlayerName .. " -", 1, true) == 1 then
-            local itemVisual = child:FindFirstChild("ItemVisual")
-            if itemVisual then
-                for _, part in ipairs(itemVisual:GetDescendants()) do
-                    if (part:IsA("MeshPart") or part:IsA("BasePart") or part:IsA("Part"))
-                        and not string.find(string.lower(part.Name), "primary") then
-                        pcall(function() part.Transparency = pct / 100 end)
-                    end
-                end
-            end
-        end
-    end
-end
-
-local function SC_WatchViewModels()
-    local tempVMs = nil
-    pcall(function() tempVMs = ReplicatedStorage.Assets.Temp.ViewModels end)
-    if not tempVMs then return end
-    tempVMs.ChildAdded:Connect(function(child)
-        if not skinConfig.MaterialEnabled then return end
-        task.wait(0.1)
-        if string.find(child.Name, localPlayerName .. " -", 1, true) == 1 then
-            SC_ApplyMaterial(skinConfig.CurrentMaterial)
-            SC_ApplyTransparency(skinConfig.Transparency)
-        end
-    end)
-    tempVMs.ChildRemoved:Connect(function(child)
-        if not skinConfig.MaterialEnabled then return end
-        task.wait(0.1)
-        if string.find(child.Name, localPlayerName .. " -", 1, true) == 1 then
-            SC_ApplyMaterial(skinConfig.CurrentMaterial)
-            SC_ApplyTransparency(skinConfig.Transparency)
-        end
-    end)
-end
-
-local function SC_GetConfigList()
-    if not isfolder(SC_FOLDER) then return {} end
-    local list = {}
-    local ok, files = pcall(listfiles, SC_FOLDER)
-    if ok and files then
-        for _, path in pairs(files) do
-            local name = path:match("([^/\\]+)%.json$")
-            if name then table.insert(list, name) end
-        end
-    end
-    return list
-end
-
-local function SC_SaveConfig(configName)
-    if not configName or configName == "" then configName = "default" end
-    if not isfolder(SC_FOLDER) then makefolder(SC_FOLDER) end
-    local path = SC_FOLDER .. "/" .. configName .. ".json"
-    local data = {
-        AutoLoadConfig   = skinConfig.AutoLoadConfig,
-        LastLoadedConfig = configName,
-        ActiveSkins      = skinConfig.ActiveSkins,
-        CurrentMaterial  = skinConfig.CurrentMaterial,
-        MaterialEnabled  = skinConfig.MaterialEnabled,
-        Transparency     = skinConfig.Transparency,
-    }
-    local ok, err = pcall(writefile, path, HttpService:JSONEncode(data))
-    if ok then
-        Library:Notify("Config '" .. configName .. "' saved!", 2)
-    else
-        Library:Notify("Failed to save: " .. tostring(err), 3)
-    end
-end
-
-local function SC_LoadConfig(configName)
-    if not configName or configName == "" then configName = "default" end
-    local path = SC_FOLDER .. "/" .. configName .. ".json"
-    if not isfile(path) then Library:Notify("Config not found!", 2); return end
-    local readOk, raw = pcall(readfile, path)
-    if not readOk then Library:Notify("Failed to read config", 3); return end
-    local decodeOk, data = pcall(function() return HttpService:JSONDecode(raw) end)
-    if not decodeOk or not data then Library:Notify("Failed to decode config", 3); return end
-    skinConfig.AutoLoadConfig   = data.AutoLoadConfig or true
-    skinConfig.ActiveSkins      = data.ActiveSkins or {}
-    skinConfig.CurrentMaterial  = data.CurrentMaterial or "SmoothPlastic"
-    skinConfig.MaterialEnabled  = data.MaterialEnabled or false
-    skinConfig.Transparency     = data.Transparency or 0
-    skinConfig.LastLoadedConfig = configName
-    for weaponName, skinName in pairs(skinConfig.ActiveSkins) do
-        SC_ApplySkin(weaponName, skinName, true)
-    end
-    if skinConfig.MaterialEnabled then
-        SC_ApplyMaterial(skinConfig.CurrentMaterial)
-        SC_ApplyTransparency(skinConfig.Transparency)
-    end
-    if materialToggle     then materialToggle:SetValue(skinConfig.MaterialEnabled)     end
-    if materialDropdown   then materialDropdown:SetValue(skinConfig.CurrentMaterial)   end
-    if transparencySlider then transparencySlider:SetValue(skinConfig.Transparency)    end
-    if autoLoadToggle     then autoLoadToggle:SetValue(skinConfig.AutoLoadConfig)      end
-    local firstWeapon, firstSkin = next(skinConfig.ActiveSkins)
-    if firstWeapon and firstSkin then
-        if weaponDropdown then weaponDropdown:SetValue(firstWeapon) end
-        if skinDropdown and WEAPON_SKINS[firstWeapon] then
-            skinDropdown:SetValues(WEAPON_SKINS[firstWeapon])
-            skinDropdown:SetValue(firstSkin)
-        end
-        currentWeaponSel = firstWeapon
-    end
-    Library:Notify("Config '" .. configName .. "' loaded!", 2)
-end
-
-local function SC_DeleteConfig(configName)
-    if not configName or configName == "" or configName == "default" then
-        Library:Notify("Cannot delete default!", 2); return
-    end
-    local path = SC_FOLDER .. "/" .. configName .. ".json"
-    if not isfile(path) then Library:Notify("Config not found!", 2); return end
-    local ok, err = pcall(delfile, path)
-    if ok then
-        Library:Notify("Deleted '" .. configName .. "'", 2)
-    else
-        Library:Notify("Failed: " .. tostring(err), 3)
-    end
-end
-
-local function SC_AutoLoad()
-    if not isfolder(SC_FOLDER) then makefolder(SC_FOLDER) end
-    if skinConfig.AutoLoadConfig then
-        local target = skinConfig.LastLoadedConfig or "default"
-        if isfile(SC_FOLDER .. "/" .. target .. ".json") then
-            SC_LoadConfig(target)
-        end
-    end
 end
 
 -- ═══════════════════════════════════════════
@@ -1180,9 +1119,7 @@ local function getBackstabHitboxPart()
     local myRoot = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
     if not myRoot then return nil end
     for _, part in ipairs(CollectionService:GetTagged("FireHitbox")) do
-        if (part.Position - myRoot.Position).Magnitude < 15 then
-            return part
-        end
+        if (part.Position - myRoot.Position).Magnitude < 15 then return part end
     end
     return nil
 end
@@ -1488,9 +1425,7 @@ local function startSAManipulation()
             pcall(function() rs.Remotes.Replication.Fighter.UseItem:FireServer(item:Get("ObjectID"), sa_enums_mod:ToEnum("Reload"), {}, nil) end)
             sa_reloadCooldown = 2.0; return
         end
-        local cam    = ws.CurrentCamera.CFrame
-        local tp     = saCurrentTarget
-        local tc     = saCurrentTargetChar
+        local cam = ws.CurrentCamera.CFrame; local tp = saCurrentTarget; local tc = saCurrentTargetChar
         local origin = cam.Position
         sa_ray_params.FilterDescendantsInstances = {LP.Character, tc}
         sa_ray_params.FilterType = Enum.RaycastFilterType.Exclude
@@ -1962,7 +1897,7 @@ local function applyMobileControllerSettings()
     if not MobileController then Library:Notify("MobileController not loaded", 3); return end
     pcall(function()
         if MobileCtrlCFG.ForceEnable then
-            if MobileController.Enable    then MobileController:Enable() end
+            if MobileController.Enable     then MobileController:Enable() end
             if MobileController.SetEnabled then MobileController:SetEnabled(true) end
             local CONSTANTS = safeRequire(ReplicatedStorage.Modules.CONSTANTS)
             if CONSTANTS then
@@ -1990,9 +1925,9 @@ end
 Connections.AutoCollect = RunService.RenderStepped:Connect(function()
     if not AutoCollectCFG.Enabled then return end
     pcall(function()
-        local char   = LP.Character; if not char then return end
-        local myHrp  = char:FindFirstChild("HumanoidRootPart"); if not myHrp then return end
-        local hum    = char:FindFirstChild("Humanoid")
+        local char  = LP.Character; if not char then return end
+        local myHrp = char:FindFirstChild("HumanoidRootPart"); if not myHrp then return end
+        local hum   = char:FindFirstChild("Humanoid")
         local needsHealth = hum and hum.Health < hum.MaxHealth
         for _, obj in ipairs(Workspace:GetChildren()) do
             if obj.Name == "_drop" and obj:IsA("BasePart") then
@@ -2094,10 +2029,7 @@ local function startRakNetHook()
         raknet.add_send_hook(raknetHookRef)
         raknetHookActive = true
     end)
-    if not ok then
-        Library:Notify("RakNet hook failed", 4)
-        RakNetCFG.Enabled = false
-    end
+    if not ok then Library:Notify("RakNet hook failed", 4); RakNetCFG.Enabled = false end
 end
 
 local function stopRakNetHook()
@@ -2114,29 +2046,22 @@ local hitColor    = Color3.fromRGB(255,20,147)
 local hitStayTime = 5
 
 local hitNumberGui = Instance.new("ScreenGui")
-hitNumberGui.Name           = "HitNumbersUI"
-hitNumberGui.ResetOnSpawn   = false
-hitNumberGui.IgnoreGuiInset = true
-hitNumberGui.Parent         = LP:WaitForChild("PlayerGui")
+hitNumberGui.Name="HitNumbersUI"; hitNumberGui.ResetOnSpawn=false
+hitNumberGui.IgnoreGuiInset=true; hitNumberGui.Parent=LP:WaitForChild("PlayerGui")
 
 local function showHit(amount)
     if not hitEnabled then return end
     local label = Instance.new("TextLabel")
-    label.BackgroundTransparency = 1
-    label.AutomaticSize          = Enum.AutomaticSize.XY
-    label.Text                   = tostring(math.floor(amount + 0.5))
-    label.Font                   = Enum.Font.Jura
-    label.TextColor3             = hitColor
-    label.TextSize               = 50
-    label.TextStrokeTransparency = 0
-    label.TextStrokeColor3       = Color3.new(0,0,0)
-    label.TextTransparency       = 1
-    label.Position               = UDim2.new(0.5, math.random(-180,180), 0.45, math.random(-120,120))
-    label.AnchorPoint            = Vector2.new(0.5,0.5)
-    label.Parent                 = hitNumberGui
-    TweenService:Create(label, TweenInfo.new(0.3), {TextTransparency=0}):Play()
-    task.delay(hitStayTime, function()
-        TweenService:Create(label, TweenInfo.new(1), {TextTransparency=1}):Play()
+    label.BackgroundTransparency=1; label.AutomaticSize=Enum.AutomaticSize.XY
+    label.Text=tostring(math.floor(amount+0.5)); label.Font=Enum.Font.Jura
+    label.TextColor3=hitColor; label.TextSize=50
+    label.TextStrokeTransparency=0; label.TextStrokeColor3=Color3.new(0,0,0)
+    label.TextTransparency=1
+    label.Position=UDim2.new(0.5,math.random(-180,180),0.45,math.random(-120,120))
+    label.AnchorPoint=Vector2.new(0.5,0.5); label.Parent=hitNumberGui
+    TweenService:Create(label,TweenInfo.new(0.3),{TextTransparency=0}):Play()
+    task.delay(hitStayTime,function()
+        TweenService:Create(label,TweenInfo.new(1),{TextTransparency=1}):Play()
         task.wait(1); label:Destroy()
     end)
 end
@@ -2166,15 +2091,15 @@ end
 -- HIT SOUNDS
 -- ═══════════════════════════════════════════
 local hitSoundReplacements = {
-    [16530229616]=8941612531, [16530229541]=8941612531, [16530229695]=8941612531,
-    [16537337310]=5043539486, [16537449730]=5043539486,
-    [16810041280]=140314442804013, [13110130082]=97859770743369,
+    [16530229616]=8941612531,[16530229541]=8941612531,[16530229695]=8941612531,
+    [16537337310]=5043539486,[16537449730]=5043539486,
+    [16810041280]=140314442804013,[13110130082]=97859770743369,
 }
 
 local function replaceSound(obj)
     for oldId, newId in pairs(hitSoundReplacements) do
-        if obj.SoundId == "rbxassetid://" .. tostring(oldId) or obj.SoundId:find(tostring(oldId)) then
-            obj.SoundId = "rbxassetid://" .. tostring(newId); return
+        if obj.SoundId == "rbxassetid://"..tostring(oldId) or obj.SoundId:find(tostring(oldId)) then
+            obj.SoundId = "rbxassetid://"..tostring(newId); return
         end
     end
 end
@@ -2347,7 +2272,7 @@ local function startTriggerbot()
         local rp = RaycastParams.new()
         rp.FilterType = Enum.RaycastFilterType.Exclude
         rp.FilterDescendantsInstances = {LP.Character}; rp.IgnoreWater = true
-        local result  = Workspace:Raycast(camera.CFrame.Position, camera.CFrame.LookVector * TriggerbotCFG.MaxDistance, rp)
+        local result = Workspace:Raycast(camera.CFrame.Position, camera.CFrame.LookVector * TriggerbotCFG.MaxDistance, rp)
         local shouldFire = false
         if result then
             local hm = result.Instance:FindFirstAncestorOfClass("Model")
@@ -2420,7 +2345,6 @@ local function disableAll()
     MechCFG.JumpPower       = 1;     setJumpPower(1)
     RakNetCFG.Enabled       = false; stopRakNetHook()
     WeaponsCFG.ReloadSpeedEnabled = false; applyReloadPatch()
-    skinConfig.MaterialEnabled    = false
     lockedTarget = nil; lockTimer = 0; resetDelayedPos()
     if fovCircle   then fovCircle.Visible   = false end
     if saFovCircle then saFovCircle.Visible = false end
@@ -2510,15 +2434,15 @@ LB_F:AddToggle("AimbotDrawFOV",    {Text="Draw FOV",    Default=false, Callback=
 LB_F:AddDropdown("AimbotFOVStyle", {Text="FOV Style",   Default="Half", Values={"Half","Filled","Invisible"}, Callback=function(v) AimbotCFG.FOVStyle=v end})
 LB_F:AddToggle("AimbotDynFOV",     {Text="Dynamic FOV", Default=false, Callback=function(v) AimbotCFG.DynamicFOV=v end})
 
-LB_T:AddToggle("TriggerOn",    {Text="Enabled",     Default=false, Callback=function(v) TriggerbotCFG.On=v; if v then startTriggerbot() else stopTriggerbot() end end})
-LB_T:AddDropdown("TriggerMode",{Text="Mode",        Default="Always", Values={"Always","Scoped Only","On Aimbot Target"}, Callback=function(v) TriggerbotCFG.Mode=v end})
-LB_T:AddSlider("TriggerDelay", {Text="Delay (ms)",  Default=0,    Min=0,  Max=500,  Rounding=0, Callback=function(v) TriggerbotCFG.Delay=v      end})
-LB_T:AddSlider("TriggerDist",  {Text="Max Distance",Default=1000, Min=10, Max=5000, Rounding=0, Callback=function(v) TriggerbotCFG.MaxDistance=v end})
-LB_T:AddDropdown("TriggerPart",{Text="Target Part", Default="Head", Values=ALL_TARGET_OPTIONS, Callback=function(v) TriggerbotCFG.TargetPart=v end})
-LB_T:AddToggle("TriggerTeam",  {Text="Team Check",   Default=true,  Callback=function(v) TriggerbotCFG.TeamCheck=v    end})
-LB_T:AddToggle("TriggerVis",   {Text="Visible Check",Default=false, Callback=function(v) TriggerbotCFG.VisibleCheck=v end})
-LB_T:AddToggle("TriggerAuto",  {Text="Auto Fire",    Default=true,  Callback=function(v) TriggerbotCFG.AutoFire=v     end})
-LB_T:AddSlider("TriggerBurst", {Text="Burst Count",  Default=1, Min=1, Max=10, Rounding=0, Callback=function(v) TriggerbotCFG.BurstCount=v end})
+LB_T:AddToggle("TriggerOn",    {Text="Enabled",      Default=false, Callback=function(v) TriggerbotCFG.On=v; if v then startTriggerbot() else stopTriggerbot() end end})
+LB_T:AddDropdown("TriggerMode",{Text="Mode",         Default="Always", Values={"Always","Scoped Only","On Aimbot Target"}, Callback=function(v) TriggerbotCFG.Mode=v end})
+LB_T:AddSlider("TriggerDelay", {Text="Delay (ms)",   Default=0,    Min=0,  Max=500,  Rounding=0, Callback=function(v) TriggerbotCFG.Delay=v      end})
+LB_T:AddSlider("TriggerDist",  {Text="Max Distance", Default=1000, Min=10, Max=5000, Rounding=0, Callback=function(v) TriggerbotCFG.MaxDistance=v end})
+LB_T:AddDropdown("TriggerPart",{Text="Target Part",  Default="Head", Values=ALL_TARGET_OPTIONS, Callback=function(v) TriggerbotCFG.TargetPart=v end})
+LB_T:AddToggle("TriggerTeam",  {Text="Team Check",    Default=true,  Callback=function(v) TriggerbotCFG.TeamCheck=v    end})
+LB_T:AddToggle("TriggerVis",   {Text="Visible Check", Default=false, Callback=function(v) TriggerbotCFG.VisibleCheck=v end})
+LB_T:AddToggle("TriggerAuto",  {Text="Auto Fire",     Default=true,  Callback=function(v) TriggerbotCFG.AutoFire=v     end})
+LB_T:AddSlider("TriggerBurst", {Text="Burst Count",   Default=1, Min=1, Max=10, Rounding=0, Callback=function(v) TriggerbotCFG.BurstCount=v end})
 
 -- ═══════════════════════════════════════════
 -- UI — SILENT AIM TAB
@@ -2613,127 +2537,18 @@ GN_R:AddButton({Text="Restore Reload", Func=function() WeaponsCFG.ReloadSpeedEna
 local PT_L = Tabs.ProjectileTP:AddLeftGroupbox("Projectile Teleport")
 local PT_R = Tabs.ProjectileTP:AddRightGroupbox("Filters & Priority")
 
-PT_L:AddToggle("ProjEnabled",  {Text="Enable",       Default=false, Callback=function(v) ProjectileTPCFG.Enabled=v end})
-PT_L:AddToggle("ProjAutoShoot",{Text="Auto Shoot",   Default=false, Callback=function(v) ProjectileTPCFG.AutoShoot=v end})
-PT_L:AddDropdown("ProjHitbox", {Text="Target Hitbox",Default="HitBoxHeadSmall",Values={"HitBoxHeadSmall","HitBoxHead","Head","HumanoidRootPart"},Callback=function(v) ProjectileTPCFG.TargetPart=v end})
+PT_L:AddToggle("ProjEnabled",  {Text="Enable",        Default=false, Callback=function(v) ProjectileTPCFG.Enabled=v end})
+PT_L:AddToggle("ProjAutoShoot",{Text="Auto Shoot",    Default=false, Callback=function(v) ProjectileTPCFG.AutoShoot=v end})
+PT_L:AddDropdown("ProjHitbox", {Text="Target Hitbox", Default="HitBoxHeadSmall", Values={"HitBoxHeadSmall","HitBoxHead","Head","HumanoidRootPart"}, Callback=function(v) ProjectileTPCFG.TargetPart=v end})
 PT_L:AddSlider("ProjDelay",    {Text="Loop Delay (ms)",Default=10,Min=1,Max=100,Rounding=0,Callback=function(v) ProjectileTPCFG.LoopDelay=v/1000 end})
-PT_L:AddSlider("ProjAttempts", {Text="Shoot Attempts",Default=1,Min=1,Max=10,Rounding=0,Callback=function(v) ProjectileTPCFG.ShootAttempts=v end})
-PT_L:AddSlider("ProjHitboxSz", {Text="Hitbox Size",  Default=5,Min=1,Max=50,Rounding=0,Callback=function(v) ProjectileTPCFG.HitboxSize=v end})
+PT_L:AddSlider("ProjAttempts", {Text="Shoot Attempts", Default=1, Min=1,Max=10, Rounding=0,Callback=function(v) ProjectileTPCFG.ShootAttempts=v end})
+PT_L:AddSlider("ProjHitboxSz", {Text="Hitbox Size",   Default=5, Min=1,Max=50, Rounding=0,Callback=function(v) ProjectileTPCFG.HitboxSize=v end})
 
 PT_R:AddDropdown("ProjPriority",{Text="Target Priority",Default="Closest",Values={"Closest","Furthest","Random","Lowest HP","Highest HP"},Callback=function(v) ProjectileTPCFG.Priority=v end})
-PT_R:AddToggle("ProjTeamCheck", {Text="Team Check",   Default=true,  Callback=function(v) ProjectileTPCFG.TeamCheck=v end})
-PT_R:AddToggle("ProjVisCheck",  {Text="Visible Check",Default=false, Callback=function(v) ProjectileTPCFG.VisCheck=v  end})
-PT_R:AddSlider("ProjMaxDist",   {Text="Max Distance", Default=999, Min=10, Max=999, Rounding=0, Callback=function(v) ProjectileTPCFG.MaxDistance=v end})
+PT_R:AddToggle("ProjTeamCheck", {Text="Team Check",    Default=true,  Callback=function(v) ProjectileTPCFG.TeamCheck=v end})
+PT_R:AddToggle("ProjVisCheck",  {Text="Visible Check", Default=false, Callback=function(v) ProjectileTPCFG.VisCheck=v  end})
+PT_R:AddSlider("ProjMaxDist",   {Text="Max Distance",  Default=999, Min=10, Max=999, Rounding=0, Callback=function(v) ProjectileTPCFG.MaxDistance=v end})
 PT_R:AddLabel("Works with: Bow, Daggers, Slingshot")
-
--- ═══════════════════════════════════════════
--- UI — SKIN CHANGER TAB
--- ═══════════════════════════════════════════
-local SC_Left  = Tabs.SkinChanger:AddLeftGroupbox("Skin Selection")
-local SC_Right = Tabs.SkinChanger:AddRightGroupbox("Skin Options")
-local SC_Mat   = Tabs.SkinChanger:AddLeftGroupbox("Material / Transparency")
-local SC_Cfg   = Tabs.SkinChanger:AddRightGroupbox("Config")
-
-local weaponList = {}
-for w in pairs(WEAPON_SKINS) do table.insert(weaponList, w) end
-table.sort(weaponList)
-currentWeaponSel = weaponList[1] or "Assault Rifle"
-
-weaponDropdown = SC_Left:AddDropdown("SC_WeaponSelect", {
-    Text    = "Select Weapon",
-    Default = currentWeaponSel,
-    Values  = weaponList,
-    Callback = function(v)
-        currentWeaponSel = v
-        if skinDropdown and WEAPON_SKINS[v] then
-            skinDropdown:SetValues(WEAPON_SKINS[v])
-            skinDropdown:SetValue(WEAPON_SKINS[v][1])
-        end
-    end,
-})
-
-skinDropdown = SC_Right:AddDropdown("SC_SkinSelect", {
-    Text    = "Select Skin",
-    Default = WEAPON_SKINS[currentWeaponSel] and WEAPON_SKINS[currentWeaponSel][1] or "None",
-    Values  = WEAPON_SKINS[currentWeaponSel] or {},
-    Callback = function(v)
-        if currentWeaponSel then
-            SC_ApplySkin(currentWeaponSel, v, true)
-            Library:Notify("Applied " .. v .. " to " .. currentWeaponSel, 2)
-        end
-    end,
-})
-
-SC_Left:AddButton({Text="Remove Skin for Selected Weapon", Func=function()
-    if currentWeaponSel then
-        SC_ApplySkin(currentWeaponSel, nil, false)
-        Library:Notify("Removed skin from " .. currentWeaponSel, 2)
-    end
-end})
-
-SC_Left:AddButton({Text="Remove All Skins", Func=function()
-    for weaponName in pairs(activeSkinMap) do
-        SC_ApplySkin(weaponName, nil, false)
-    end
-    Library:Notify("All skins removed", 2)
-end})
-
-SC_Left:AddLabel("Active skins are saved to config")
-
-materialToggle = SC_Mat:AddToggle("SC_MatEnabled", {
-    Text    = "Enable Material Override",
-    Default = false,
-    Callback = function(v)
-        skinConfig.MaterialEnabled = v
-        if v then
-            SC_ApplyMaterial(skinConfig.CurrentMaterial)
-            SC_ApplyTransparency(skinConfig.Transparency)
-        end
-    end,
-})
-
-materialDropdown = SC_Mat:AddDropdown("SC_MatSelect", {
-    Text    = "Select Material",
-    Default = "SmoothPlastic",
-    Values  = MATERIAL_LIST,
-    Callback = function(v)
-        skinConfig.CurrentMaterial = v
-        SC_ApplyMaterial(v)
-    end,
-})
-
-transparencySlider = SC_Mat:AddSlider("SC_Transparency", {
-    Text     = "Transparency %",
-    Default  = 0,
-    Min      = 0,
-    Max      = 100,
-    Rounding = 0,
-    Callback = function(v) SC_ApplyTransparency(v) end,
-})
-
-local configNameInput = "default"
-SC_Cfg:AddInput("SC_ConfigName", {
-    Default     = "default",
-    Numeric     = false,
-    Finished    = false,
-    Text        = "Config Name",
-    Placeholder = "Enter config name...",
-    Callback    = function(v) configNameInput = v end,
-})
-SC_Cfg:AddButton({Text="Save Config",   Func=function() SC_SaveConfig(configNameInput) end})
-SC_Cfg:AddButton({Text="Load Config",   Func=function() SC_LoadConfig(configNameInput) end})
-SC_Cfg:AddButton({Text="Delete Config", Func=function() SC_DeleteConfig(configNameInput) end, DoubleClick=true})
-SC_Cfg:AddButton({Text="List Configs",  Func=function()
-    local list = SC_GetConfigList()
-    Library:Notify(#list .. " config(s) found — see console", 2)
-    for _, name in pairs(list) do print("[SC Config] " .. name) end
-end})
-
-autoLoadToggle = SC_Cfg:AddToggle("SC_AutoLoad", {
-    Text    = "Auto-Load on Start",
-    Default = true,
-    Callback = function(v) skinConfig.AutoLoadConfig = v end,
-})
 
 -- ═══════════════════════════════════════════
 -- UI — VISUALS TAB
@@ -2750,9 +2565,9 @@ crosshairImg.BackgroundTransparency=1; crosshairImg.AnchorPoint=Vector2.new(0.5,
 crosshairImg.Position=UDim2.new(0.5,0,0.5,0); crosshairImg.Size=UDim2.new(0,24,0,24)
 crosshairImg.Image="rbxassetid://97119437608195"; crosshairImg.ImageTransparency=1
 
-VS_L:AddToggle("CrossOn",   {Text="Enable Crosshair",Default=false,Callback=function(v) crosshairImg.ImageTransparency=v and 0 or 1; UIS.MouseIconEnabled=not v end})
+VS_L:AddToggle("CrossOn",   {Text="Enable Crosshair", Default=false, Callback=function(v) crosshairImg.ImageTransparency=v and 0 or 1; UIS.MouseIconEnabled=not v end})
 VS_L:AddSlider("CrossSize", {Text="Size",             Default=24, Min=8, Max=64, Rounding=0, Callback=function(v) crosshairImg.Size=UDim2.new(0,v,0,v) end})
-VS_R:AddToggle("HitNumOn",  {Text="Enable Hit Numbers",Default=true,Callback=function(v) hitEnabled=v end})
+VS_R:AddToggle("HitNumOn",  {Text="Enable Hit Numbers",Default=true, Callback=function(v) hitEnabled=v end})
 VS_R:AddLabel("Color"):AddColorPicker("HitNumColor",{Default=Color3.fromRGB(255,20,147),Callback=function(v) hitColor=v end})
 VS_R:AddSlider("HitNumDur", {Text="Duration (s)",     Default=5, Min=1, Max=10, Rounding=1, Callback=function(v) hitStayTime=v end})
 
@@ -2888,9 +2703,9 @@ MS_AC:AddToggle("CollectHealth",{Text="Health Drops",Default=true, Tooltip="Only
 MS_AC:AddToggle("CollectAmmo",  {Text="Ammo Drops",  Default=true, Callback=function(v) AutoCollectCFG.CollectAmmo=v end})
 
 MS_OOB:AddLabel("3 layers: Remote spoof, Module patch, Hide parts")
-MS_OOB:AddToggle("AntiOOBEnabled",{Text="Enable",       Default=false,Callback=function(v) AntiOOBCFG.Enabled=v; if v then startAntiOOB() else stopAntiOOB() end end})
-MS_OOB:AddToggle("AntiOOBSpoof",  {Text="Spoof Remote", Default=true, Callback=function(v) AntiOOBCFG.SpoofRemote=v end})
-MS_OOB:AddToggle("AntiOOBPatch",  {Text="Patch Module", Default=true, Callback=function(v) AntiOOBCFG.PatchModule=v; if v and AntiOOBCFG.Enabled then antiOOB_PatchModule() end end})
+MS_OOB:AddToggle("AntiOOBEnabled",{Text="Enable",        Default=false,Callback=function(v) AntiOOBCFG.Enabled=v; if v then startAntiOOB() else stopAntiOOB() end end})
+MS_OOB:AddToggle("AntiOOBSpoof",  {Text="Spoof Remote",  Default=true, Callback=function(v) AntiOOBCFG.SpoofRemote=v end})
+MS_OOB:AddToggle("AntiOOBPatch",  {Text="Patch Module",  Default=true, Callback=function(v) AntiOOBCFG.PatchModule=v; if v and AntiOOBCFG.Enabled then antiOOB_PatchModule() end end})
 MS_OOB:AddToggle("AntiOOBHide",   {Text="Hide OOB Parts",Default=false,Callback=function(v) AntiOOBCFG.HideParts=v; if v and AntiOOBCFG.Enabled then antiOOB_HideOOBParts(true) end end})
 MS_OOB:AddButton({Text="Force Apply",Func=function() startAntiOOB(); Library:Notify("Applied",2) end})
 
@@ -2908,10 +2723,10 @@ MS_BS:AddToggle("BackstabEnabled",{
         else stopAutoBackstab() end
     end,
 })
-MS_BS:AddToggle("BackstabOnlyKnife",{Text="Knife Only",Default=true,Tooltip="Only when holding a knife",Callback=function(v) AutoBackstabCFG.OnlyKnife=v end})
-MS_BS:AddSlider("BackstabMaxDist",  {Text="Max Distance",Default=8,Min=1,Max=20,Rounding=0,Callback=function(v) AutoBackstabCFG.MaxDistance=v end})
+MS_BS:AddToggle("BackstabOnlyKnife",{Text="Knife Only",  Default=true, Tooltip="Only when holding a knife",Callback=function(v) AutoBackstabCFG.OnlyKnife=v end})
+MS_BS:AddSlider("BackstabMaxDist",  {Text="Max Distance",Default=8, Min=1,Max=20, Rounding=0,Callback=function(v) AutoBackstabCFG.MaxDistance=v end})
 MS_BS:AddSlider("BackstabFireRate", {Text="Fire Rate (ms)",Default=50,Min=10,Max=500,Rounding=0,Callback=function(v) AutoBackstabCFG.FireRate=v/1000 end})
-MS_BS:AddToggle("BackstabTeamCheck",{Text="Team Check",Default=true,Callback=function(v) AutoBackstabCFG.TeamCheck=v end})
+MS_BS:AddToggle("BackstabTeamCheck",{Text="Team Check",  Default=true, Callback=function(v) AutoBackstabCFG.TeamCheck=v end})
 
 MS_TM:AddLabel("Reveals enemy mines that normally fade in")
 MS_TM:AddLabel("Uses SubspaceTripmine CollectionService tag")
@@ -2923,8 +2738,8 @@ MS_TM:AddToggle("AntiTripmineEnabled",{
         else stopAntiTripmine() end
     end,
 })
-MS_TM:AddToggle("AntiTripmineVisible",{Text="Make Enemy Mines Visible",Default=true,Tooltip="Forces LocalTransparencyModifier=0",Callback=function(v) AntiTripmineCFG.MakeVisible=v end})
-MS_TM:AddToggle("AntiTripmineDestroy",{Text="Auto Detonate Mine",Default=false,Tooltip="firetouchinterest on mine Hitbox",Callback=function(v) AntiTripmineCFG.AutoDestroyMine=v end})
+MS_TM:AddToggle("AntiTripmineVisible",{Text="Make Enemy Mines Visible",Default=true, Tooltip="Forces LocalTransparencyModifier=0",Callback=function(v) AntiTripmineCFG.MakeVisible=v end})
+MS_TM:AddToggle("AntiTripmineDestroy",{Text="Auto Detonate Mine",      Default=false,Tooltip="firetouchinterest on mine Hitbox",  Callback=function(v) AntiTripmineCFG.AutoDestroyMine=v end})
 MS_TM:AddButton({Text="Reveal All Active Mines",Func=function()
     local count=0
     for _, obj in ipairs(CollectionService:GetTagged("SubspaceTripmine")) do
@@ -2957,10 +2772,10 @@ ST_R:AddButton({
         for _, conn in pairs(Connections) do
             if typeof(conn) == "RBXScriptConnection" then conn:Disconnect() end
         end
-        for _, conn in ipairs(antiOOBConns)        do pcall(function() conn:Disconnect() end) end
-        for _, conn in ipairs(tracerConns)          do pcall(function() conn:Disconnect() end) end
-        for _, conn in ipairs(explosionDeathConns)  do pcall(function() conn:Disconnect() end) end
-        for _, conn in ipairs(tripmineConns)        do pcall(function() conn:Disconnect() end) end
+        for _, conn in ipairs(antiOOBConns)       do pcall(function() conn:Disconnect() end) end
+        for _, conn in ipairs(tracerConns)         do pcall(function() conn:Disconnect() end) end
+        for _, conn in ipairs(explosionDeathConns) do pcall(function() conn:Disconnect() end) end
+        for _, conn in ipairs(tripmineConns)       do pcall(function() conn:Disconnect() end) end
         if backstabConn       then backstabConn:Disconnect()       end
         if ragebotPersistConn then ragebotPersistConn:Disconnect() end
         stopRakNetHook(); stopAntiOOB(); stopLoopExplosions()
@@ -2987,22 +2802,15 @@ ThemeManager:ApplyToTab(Tabs.Settings)
 SaveManager:LoadAutoloadConfig()
 
 -- ═══════════════════════════════════════════
--- INIT
--- ═══════════════════════════════════════════
-SC_WatchViewModels()
-SC_AutoLoad()
-
--- ═══════════════════════════════════════════
 -- LOAD COMPLETE
 -- ═══════════════════════════════════════════
 Library:Notify("Rivals Tool loaded — " .. (IsMobile and "MOBILE" or "PC") .. " | DELETE = Emergency Stop", 6)
 print("[RIVALS TOOL] " .. (IsMobile and "MOBILE" or "PC"))
 print("[AC BYPASS]  Kick hook ✓ | Mouse proxy ✓ | getfenv scrub ✓ | Pipeline pending")
+print("[SKIN]       CosmeticLibrary hook active — config: " .. SC_saveFile)
 print("[AIMBOT]     CameraController: " .. (CameraController and "✓" or "✗"))
 print("[AIMBOT]     Shooting range filter: ACTIVE")
-print("[DUMMY]      ShootingRangeEntities child index mode")
 print("[SA]         hookmetamethod: " .. (hookmetamethod and "✓" or "✗"))
-print("[SKIN]       ViewModels: " .. (viewModels and "✓" or "✗"))
 print("[BACKSTAB]   FireHitbox tag + dot product behind check")
 print("[TRIPMINE]   SubspaceTripmine CollectionService reveal")
 print("[EFFECTS]    Explosion: " .. (ExplosionEffectFn and "✓" or "✗") .. " | Tracer: " .. (TracerEffectModule and "✓" or "✗"))

@@ -2,7 +2,7 @@
     RIVALS TOOL v2 — Full Script
     - Proper AC bypass (no Player:GetMouse(), cloneref everywhere)
     - Skin/Charm/Dance/Wrap changer integrated into Skins tab
-    - Silent Aim via util_raycast hook
+    - Silent Aim via util.Raycast hook
     - Fixed Triggerbot
     - PC/Mobile input system
 ]]
@@ -28,11 +28,6 @@ local camera        = Workspace.CurrentCamera
 
 -- ═══════════════════════════════════════════
 -- AC BYPASS
--- The only thing Rivals detects:
--- 1. Player:GetMouse() being referenced (weak table check)
--- 2. game:Kick() returning successfully (hook detection)
--- 3. CameraSecurity __index checking for hookfunction in getfenv
--- Fix: Never use Player:GetMouse(), use cloneref, use newcclosure
 -- ═══════════════════════════════════════════
 if hookmetamethod then
     if not game:IsLoaded() then game.Loaded:Wait() end
@@ -41,7 +36,6 @@ if hookmetamethod then
             if typeof(v) == "function" then
                 local ok, s = pcall(debug.info, v, "s")
                 if ok and s and string.find(s, "AnalyticsPipelineController") then
-                    -- Neutralize the ban function cleanly
                     hookfunction(v, newcclosure(function(...) return end))
                 end
             end
@@ -50,7 +44,7 @@ if hookmetamethod then
 end
 
 -- ═══════════════════════════════════════════
--- PLATFORM / INPUT — Never uses Player:GetMouse()
+-- PLATFORM / INPUT
 -- ═══════════════════════════════════════════
 local DetectedPlatform = (UIS.TouchEnabled and not UIS.KeyboardEnabled) and "Mobile" or "PC"
 local ActivePlatform   = DetectedPlatform
@@ -70,7 +64,6 @@ local InputCFG = {
 }
 
 local function getMousePosition()
-    -- NEVER Player:GetMouse() — that's what gets you banned
     local pos  = UIS:GetMouseLocation()
     local offX = InputCFG.Platform == "PC" and InputCFG.PC_OffsetX or InputCFG.MB_OffsetX
     local offY = InputCFG.Platform == "PC" and InputCFG.PC_OffsetY or InputCFG.MB_OffsetY
@@ -168,54 +161,38 @@ end)
 -- ═══════════════════════════════════════════
 -- SKIN CHANGER MODULES
 -- ═══════════════════════════════════════════
-local EnumLibrary     = nil
-local CosmeticLibrary = nil
-local ItemLibrary     = nil
-local DataController  = nil
+local EnumLibrary       = nil
+local CosmeticLibrary   = nil
+local ItemLibrary       = nil
+local DataController    = nil
 local FighterController = nil
-local ClientItem      = nil
-local ClientViewModel = nil
-local viewModelModule = nil
-local EmoteController = nil
+local ClientItem        = nil
+local ClientViewModel   = nil
+local viewModelModule   = nil
+local EmoteController   = nil
 
 pcall(function()
     EnumLibrary = require(ReplicatedStorage.Modules:WaitForChild("EnumLibrary", 10))
     if EnumLibrary then EnumLibrary:WaitForEnumBuilder() end
 end)
-pcall(function()
-    CosmeticLibrary = require(ReplicatedStorage.Modules:WaitForChild("CosmeticLibrary", 10))
-end)
-pcall(function()
-    ItemLibrary = require(ReplicatedStorage.Modules:WaitForChild("ItemLibrary", 10))
-end)
-pcall(function()
-    DataController = require(controllers:WaitForChild("PlayerDataController", 10))
-end)
-pcall(function()
-    FighterController = require(controllers:WaitForChild("FighterController", 10))
-end)
-pcall(function()
-    ClientItem = require(LP.PlayerScripts.Modules.ClientReplicatedClasses.ClientFighter.ClientItem)
-end)
+pcall(function() CosmeticLibrary = require(ReplicatedStorage.Modules:WaitForChild("CosmeticLibrary", 10)) end)
+pcall(function() ItemLibrary     = require(ReplicatedStorage.Modules:WaitForChild("ItemLibrary", 10)) end)
+pcall(function() DataController  = require(controllers:WaitForChild("PlayerDataController", 10)) end)
+pcall(function() FighterController = require(controllers:WaitForChild("FighterController", 10)) end)
+pcall(function() ClientItem = require(LP.PlayerScripts.Modules.ClientReplicatedClasses.ClientFighter.ClientItem) end)
 pcall(function()
     viewModelModule = LP.PlayerScripts.Modules.ClientReplicatedClasses.ClientFighter.ClientItem
         :FindFirstChild("ClientViewModel")
-    if viewModelModule then
-        ClientViewModel = require(viewModelModule)
-    end
+    if viewModelModule then ClientViewModel = require(viewModelModule) end
 end)
-pcall(function()
-    EmoteController = require(controllers:WaitForChild("EmoteController", 10))
-end)
+pcall(function() EmoteController = require(controllers:WaitForChild("EmoteController", 10)) end)
 
--- Skin changer state
 local equipped           = {}
 local favorites          = {}
 local constructingWeapon = nil
 local viewingProfile     = nil
 local lastUsedWeapon     = nil
-
-local skinChangerEnabled = false -- master toggle from UI
+local skinChangerEnabled = false
 
 -- ─────────────────────────────────────────
 -- SKIN CHANGER CORE
@@ -228,9 +205,9 @@ local function cloneCosmetic(name, cosmeticType, options)
     if not base then return nil end
     local data = {}
     for k, v in pairs(base) do data[k] = v end
-    data.Name  = name
-    data.Type  = data.Type or cosmeticType
-    data.Seed  = data.Seed or math.random(1, 1000000)
+    data.Name = name
+    data.Type = data.Type or cosmeticType
+    data.Seed = data.Seed or math.random(1, 1000000)
     if EnumLibrary then
         local ok, enumId = pcall(EnumLibrary.ToEnum, EnumLibrary, name)
         if ok and enumId then
@@ -286,26 +263,18 @@ local function loadConfig()
     end)
 end
 
--- ─────────────────────────────────────────
--- COSMETIC OWNERSHIP PATCHES
--- All types: Skin, Charm, Dance, Emote, Wrap
--- Excludes Finishers intentionally
--- ─────────────────────────────────────────
 local function isCosmeticAllowed(name, cosmetic)
     if not cosmetic then return false end
     if not skinChangerEnabled then return false end
-    -- Exclude finishers
     local t = cosmetic.Type or ""
     if t == "Finisher" then return false end
     if name:lower():find("finisher") then return false end
-    -- Allow everything else
     return true
 end
 
 local function applyCosmeticOwnershipPatches()
     if not CosmeticLibrary or not DataController then return end
 
-    -- Unified OwnsCosmetic override
     CosmeticLibrary.OwnsCosmetic = function(self, inventory, name, weapon)
         if name:find("MISSING_") then return false end
         local cosmetic = CosmeticLibrary.Cosmetics[name]
@@ -316,7 +285,6 @@ local function applyCosmeticOwnershipPatches()
     CosmeticLibrary.OwnsCosmeticUniversally = CosmeticLibrary.OwnsCosmetic
     CosmeticLibrary.OwnsCosmeticForWeapon   = CosmeticLibrary.OwnsCosmetic
 
-    -- Unified DataController.Get override
     local originalGet = DataController.Get
     DataController.Get = function(self, key)
         local data = originalGet(self, key)
@@ -325,9 +293,7 @@ local function applyCosmeticOwnershipPatches()
             if data then
                 for k, v in pairs(data) do
                     local cosmetic = CosmeticLibrary.Cosmetics[k]
-                    if cosmetic and isCosmeticAllowed(k, cosmetic) then
-                        proxy[k] = v
-                    end
+                    if cosmetic and isCosmeticAllowed(k, cosmetic) then proxy[k] = v end
                 end
             end
             return setmetatable(proxy, {
@@ -354,7 +320,6 @@ local function applyCosmeticOwnershipPatches()
         return data
     end
 
-    -- Unified DataController.GetWeaponData override
     local originalGetWeaponData = DataController.GetWeaponData
     DataController.GetWeaponData = function(self, weaponName)
         local data = originalGetWeaponData(self, weaponName)
@@ -371,36 +336,29 @@ local function applyCosmeticOwnershipPatches()
     end
 end
 
--- ─────────────────────────────────────────
--- REMOTE HOOKS — Single unified __namecall hook
--- Handles Skin, Charm, Dance/Emote, Wrap equip + favorite
--- ─────────────────────────────────────────
 local remoteHookApplied = false
 
 local function applyRemoteHook()
     if remoteHookApplied then return end
     if not hookmetamethod then return end
 
-    local remotes           = rs:FindFirstChild("Remotes")
-    local dataRemotes       = remotes and remotes:FindFirstChild("Data")
-    local equipRemote       = dataRemotes and dataRemotes:FindFirstChild("EquipCosmetic")
-    local favoriteRemote    = dataRemotes and dataRemotes:FindFirstChild("FavoriteCosmetic")
+    local remotes            = rs:FindFirstChild("Remotes")
+    local dataRemotes        = remotes and remotes:FindFirstChild("Data")
+    local equipRemote        = dataRemotes and dataRemotes:FindFirstChild("EquipCosmetic")
+    local favoriteRemote     = dataRemotes and dataRemotes:FindFirstChild("FavoriteCosmetic")
     local replicationRemotes = remotes and remotes:FindFirstChild("Replication")
-    local fighterRemotes    = replicationRemotes and replicationRemotes:FindFirstChild("Fighter")
-    local useItemRemote     = fighterRemotes and fighterRemotes:FindFirstChild("UseItem")
+    local fighterRemotes     = replicationRemotes and replicationRemotes:FindFirstChild("Fighter")
+    local useItemRemote      = fighterRemotes and fighterRemotes:FindFirstChild("UseItem")
 
     if not equipRemote then return end
 
     local oldNamecall
     oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
         local method = getnamecallmethod()
-        if method ~= "FireServer" then
-            return oldNamecall(self, ...)
-        end
+        if method ~= "FireServer" then return oldNamecall(self, ...) end
 
         local args = {...}
 
-        -- Track last used weapon for skin changer
         if useItemRemote and self == useItemRemote then
             pcall(function()
                 local objectID = args[1]
@@ -418,17 +376,12 @@ local function applyRemoteHook()
             end)
         end
 
-        -- Equip cosmetic interception
         if self == equipRemote and skinChangerEnabled then
             local weaponName, cosmeticType, cosmeticName, options =
                 args[1], args[2], args[3], args[4] or {}
 
-            -- Don't touch finishers
-            if cosmeticType == "Finisher" then
-                return oldNamecall(self, ...)
-            end
+            if cosmeticType == "Finisher" then return oldNamecall(self, ...) end
 
-            -- If player actually owns it, let it go through normally
             if cosmeticName and cosmeticName ~= "None" and cosmeticName ~= "" then
                 local inventory = DataController:Get("CosmeticInventory")
                 if inventory and rawget(inventory, cosmeticName) then
@@ -436,7 +389,6 @@ local function applyRemoteHook()
                 end
             end
 
-            -- Handle dance/emote (stored separately)
             if cosmeticType == "Dance" or cosmeticType == "Emote" then
                 equipped.Dances = equipped.Dances or {}
                 if not cosmeticName or cosmeticName == "None" or cosmeticName == "" then
@@ -456,7 +408,6 @@ local function applyRemoteHook()
                 return
             end
 
-            -- Handle Skin, Charm, Wrap
             equipped[weaponName] = equipped[weaponName] or {}
             if not cosmeticName or cosmeticName == "None" or cosmeticName == "" then
                 equipped[weaponName][cosmeticType] = nil
@@ -476,7 +427,6 @@ local function applyRemoteHook()
             return
         end
 
-        -- Favorite cosmetic interception
         if self == favoriteRemote and skinChangerEnabled then
             local cosmetic = CosmeticLibrary and CosmeticLibrary.Cosmetics[args[2]]
             if cosmetic and isCosmeticAllowed(args[2], cosmetic) then
@@ -496,16 +446,12 @@ local function applyRemoteHook()
     remoteHookApplied = true
 end
 
--- ─────────────────────────────────────────
--- VIEWMODEL PATCHES — Skin, Charm, Wrap
--- ─────────────────────────────────────────
 local viewmodelPatchApplied = false
 
 local function applyViewmodelPatches()
     if viewmodelPatchApplied then return end
     if not ClientItem or not ClientItem._CreateViewModel then return end
 
-    -- _CreateViewModel patch (applies all cosmetics to viewmodel)
     local originalCreateVM = ClientItem._CreateViewModel
     ClientItem._CreateViewModel = function(self, viewmodelRef)
         local weaponName   = self.Name
@@ -513,18 +459,17 @@ local function applyViewmodelPatches()
         constructingWeapon = (weaponPlayer == LP) and weaponName or nil
 
         if weaponPlayer == LP and equipped[weaponName] and viewmodelRef and skinChangerEnabled then
-            local cosmeticTypes = {"Skin", "Charm", "Wrap"}
-            for _, ct in ipairs(cosmeticTypes) do
+            for _, ct in ipairs({"Skin", "Charm", "Wrap"}) do
                 if equipped[weaponName][ct] then
-                    local ok, dataKey   = pcall(function() return self:ToEnum("Data") end)
+                    local ok,  dataKey  = pcall(function() return self:ToEnum("Data") end)
                     local ok2, ctKey    = pcall(function() return self:ToEnum(ct) end)
                     local ok3, nameKey  = pcall(function() return self:ToEnum("Name") end)
                     if ok and ok2 and ok3 and viewmodelRef[dataKey] then
                         viewmodelRef[dataKey][ctKey]   = equipped[weaponName][ct]
                         viewmodelRef[dataKey][nameKey] = equipped[weaponName][ct].Name
                     elseif viewmodelRef.Data then
-                        viewmodelRef.Data[ct]   = equipped[weaponName][ct]
-                        viewmodelRef.Data.Name  = equipped[weaponName][ct].Name
+                        viewmodelRef.Data[ct]  = equipped[weaponName][ct]
+                        viewmodelRef.Data.Name = equipped[weaponName][ct].Name
                     end
                 end
             end
@@ -535,7 +480,6 @@ local function applyViewmodelPatches()
         return result
     end
 
-    -- ClientViewModel.new patch
     if ClientViewModel then
         local originalVMNew = ClientViewModel.new
         ClientViewModel.new = function(replicatedData, clientItem)
@@ -549,13 +493,10 @@ local function applyViewmodelPatches()
                 if ok and ReplicatedClass then
                     local dataKey = ReplicatedClass:ToEnum("Data")
                     replicatedData[dataKey] = replicatedData[dataKey] or {}
-                    local cosmeticTypes = {"Skin", "Charm", "Wrap"}
-                    for _, ct in ipairs(cosmeticTypes) do
+                    for _, ct in ipairs({"Skin", "Charm", "Wrap"}) do
                         if equipped[weaponName][ct] then
                             local ok2, ctEnum = pcall(function() return ReplicatedClass:ToEnum(ct) end)
-                            if ok2 then
-                                replicatedData[dataKey][ctEnum] = equipped[weaponName][ct]
-                            end
+                            if ok2 then replicatedData[dataKey][ctEnum] = equipped[weaponName][ct] end
                         end
                     end
                 end
@@ -563,7 +504,6 @@ local function applyViewmodelPatches()
 
             local result = originalVMNew(replicatedData, clientItem)
 
-            -- Force wrap update after construction
             if weaponPlayer == LP and equipped[weaponName] and equipped[weaponName].Wrap
                 and result and result._UpdateWrap and skinChangerEnabled then
                 result:_UpdateWrap()
@@ -575,7 +515,6 @@ local function applyViewmodelPatches()
             return result
         end
 
-        -- GetCharm patch
         if ClientViewModel.GetCharm then
             local originalGetCharm = ClientViewModel.GetCharm
             ClientViewModel.GetCharm = function(self)
@@ -589,7 +528,6 @@ local function applyViewmodelPatches()
             end
         end
 
-        -- GetWrap patch
         if ClientViewModel.GetWrap then
             local originalGetWrap = ClientViewModel.GetWrap
             ClientViewModel.GetWrap = function(self)
@@ -604,7 +542,6 @@ local function applyViewmodelPatches()
         end
     end
 
-    -- ItemLibrary viewmodel image patch
     if ItemLibrary and ItemLibrary.GetViewModelImageFromWeaponData then
         local originalGetImg = ItemLibrary.GetViewModelImageFromWeaponData
         ItemLibrary.GetViewModelImageFromWeaponData = function(self, weaponData, highRes)
@@ -620,7 +557,6 @@ local function applyViewmodelPatches()
         end
     end
 
-    -- EmoteController patch
     if EmoteController and EmoteController.GetEmotes then
         local originalGetEmotes = EmoteController.GetEmotes
         EmoteController.GetEmotes = function(self)
@@ -644,7 +580,6 @@ local function applyViewmodelPatches()
         end
     end
 
-    -- ViewProfile patch
     pcall(function()
         local ViewProfile = require(LP.PlayerScripts.Modules.Pages.ViewProfile)
         if ViewProfile and ViewProfile.Fetch then
@@ -693,17 +628,11 @@ local AimbotCFG = {
     DynamicFOV   = false,
 }
 
+-- Silent Aim config (FOV and dist controlled by sliders)
 local SACFG = {
-    On          = false,
-    VisCheck    = false,
-    TeamCheck   = true,
-    HitChance   = 100,
-    IgnoreFOV   = false,
-    FOVSize     = 600,
-    DrawFOV     = true,
-    DynamicFOV  = false,
-    TargetParts = "Head",
-    Targeting   = "Closest",
+    On      = false,
+    MaxDist = 200,
+    FOV     = 150,
 }
 
 local TriggerCFG = {
@@ -921,162 +850,96 @@ local function findAimbotTarget()
 end
 
 -- ═══════════════════════════════════════════
--- SILENT AIM — util_raycast hook
--- Intercepts Workspace:Raycast calls the game
--- uses for bullet detection and redirects them
--- to the target. NOT ragebot. NOT remote firing.
+-- SILENT AIM — util.Raycast hook
+-- Hooks the game's own util.Raycast function
+-- so bullets redirect to the target's head.
+-- Also blocks flash/smoke/blind particles.
 -- ═══════════════════════════════════════════
+
+-- SA FOV circle (reuses same Drawing circle from original)
 local saFovCircle = Drawing.new("Circle")
-saFovCircle.NumSides     = 64
-saFovCircle.Visible      = false
-saFovCircle.Color        = Color3.fromRGB(0, 200, 255)
-saFovCircle.Thickness    = 1.5
-saFovCircle.Transparency = 0.7
-saFovCircle.Filled       = false
+saFovCircle.Thickness = 1.5
+saFovCircle.Filled    = false
+saFovCircle.NumSides  = 64
+saFovCircle.Visible   = false
+saFovCircle.Color     = Color3.fromRGB(0, 200, 255)
 
-local saTarget      = nil
-local saTargetChar  = nil
-local saTargetConn  = nil
 local saHookApplied = false
-local saRayHook     = nil
 
-local saRayParams = RaycastParams.new()
-saRayParams.FilterType = Enum.RaycastFilterType.Exclude
+-- Target finder used by util.Raycast hook
+-- Looks for closest head within FOV and MaxDist
+local function saGetTarget(origin)
+    local center   = Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2)
+    local best, bd = nil, math.huge
+    local myChar   = LP.Character
 
-local function getEffectiveSAFOV()
-    if SACFG.IgnoreFOV then return math.huge end
-    local f = SACFG.FOVSize
-    if SACFG.DynamicFOV then f = f * (camera.FieldOfView / 70) end
-    return f
-end
-
-local function saIsValid(plr, camPos, center)
-    local ch = plr.Character
-    if not ch then return false end
-    local hum = ch:FindFirstChildOfClass("Humanoid")
-    if not hum or hum.Health <= 0 then return false end
-    local myEnv    = LP:GetAttribute("EnvironmentID")
-    local theirEnv = plr:GetAttribute("EnvironmentID")
-    if myEnv ~= nil and theirEnv ~= nil and myEnv ~= theirEnv then return false end
-    if SACFG.TeamCheck and isSameTeam(plr) then return false end
-    local tp = getBestPart(ch, SACFG.TargetParts)
-    if not tp then return false end
-    if not SACFG.IgnoreFOV then
-        local sp, on = camera:WorldToViewportPoint(tp.Position)
-        if not on then return false end
-        if (Vector2.new(sp.X, sp.Y) - center).Magnitude > getEffectiveSAFOV() then return false end
-    end
-    if SACFG.VisCheck then
-        saRayParams.FilterDescendantsInstances = {LP.Character, ch}
-        local dir = tp.Position - camPos
-        local hit = Workspace:Raycast(camPos, dir, saRayParams)
-        if hit and not hit.Instance:IsDescendantOf(ch) then return false end
-    end
-    return true
-end
-
-local function saUpdateTarget()
-    if not SACFG.On then saTarget = nil; saTargetChar = nil; return end
-    local camPos = camera.CFrame.Position
-    local center = camera.ViewportSize / 2
-    local best, bd, bestChar = nil, math.huge, nil
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if plr == LP then continue end
-        if not saIsValid(plr, camPos, center) then continue end
-        local ch = plr.Character
-        local tp = getBestPart(ch, SACFG.TargetParts)
-        if not tp then continue end
-        local sp, on = camera:WorldToViewportPoint(tp.Position)
-        if not on then continue end
+    for _, p in pairs(Players:GetPlayers()) do
+        if p == LP then continue end
+        local char = p.Character
+        if not char or char == myChar then continue end
+        local head = char:FindFirstChild("Head")
+        local hum  = char:FindFirstChildOfClass("Humanoid")
+        if not head or not hum or hum.Health <= 0 then continue end
+        if (origin - head.Position).Magnitude > SACFG.MaxDist then continue end
+        local sp, vis = camera:WorldToViewportPoint(head.Position)
+        if not vis then continue end
         local d = (Vector2.new(sp.X, sp.Y) - center).Magnitude
-        if SACFG.Targeting == "Closest" and d < bd then
-            bd = d; best = tp; bestChar = ch
-        elseif SACFG.Targeting == "Furthest" and d > bd then
-            bd = d; best = tp; bestChar = ch
-        elseif SACFG.Targeting == "Random" then
-            if not best or math.random() < 0.3 then best = tp; bestChar = ch end
+        if d < SACFG.FOV and d < bd then
+            bd   = d
+            best = head
         end
     end
-    saTarget     = best
-    saTargetChar = bestChar
+
+    return best
 end
 
--- The raycast hook: intercepts Workspace:Raycast,
--- checks if it looks like a bullet ray, redirects to target
-local function applySARayHook()
+local function applySAHook()
     if saHookApplied then return end
-    if not hookmetamethod then
-        Library:Notify("SA: hookmetamethod not available", 4)
+    if not util_mod then
+        Library:Notify("SA: util_mod not loaded", 4)
         return
     end
 
-    local originalNamecall
-    originalNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
-        local method = getnamecallmethod()
-
-        if method == "Raycast" and (self == Workspace or self == ws) then
-            if SACFG.On and saTarget and saTargetChar then
-                if math.random(1, 100) <= SACFG.HitChance then
-                    if not checkcaller() then
-                        local args   = {...}
-                        local origin = args[1]
-                        local dir    = args[2]
-
-                        if origin and dir
-                            and typeof(origin) == "Vector3"
-                            and typeof(dir)    == "Vector3" then
-
-                            local rayLength = dir.Magnitude
-
-                            -- Bullet rays are long (> 50 studs)
-                            if rayLength > 50 then
-                                local camPos    = camera.CFrame.Position
-                                local distFromCam = (origin - camPos).Magnitude
-
-                                local distFromHRP = math.huge
-                                pcall(function()
-                                    if LP.Character and LP.Character:FindFirstChild("HumanoidRootPart") then
-                                        distFromHRP = (origin - LP.Character.HumanoidRootPart.Position).Magnitude
-                                    end
-                                end)
-
-                                -- Only redirect rays starting near camera or HRP
-                                if distFromCam < 20 or distFromHRP < 10 then
-                                    local targetPos = saTarget.Position
-                                    local newDir    = (targetPos - origin).Unit * rayLength
-                                    return originalNamecall(self, origin, newDir, args[3])
-                                end
-                            end
-                        end
-                    end
-                end
+    -- Hook util.Raycast — redirects bullet to target head
+    local origRaycast = util_mod.Raycast
+    util_mod.Raycast = function(self, origin, direction, distance, ...)
+        if SACFG.On then
+            local target = saGetTarget(origin)
+            if target then
+                return origRaycast(self, origin, target.Position, distance, ...)
             end
         end
+        return origRaycast(self, origin, direction, distance, ...)
+    end
 
-        return originalNamecall(self, ...)
-    end))
+    -- Hook util.PlayParticles — blocks flash/smoke/blind effects
+    local origParticles = util_mod.PlayParticles
+    if origParticles then
+        util_mod.PlayParticles = function(self, obj)
+            if typeof(obj) == "Instance" then
+                local n = obj.Name:lower()
+                if n:find("flash") or n:find("smoke") or n:find("blind") then return end
+            end
+            return origParticles(self, obj)
+        end
+    end
 
     saHookApplied = true
-    saRayHook     = originalNamecall
 end
 
 local function startSA()
-    applySARayHook()
-    if saTargetConn then saTargetConn:Disconnect() end
-    saTargetConn = RunService.Heartbeat:Connect(function()
-        saUpdateTarget()
-    end)
+    applySAHook()
+    -- Hook is permanent once applied, SACFG.On gates it
+    saFovCircle.Visible = SACFG.On
 end
 
 local function stopSA()
-    SACFG.On     = false
-    saTarget     = nil
-    saTargetChar = nil
-    if saTargetConn then saTargetConn:Disconnect(); saTargetConn = nil end
+    SACFG.On            = false
+    saFovCircle.Visible = false
 end
 
 -- ═══════════════════════════════════════════
--- TRIGGERBOT — Fixed
+-- TRIGGERBOT
 -- ═══════════════════════════════════════════
 local triggerConn     = nil
 local triggerLastFire = 0
@@ -1123,7 +986,6 @@ end
 
 local function startTriggerbot()
     if triggerConn then triggerConn:Disconnect() end
-
     triggerConn = RunService.Heartbeat:Connect(function()
         if not TriggerCFG.On then return end
         local myChar = LP.Character
@@ -1188,8 +1050,8 @@ end
 -- ═══════════════════════════════════════════
 -- RAGEBOT
 -- ═══════════════════════════════════════════
-local rageConn      = nil
-local rageReloadCD  = 0
+local rageConn     = nil
+local rageReloadCD = 0
 
 local rageRayParams = RaycastParams.new()
 rageRayParams.FilterType = Enum.RaycastFilterType.Exclude
@@ -1206,7 +1068,7 @@ local function rageGetClosest()
     for _, v in ipairs(Players:GetPlayers()) do
         if v == LP then continue end
         if RageCFG.TeamCheck and isSameTeam(v) then continue end
-        local ch   = v.Character
+        local ch  = v.Character
         if not ch then continue end
         local head = ch:FindFirstChild("Head")
         local hum  = ch:FindFirstChildOfClass("Humanoid")
@@ -1237,8 +1099,10 @@ local function startRagebot()
         if not LP.Character:FindFirstChild("HumanoidRootPart") then return end
         if not fighter_mod or not fighter_mod.LocalFighter then return end
         if not util_mod or not enums_mod then return end
+
         local item = fighter_mod.LocalFighter.EquippedItem
         if not item then return end
+
         rageReloadCD = rageReloadCD - dt
         local ammo = nil
         pcall(function() ammo = item:Get("CurrentAmmo") end)
@@ -1251,11 +1115,14 @@ local function startRagebot()
             rageReloadCD = 2.0
             return
         end
+
         local tp, tc = rageGetClosest()
         if not tp or not tc then return end
+
         local cam       = camera.CFrame
         local manip, height = ragePeek(cam.Position, tp.Position, tc)
         if not manip then return end
+
         local sp   = Vector3.new(manip.X, manip.Y + (height or 0), manip.Z)
         local look = CFrame.lookAt(sp, tp.Position)
         local p, y = look:ToOrientation()
@@ -1306,13 +1173,11 @@ local function patchGun()
                     }
                 end
                 local orig = gunOriginals[name]
-                if data.ShootSpread   then data.ShootSpread   = GunCFG.NoSpread  and 0    or orig.ShootSpread   end
-                if data.ShootAccuracy then data.ShootAccuracy = GunCFG.NoSpread  and 0    or orig.ShootAccuracy end
-                if data.ShootRecoil   then data.ShootRecoil   = GunCFG.NoRecoil and 0    or orig.ShootRecoil   end
-                if data.ShootCooldown then data.ShootCooldown = GunCFG.FastShoot and 0.05 or orig.ShootCooldown end
-                if data.ShootBurstCooldown then
-                    data.ShootBurstCooldown = GunCFG.FastShoot and 0.05 or orig.ShootBurstCooldown
-                end
+                if data.ShootSpread        then data.ShootSpread        = GunCFG.NoSpread  and 0    or orig.ShootSpread        end
+                if data.ShootAccuracy      then data.ShootAccuracy      = GunCFG.NoSpread  and 0    or orig.ShootAccuracy      end
+                if data.ShootRecoil        then data.ShootRecoil        = GunCFG.NoRecoil  and 0    or orig.ShootRecoil        end
+                if data.ShootCooldown      then data.ShootCooldown      = GunCFG.FastShoot and 0.05 or orig.ShootCooldown      end
+                if data.ShootBurstCooldown then data.ShootBurstCooldown = GunCFG.FastShoot and 0.05 or orig.ShootBurstCooldown end
             end
         end
         gunPatchBusy = false
@@ -1430,12 +1295,12 @@ local function updateESP()
         if not hrp or not hum or hum.Health <= 0 then continue end
         if not espBoxes[p] then
             local h = Instance.new("SelectionBox")
-            h.Color3               = Color3.fromRGB(255, 50, 50)
-            h.LineThickness        = 0.05
-            h.SurfaceTransparency  = 1
-            h.Adornee              = ch
-            h.Parent               = Workspace
-            espBoxes[p]            = h
+            h.Color3              = Color3.fromRGB(255, 50, 50)
+            h.LineThickness       = 0.05
+            h.SurfaceTransparency = 1
+            h.Adornee             = ch
+            h.Parent              = Workspace
+            espBoxes[p]           = h
         end
     end
     for p, h in pairs(espBoxes) do
@@ -1471,17 +1336,17 @@ C_PLAT:AddDropdown("PlatformMode", {
     Callback = function(v) InputCFG.Platform = v; ActivePlatform = v end
 })
 C_PLAT:AddLabel("── PC ──")
-C_PLAT:AddSlider("PC_SensX",  { Text = "PC Sens X",      Default = 100, Min = 10, Max = 300, Rounding = 0, Suffix = "%", Callback = function(v) InputCFG.PC_SensX = v/100 end })
-C_PLAT:AddSlider("PC_SensY",  { Text = "PC Sens Y",      Default = 100, Min = 10, Max = 300, Rounding = 0, Suffix = "%", Callback = function(v) InputCFG.PC_SensY = v/100 end })
-C_PLAT:AddSlider("PC_Smooth", { Text = "PC Smoothness",  Default = 10,  Min = 1,  Max = 100, Rounding = 0, Callback = function(v) InputCFG.PC_Smoothness = v end })
-C_PLAT:AddSlider("PC_OffX",   { Text = "PC Offset X",    Default = 0,   Min = -200, Max = 200, Rounding = 0, Callback = function(v) InputCFG.PC_OffsetX = v end })
-C_PLAT:AddSlider("PC_OffY",   { Text = "PC Offset Y",    Default = 0,   Min = -200, Max = 200, Rounding = 0, Callback = function(v) InputCFG.PC_OffsetY = v end })
+C_PLAT:AddSlider("PC_SensX",  { Text = "PC Sens X",       Default = 100, Min = 10, Max = 300, Rounding = 0, Suffix = "%", Callback = function(v) InputCFG.PC_SensX      = v/100 end })
+C_PLAT:AddSlider("PC_SensY",  { Text = "PC Sens Y",       Default = 100, Min = 10, Max = 300, Rounding = 0, Suffix = "%", Callback = function(v) InputCFG.PC_SensY      = v/100 end })
+C_PLAT:AddSlider("PC_Smooth", { Text = "PC Smoothness",   Default = 10,  Min = 1,  Max = 100, Rounding = 0,               Callback = function(v) InputCFG.PC_Smoothness = v     end })
+C_PLAT:AddSlider("PC_OffX",   { Text = "PC Offset X",     Default = 0,   Min = -200, Max = 200, Rounding = 0,             Callback = function(v) InputCFG.PC_OffsetX    = v     end })
+C_PLAT:AddSlider("PC_OffY",   { Text = "PC Offset Y",     Default = 0,   Min = -200, Max = 200, Rounding = 0,             Callback = function(v) InputCFG.PC_OffsetY    = v     end })
 C_PLAT:AddLabel("── Mobile ──")
-C_PLAT:AddSlider("MB_SensX",  { Text = "Mobile Sens X",  Default = 100, Min = 10, Max = 300, Rounding = 0, Suffix = "%", Callback = function(v) InputCFG.MB_SensX = v/100 end })
-C_PLAT:AddSlider("MB_SensY",  { Text = "Mobile Sens Y",  Default = 100, Min = 10, Max = 300, Rounding = 0, Suffix = "%", Callback = function(v) InputCFG.MB_SensY = v/100 end })
-C_PLAT:AddSlider("MB_Smooth", { Text = "Mobile Smooth",  Default = 8,   Min = 1,  Max = 100, Rounding = 0, Callback = function(v) InputCFG.MB_Smoothness = v end })
-C_PLAT:AddSlider("MB_OffX",   { Text = "Mobile Offset X",Default = 0,   Min = -200, Max = 200, Rounding = 0, Callback = function(v) InputCFG.MB_OffsetX = v end })
-C_PLAT:AddSlider("MB_OffY",   { Text = "Mobile Offset Y",Default = 0,   Min = -200, Max = 200, Rounding = 0, Callback = function(v) InputCFG.MB_OffsetY = v end })
+C_PLAT:AddSlider("MB_SensX",  { Text = "Mobile Sens X",   Default = 100, Min = 10, Max = 300, Rounding = 0, Suffix = "%", Callback = function(v) InputCFG.MB_SensX      = v/100 end })
+C_PLAT:AddSlider("MB_SensY",  { Text = "Mobile Sens Y",   Default = 100, Min = 10, Max = 300, Rounding = 0, Suffix = "%", Callback = function(v) InputCFG.MB_SensY      = v/100 end })
+C_PLAT:AddSlider("MB_Smooth", { Text = "Mobile Smooth",   Default = 8,   Min = 1,  Max = 100, Rounding = 0,               Callback = function(v) InputCFG.MB_Smoothness = v     end })
+C_PLAT:AddSlider("MB_OffX",   { Text = "Mobile Offset X", Default = 0,   Min = -200, Max = 200, Rounding = 0,             Callback = function(v) InputCFG.MB_OffsetX    = v     end })
+C_PLAT:AddSlider("MB_OffY",   { Text = "Mobile Offset Y", Default = 0,   Min = -200, Max = 200, Rounding = 0,             Callback = function(v) InputCFG.MB_OffsetY    = v     end })
 
 -- Aimbot
 C_AB:AddLabel("CamCtrl: " .. (CameraController and "OK" or "Missing"))
@@ -1489,70 +1354,105 @@ C_AB:AddToggle("ABOn", { Text = "Enabled", Default = false, Callback = function(
     AimbotCFG.On = v
     if not v then lockedTarget = nil; lockTimer = 0; resetDelayedPos() end
 end})
-C_AB:AddDropdown("ABPart",  { Text = "Target Part", Default = "Head", Values = ALL_TARGET_OPTIONS, Callback = function(v) AimbotCFG.TargetPart = v end })
-C_AB:AddToggle("ABTeam",    { Text = "Team Check",    Default = false, Callback = function(v) AimbotCFG.TeamCheck = v end })
-C_AB:AddToggle("ABVis",     { Text = "Visible Check", Default = false, Callback = function(v) AimbotCFG.VisibleCheck = v end })
+C_AB:AddDropdown("ABPart", { Text = "Target Part", Default = "Head",  Values = ALL_TARGET_OPTIONS, Callback = function(v) AimbotCFG.TargetPart   = v end })
+C_AB:AddToggle("ABTeam",   { Text = "Team Check",    Default = false,                              Callback = function(v) AimbotCFG.TeamCheck    = v end })
+C_AB:AddToggle("ABVis",    { Text = "Visible Check", Default = false,                              Callback = function(v) AimbotCFG.VisibleCheck = v end })
 
-C_AB2:AddSlider("ABSmooth", { Text = "Smoothness",       Default = 10,  Min = 1,   Max = 100, Rounding = 0, Callback = function(v) AimbotCFG.Smoothness = v end })
-C_AB2:AddSlider("ABReact",  { Text = "Reaction Time(ms)",Default = 100, Min = 0,   Max = 500, Rounding = 0, Callback = function(v) AimbotCFG.ReactionTime = v end })
-C_AB2:AddSlider("ABForgot", { Text = "Forget Time(s)",   Default = 3,   Min = 1,   Max = 15,  Rounding = 0, Callback = function(v) AimbotCFG.ForgotTime = v end })
-C_AB2:AddSlider("ABFOV",    { Text = "Max FOV",           Default = 150, Min = 0,   Max = 600, Rounding = 0, Callback = function(v) AimbotCFG.MaxFOV = v; fovCircle.Radius = v end })
-C_AB2:AddToggle("ABDrawFOV",{ Text = "Draw FOV",          Default = false, Callback = function(v) AimbotCFG.DrawFOV = v end })
-C_AB2:AddDropdown("ABFOVStyle", { Text = "FOV Style", Default = "Half", Values = {"Half","Filled","Invisible"}, Callback = function(v) AimbotCFG.FOVStyle = v; fovCircle.Filled = (v == "Filled") end })
-C_AB2:AddToggle("ABDynFOV", { Text = "Dynamic FOV",       Default = false, Callback = function(v) AimbotCFG.DynamicFOV = v end })
+C_AB2:AddSlider("ABSmooth",  { Text = "Smoothness",        Default = 10,  Min = 1,   Max = 100, Rounding = 0, Callback = function(v) AimbotCFG.Smoothness   = v   end })
+C_AB2:AddSlider("ABReact",   { Text = "Reaction Time (ms)",Default = 100, Min = 0,   Max = 500, Rounding = 0, Callback = function(v) AimbotCFG.ReactionTime  = v   end })
+C_AB2:AddSlider("ABForgot",  { Text = "Forget Time (s)",   Default = 3,   Min = 1,   Max = 15,  Rounding = 0, Callback = function(v) AimbotCFG.ForgotTime    = v   end })
+C_AB2:AddSlider("ABFOV",     { Text = "Max FOV",            Default = 150, Min = 0,   Max = 600, Rounding = 0, Callback = function(v) AimbotCFG.MaxFOV = v; fovCircle.Radius = v end })
+C_AB2:AddToggle("ABDrawFOV", { Text = "Draw FOV",           Default = false,                                   Callback = function(v) AimbotCFG.DrawFOV       = v   end })
+C_AB2:AddDropdown("ABFOVStyle", { Text = "FOV Style", Default = "Half", Values = {"Half","Filled","Invisible"}, Callback = function(v)
+    AimbotCFG.FOVStyle = v
+    fovCircle.Filled   = (v == "Filled")
+end })
+C_AB2:AddToggle("ABDynFOV",  { Text = "Dynamic FOV", Default = false, Callback = function(v) AimbotCFG.DynamicFOV = v end })
 C_AB2:AddLabel("── Delay Position ──")
-C_AB2:AddSlider("ABXSmooth",{ Text = "X Delay", Default = 0, Min = 0, Max = 100, Rounding = 0, Suffix = "%", Callback = function(v) AimbotCFG.XSmooth = v/100 end })
-C_AB2:AddSlider("ABYSmooth",{ Text = "Y Delay", Default = 0, Min = 0, Max = 100, Rounding = 0, Suffix = "%", Callback = function(v) AimbotCFG.YSmooth = v/100 end })
-C_AB2:AddSlider("ABJSmooth",{ Text = "Jump Delay", Default = 0, Min = 0, Max = 100, Rounding = 0, Suffix = "%", Callback = function(v) AimbotCFG.JumpSmooth = v/100 end })
+C_AB2:AddSlider("ABXSmooth", { Text = "X Delay",    Default = 0, Min = 0, Max = 100, Rounding = 0, Suffix = "%", Callback = function(v) AimbotCFG.XSmooth    = v/100 end })
+C_AB2:AddSlider("ABYSmooth", { Text = "Y Delay",    Default = 0, Min = 0, Max = 100, Rounding = 0, Suffix = "%", Callback = function(v) AimbotCFG.YSmooth    = v/100 end })
+C_AB2:AddSlider("ABJSmooth", { Text = "Jump Delay", Default = 0, Min = 0, Max = 100, Rounding = 0, Suffix = "%", Callback = function(v) AimbotCFG.JumpSmooth = v/100 end })
 
--- Silent Aim
-C_SA:AddLabel("Method: Workspace:Raycast hook")
-C_SA:AddLabel("Redirects bullet rays to target")
-C_SA:AddLabel("No remote spam — works PC & Mobile")
-C_SA:AddToggle("SAOn", { Text = "Enabled", Default = false, Callback = function(v)
-    SACFG.On = v
-    if v then startSA() else stopSA() end
-end})
-C_SA:AddDropdown("SAPart",      { Text = "Target Part", Default = "Head",    Values = ALL_TARGET_OPTIONS,          Callback = function(v) SACFG.TargetParts = v end })
-C_SA:AddDropdown("SATargeting", { Text = "Targeting",   Default = "Closest", Values = {"Closest","Furthest","Random"}, Callback = function(v) SACFG.Targeting = v end })
-C_SA:AddToggle("SATeam",        { Text = "Team Check",    Default = true,  Callback = function(v) SACFG.TeamCheck = v end })
-C_SA:AddToggle("SAVis",         { Text = "Visible Check", Default = false, Callback = function(v) SACFG.VisCheck = v end })
+-- ── Silent Aim ──
+C_SA:AddLabel("Method: util.Raycast hook")
+C_SA:AddLabel("Redirects bullets to target head")
+C_SA:AddLabel("Also blocks flash/smoke/blind particles")
+C_SA:AddLabel("util_mod: " .. (util_mod and "OK" or "FAILED"))
+C_SA:AddLabel("")
 
-C_SA2:AddSlider("SAHit",   { Text = "Hit Chance %", Default = 100, Min = 1, Max = 100, Rounding = 0, Callback = function(v) SACFG.HitChance = v end })
-C_SA2:AddToggle("SAIgnFOV",{ Text = "Ignore FOV",   Default = false, Callback = function(v) SACFG.IgnoreFOV = v; saFovCircle.Visible = not v and SACFG.DrawFOV and SACFG.On end })
-C_SA2:AddSlider("SAFOVSz", { Text = "FOV Size",     Default = 600, Min = 10, Max = 600, Rounding = 0, Callback = function(v) SACFG.FOVSize = v; saFovCircle.Radius = v end })
-C_SA2:AddToggle("SADrawFOV",{ Text = "Draw FOV",    Default = true,  Callback = function(v) SACFG.DrawFOV = v; saFovCircle.Visible = v and SACFG.On and not SACFG.IgnoreFOV end })
-C_SA2:AddToggle("SADynFOV", { Text = "Dynamic FOV", Default = false, Callback = function(v) SACFG.DynamicFOV = v end })
+C_SA:AddToggle("SAOn", {
+    Text     = "Enabled",
+    Default  = false,
+    Callback = function(v)
+        SACFG.On = v
+        if v then startSA() else stopSA() end
+    end
+})
+
+C_SA2:AddSlider("SAMaxDist", {
+    Text     = "Max Distance",
+    Default  = 200,
+    Min      = 10,
+    Max      = 1000,
+    Rounding = 0,
+    Callback = function(v) SACFG.MaxDist = v end
+})
+
+C_SA2:AddSlider("SAFOV", {
+    Text     = "FOV (px)",
+    Default  = 150,
+    Min      = 10,
+    Max      = 600,
+    Rounding = 0,
+    Callback = function(v)
+        SACFG.FOV           = v
+        saFovCircle.Radius  = v
+    end
+})
+
+C_SA2:AddToggle("SADrawFOV", {
+    Text     = "Draw FOV Circle",
+    Default  = true,
+    Callback = function(v)
+        saFovCircle.Visible = v and SACFG.On
+    end
+})
 
 -- Ragebot
 C_RB:AddLabel("Modules: " .. (util_mod and enums_mod and fighter_mod and "OK" or "FAILED"))
 C_RB:AddToggle("RBOn",   { Text = "Enabled",       Default = false, Callback = function(v) RageCFG.On = v; if v then startRagebot() else stopRagebot() end end })
-C_RB:AddSlider("RBDist", { Text = "Max Distance",  Default = 999, Min = 10, Max = 999, Rounding = 0, Callback = function(v) RageCFG.MaxDist = v end })
-C_RB:AddToggle("RBTeam", { Text = "Team Check",    Default = false, Callback = function(v) RageCFG.TeamCheck = v end })
-C_RB:AddToggle("RBVis",  { Text = "Visible Check", Default = false, Callback = function(v) RageCFG.VisibleCheck = v end })
+C_RB:AddSlider("RBDist", { Text = "Max Distance",  Default = 999, Min = 10, Max = 999, Rounding = 0, Callback = function(v) RageCFG.MaxDist      = v end })
+C_RB:AddToggle("RBTeam", { Text = "Team Check",    Default = false,                                  Callback = function(v) RageCFG.TeamCheck    = v end })
+C_RB:AddToggle("RBVis",  { Text = "Visible Check", Default = false,                                  Callback = function(v) RageCFG.VisibleCheck = v end })
 C_RB:AddButton({ Text = "Force Reload", Func = function()
     if not fighter_mod or not fighter_mod.LocalFighter then return end
     local item = fighter_mod.LocalFighter.EquippedItem
-    if item then pcall(function() rs.Remotes.Replication.Fighter.UseItem:FireServer(item:Get("ObjectID"), enums_mod:ToEnum("Reload"), {}, nil) end) end
+    if item then
+        pcall(function()
+            rs.Remotes.Replication.Fighter.UseItem:FireServer(
+                item:Get("ObjectID"), enums_mod:ToEnum("Reload"), {}, nil
+            )
+        end)
+    end
     Library:Notify("Reload fired", 2)
 end})
 
 -- Triggerbot
-C_TB:AddToggle("TBOn",   { Text = "Enabled", Default = false, Callback = function(v) TriggerCFG.On = v; if v then startTriggerbot() else stopTriggerbot() end end })
+C_TB:AddToggle("TBOn",    { Text = "Enabled", Default = false, Callback = function(v) TriggerCFG.On = v; if v then startTriggerbot() else stopTriggerbot() end end })
 C_TB:AddDropdown("TBMode",{ Text = "Mode", Default = "Always", Values = {"Always","Scoped Only","On Aimbot Target"}, Callback = function(v) TriggerCFG.Mode = v end })
-C_TB:AddSlider("TBDelay", { Text = "Delay (ms)",       Default = 0,   Min = 0,  Max = 500,  Rounding = 0, Callback = function(v) TriggerCFG.Delay = v end })
-C_TB:AddSlider("TBFov",   { Text = "Trigger FOV (px)", Default = 50,  Min = 5,  Max = 300,  Rounding = 0, Callback = function(v) TriggerCFG.TriggerFOV = v end })
-C_TB:AddSlider("TBDist",  { Text = "Max Distance",     Default = 500, Min = 10, Max = 2000, Rounding = 0, Callback = function(v) TriggerCFG.MaxDist = v end })
-C_TB:AddSlider("TBBurst", { Text = "Burst Count",      Default = 1,   Min = 1,  Max = 10,   Rounding = 0, Callback = function(v) TriggerCFG.BurstCount = v end })
+C_TB:AddSlider("TBDelay", { Text = "Delay (ms)",        Default = 0,   Min = 0,  Max = 500,  Rounding = 0, Callback = function(v) TriggerCFG.Delay      = v end })
+C_TB:AddSlider("TBFov",   { Text = "Trigger FOV (px)",  Default = 50,  Min = 5,  Max = 300,  Rounding = 0, Callback = function(v) TriggerCFG.TriggerFOV = v end })
+C_TB:AddSlider("TBDist",  { Text = "Max Distance",      Default = 500, Min = 10, Max = 2000, Rounding = 0, Callback = function(v) TriggerCFG.MaxDist    = v end })
+C_TB:AddSlider("TBBurst", { Text = "Burst Count",       Default = 1,   Min = 1,  Max = 10,   Rounding = 0, Callback = function(v) TriggerCFG.BurstCount  = v end })
 C_TB:AddDropdown("TBPart",{ Text = "Target Part", Default = "Head", Values = ALL_TARGET_OPTIONS, Callback = function(v) TriggerCFG.TargetPart = v end })
 C_TB:AddToggle("TBTeam",  { Text = "Team Check",    Default = true,  Callback = function(v) TriggerCFG.TeamCheck = v end })
-C_TB:AddToggle("TBVis",   { Text = "Visible Check", Default = false, Callback = function(v) TriggerCFG.VisCheck = v end })
+C_TB:AddToggle("TBVis",   { Text = "Visible Check", Default = false, Callback = function(v) TriggerCFG.VisCheck  = v end })
 
 -- Gun Mods
 C_GN:AddLabel("Excludes: Sniper, Bow, RPG, Crossbow")
-C_GN:AddToggle("GNRecoil",{ Text = "No Recoil",   Default = false, Callback = function(v) GunCFG.NoRecoil  = v; patchGun() end })
-C_GN:AddToggle("GNSpread",{ Text = "No Spread",   Default = false, Callback = function(v) GunCFG.NoSpread  = v; patchGun() end })
-C_GN:AddToggle("GNFast",  { Text = "Fast Shoot",  Default = false, Callback = function(v) GunCFG.FastShoot = v; patchGun() end })
+C_GN:AddToggle("GNRecoil",{ Text = "No Recoil",  Default = false, Callback = function(v) GunCFG.NoRecoil  = v; patchGun() end })
+C_GN:AddToggle("GNSpread",{ Text = "No Spread",  Default = false, Callback = function(v) GunCFG.NoSpread  = v; patchGun() end })
+C_GN:AddToggle("GNFast",  { Text = "Fast Shoot", Default = false, Callback = function(v) GunCFG.FastShoot = v; patchGun() end })
 C_GN:AddButton({ Text = "Apply / Restore", Func = function() patchGun(); Library:Notify("Gun mods applied", 2) end })
 
 -- ─────────────────────────────────────────
@@ -1563,19 +1463,19 @@ local V_HN  = Tabs.Visuals:AddRightGroupbox("Hit Numbers")
 local V_WD  = Tabs.Visuals:AddLeftGroupbox("World")
 local V_ESP = Tabs.Visuals:AddRightGroupbox("ESP")
 
-V_CH:AddToggle("CrossOn",  { Text = "Enable Crosshair", Default = false, Callback = function(v) crossImg.ImageTransparency = v and 0 or 1; UIS.MouseIconEnabled = not v end })
-V_CH:AddSlider("CrossSize",{ Text = "Size", Default = 24, Min = 8, Max = 64, Rounding = 0, Callback = function(v) crossImg.Size = UDim2.new(0, v, 0, v) end })
+V_CH:AddToggle("CrossOn",   { Text = "Enable Crosshair", Default = false, Callback = function(v) crossImg.ImageTransparency = v and 0 or 1; UIS.MouseIconEnabled = not v end })
+V_CH:AddSlider("CrossSize", { Text = "Size", Default = 24, Min = 8, Max = 64, Rounding = 0, Callback = function(v) crossImg.Size = UDim2.new(0, v, 0, v) end })
 V_CH:AddLabel("Color"):AddColorPicker("CrossColor", { Default = Color3.fromRGB(255,255,255), Callback = function(v) crossImg.ImageColor3 = v end })
 
 V_HN:AddToggle("HitOn",  { Text = "Enable Hit Numbers", Default = true, Callback = function(v) hitEnabled = v end })
 V_HN:AddLabel("Color"):AddColorPicker("HitColor", { Default = Color3.fromRGB(255,20,147), Callback = function(v) hitColor = v end })
 V_HN:AddSlider("HitDur", { Text = "Duration (s)", Default = 5, Min = 1, Max = 10, Rounding = 1, Callback = function(v) hitDuration = v end })
 
-V_WD:AddLabel("Screen Tint"):AddColorPicker("WDTint", { Default = Color3.fromRGB(255,255,255), Callback = function(v) colorCorrection.TintColor = v end })
-V_WD:AddSlider("WDSat",    { Text = "Saturation", Default = 0,   Min = -1, Max = 1, Rounding = 2, Callback = function(v) colorCorrection.Saturation = v end })
-V_WD:AddSlider("WDCon",    { Text = "Contrast",   Default = 0,   Min = -1, Max = 1, Rounding = 2, Callback = function(v) colorCorrection.Contrast = v end })
-V_WD:AddSlider("WDBlur",   { Text = "Blur",       Default = 0,   Min = 0,  Max = 56, Rounding = 0, Callback = function(v) blurEffect.Size = v end })
-V_WD:AddSlider("WDBright",  { Text = "Brightness", Default = 1,  Min = 0,  Max = 5,  Rounding = 1, Callback = function(v) Lighting.Brightness = v end })
+V_WD:AddLabel("Screen Tint"):AddColorPicker("WDTint",  { Default = Color3.fromRGB(255,255,255), Callback = function(v) colorCorrection.TintColor   = v end })
+V_WD:AddSlider("WDSat",    { Text = "Saturation", Default = 0,  Min = -1, Max = 1,  Rounding = 2, Callback = function(v) colorCorrection.Saturation = v end })
+V_WD:AddSlider("WDCon",    { Text = "Contrast",   Default = 0,  Min = -1, Max = 1,  Rounding = 2, Callback = function(v) colorCorrection.Contrast   = v end })
+V_WD:AddSlider("WDBlur",   { Text = "Blur",       Default = 0,  Min = 0,  Max = 56, Rounding = 0, Callback = function(v) blurEffect.Size             = v end })
+V_WD:AddSlider("WDBright", { Text = "Brightness", Default = 1,  Min = 0,  Max = 5,  Rounding = 1, Callback = function(v) Lighting.Brightness         = v end })
 
 V_ESP:AddToggle("ESPOn", { Text = "Enable ESP", Default = false, Callback = function(v) espEnabled = v; if not v then clearESP() end end })
 
@@ -1588,14 +1488,14 @@ local M_R = Tabs.Misc:AddRightGroupbox("Actions")
 M_L:AddLabel("AC Bypass: Active")
 M_L:AddLabel("Detection 1: Player:GetMouse() — NOT used")
 M_L:AddLabel("Detection 2: game:Kick() hook — neutralized")
-M_L:AddLabel("Detection 3: CameraSecurity getfenv — cloneref bypass")
+M_L:AddLabel("Detection 3: CameraSecurity — cloneref bypass")
 M_L:AddLabel("All services use cloneref()")
 M_L:AddLabel("All hooks use newcclosure()")
 
 M_R:AddButton({ Text = "Stop All Features", Func = function()
-    AimbotCFG.On = false; lockedTarget = nil; lockTimer = 0; resetDelayedPos()
-    SACFG.On     = false; stopSA()
-    RageCFG.On   = false; stopRagebot()
+    AimbotCFG.On  = false; lockedTarget = nil; lockTimer = 0; resetDelayedPos()
+    SACFG.On      = false; stopSA()
+    RageCFG.On    = false; stopRagebot()
     TriggerCFG.On = false; stopTriggerbot()
     GunCFG.NoRecoil = false; GunCFG.NoSpread = false; GunCFG.FastShoot = false
     patchGun()
@@ -1610,11 +1510,10 @@ M_R:AddButton({ Text = "Stop All Features", Func = function()
     UIS.MouseIconEnabled       = true
     Library:Notify("All features stopped", 3)
 end})
-
 M_R:AddButton({ Text = "Unload", Func = function() Library:Unload() end })
 
 -- ─────────────────────────────────────────
--- SKINS TAB — Full skin changer
+-- SKINS TAB
 -- ─────────────────────────────────────────
 local SK_L = Tabs.Skins:AddLeftGroupbox("Skin Changer")
 local SK_R = Tabs.Skins:AddRightGroupbox("Status")
@@ -1623,63 +1522,31 @@ SK_L:AddLabel("Unlocks: Skins, Charms, Dances, Wraps")
 SK_L:AddLabel("Excludes: Finishers (intentional)")
 SK_L:AddLabel("Config saved to: unlockall/config.json")
 SK_L:AddLabel("")
-
 SK_L:AddToggle("SkinChangerOn", {
     Text     = "Enable Skin Changer",
     Default  = false,
     Callback = function(v)
-        if v then
-            enableSkinChanger()
-        else
-            disableSkinChanger()
-        end
+        if v then enableSkinChanger() else disableSkinChanger() end
     end
 })
-
 SK_L:AddLabel("")
-SK_L:AddLabel("After enabling, go into the")
-SK_L:AddLabel("in-game cosmetic menu to equip")
-SK_L:AddLabel("skins/charms/wraps/dances.")
-SK_L:AddLabel("They will be applied automatically.")
+SK_L:AddLabel("After enabling, open the in-game")
+SK_L:AddLabel("cosmetic menu to equip items.")
+SK_L:AddLabel("They apply automatically.")
+SK_L:AddButton({ Text = "Save Config",   Func = function() saveConfig(); Library:Notify("Skin config saved", 2) end })
+SK_L:AddButton({ Text = "Load Config",   Func = function() loadConfig(); Library:Notify("Skin config loaded", 2) end })
+SK_L:AddButton({ Text = "Clear Equipped",Func = function() equipped = {}; favorites = {}; saveConfig(); Library:Notify("Cleared", 2) end })
 
-SK_L:AddButton({
-    Text = "Save Current Config",
-    Func = function()
-        saveConfig()
-        Library:Notify("Skin config saved", 2)
-    end
-})
-
-SK_L:AddButton({
-    Text = "Load Saved Config",
-    Func = function()
-        loadConfig()
-        Library:Notify("Skin config loaded", 2)
-    end
-})
-
-SK_L:AddButton({
-    Text = "Clear All Equipped",
-    Func = function()
-        equipped  = {}
-        favorites = {}
-        saveConfig()
-        Library:Notify("Equipped cosmetics cleared", 2)
-    end
-})
-
--- Status panel
 SK_R:AddLabel("Module Status:")
-SK_R:AddLabel("EnumLibrary: "     .. (EnumLibrary     and "OK" or "FAILED"))
-SK_R:AddLabel("CosmeticLibrary: " .. (CosmeticLibrary and "OK" or "FAILED"))
-SK_R:AddLabel("ItemLibrary: "     .. (ItemLibrary     and "OK" or "FAILED"))
-SK_R:AddLabel("DataController: "  .. (DataController  and "OK" or "FAILED"))
-SK_R:AddLabel("FighterController: " .. (FighterController and "OK" or "FAILED"))
-SK_R:AddLabel("ClientItem: "      .. (ClientItem      and "OK" or "FAILED"))
-SK_R:AddLabel("ClientViewModel: " .. (ClientViewModel  and "OK" or "FAILED"))
-SK_R:AddLabel("EmoteController: " .. (EmoteController  and "OK" or "FAILED"))
+SK_R:AddLabel("EnumLibrary: "       .. (EnumLibrary       and "OK" or "FAILED"))
+SK_R:AddLabel("CosmeticLibrary: "   .. (CosmeticLibrary   and "OK" or "FAILED"))
+SK_R:AddLabel("ItemLibrary: "       .. (ItemLibrary        and "OK" or "FAILED"))
+SK_R:AddLabel("DataController: "    .. (DataController     and "OK" or "FAILED"))
+SK_R:AddLabel("FighterController: " .. (FighterController  and "OK" or "FAILED"))
+SK_R:AddLabel("ClientItem: "        .. (ClientItem         and "OK" or "FAILED"))
+SK_R:AddLabel("ClientViewModel: "   .. (ClientViewModel    and "OK" or "FAILED"))
+SK_R:AddLabel("EmoteController: "   .. (EmoteController    and "OK" or "FAILED"))
 SK_R:AddLabel("")
-SK_R:AddLabel("Supported Types:")
 SK_R:AddLabel("✓ Weapon Skins")
 SK_R:AddLabel("✓ Charms")
 SK_R:AddLabel("✓ Dances / Emotes")
@@ -1707,14 +1574,21 @@ RunService.RenderStepped:Connect(function(dt)
     local center = getScreenCenter()
     local sensX, sensY = getSensitivity()
 
-    -- FOV circles
-    fovCircle.Position  = center
-    fovCircle.Radius    = getEffectiveAimbotFOV()
-    fovCircle.Visible   = AimbotCFG.DrawFOV and AimbotCFG.On and AimbotCFG.FOVStyle ~= "Invisible"
+    -- Aimbot FOV circle
+    fovCircle.Position = center
+    fovCircle.Radius   = getEffectiveAimbotFOV()
+    fovCircle.Visible  = AimbotCFG.DrawFOV and AimbotCFG.On and AimbotCFG.FOVStyle ~= "Invisible"
 
+    -- SA FOV circle — color changes based on whether SA has a target
     saFovCircle.Position = center
-    saFovCircle.Radius   = SACFG.IgnoreFOV and 0 or getEffectiveSAFOV()
-    saFovCircle.Visible  = SACFG.DrawFOV and SACFG.On and not SACFG.IgnoreFOV
+    saFovCircle.Radius   = SACFG.FOV
+    if SACFG.On then
+        local myRoot = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+        local hasTarget = saGetTarget(myRoot and myRoot.Position or camera.CFrame.Position) ~= nil
+        saFovCircle.Color = hasTarget
+            and Color3.fromRGB(255, 50, 50)
+            or  Color3.fromRGB(0, 200, 255)
+    end
 
     -- ESP
     updateESP()
@@ -1771,10 +1645,9 @@ end)
 -- ═══════════════════════════════════════════
 -- DONE
 -- ═══════════════════════════════════════════
-Library:Notify("Rivals Tool v2 | " .. DetectedPlatform .. " | Skin Changer Ready", 6)
+Library:Notify("Rivals Tool v2 | " .. DetectedPlatform .. " | util.Raycast SA", 6)
 print("[RIVALS TOOL v2] Platform:", DetectedPlatform)
-print("[AC] No Player:GetMouse() — Using UIS:GetMouseLocation()")
-print("[AC] All services cloneref'd")
-print("[AC] game:Kick() hook neutralized via newcclosure")
-print("[SA] Method: Workspace:Raycast hook")
-print("[SKINS] Modules loaded — enable in Skins tab")
+print("[SA] Method: util.Raycast hook — redirects bullet origin to target head")
+print("[SA] Also hooks util.PlayParticles — blocks flash/smoke/blind")
+print("[AC] No Player:GetMouse() used")
+print("[SKINS] Enable in Skins tab")

@@ -1,12 +1,11 @@
 --[[
     RIVALS TOOL v2 — Full Script
     - AC Safe: cloneref, no Player:GetMouse(), newcclosure
-    - Triggerbot via FighterController (crosshair detection, not auto-aim)
+    - Triggerbot via FighterController (crosshair detection)
     - Silent Aim via Workspace:Raycast hook
-    - Fixed Ragebot + Teleport Mode
-    - Bullet Tracers via Drawing.new
+    - Ragebot — enemy client-side teleport + orbit (UE style)
+    - Bullet Tracers via Drawing.new (no Raycast hook)
     - Skin Changer
-    - Full Combat/Visuals/Misc/Skins/UI Settings
 ]]
 
 -- ═══════════════════════════════════════════
@@ -127,8 +126,8 @@ end)
 -- ═══════════════════════════════════════════
 -- MODULES
 -- ═══════════════════════════════════════════
-local rs   = cloneref(game:GetService("ReplicatedStorage"))
-local ws   = cloneref(game:GetService("Workspace"))
+local rs = cloneref(game:GetService("ReplicatedStorage"))
+local ws = cloneref(game:GetService("Workspace"))
 
 local util_mod    = nil
 local enums_mod   = nil
@@ -179,10 +178,10 @@ pcall(function()
     EnumLibrary = require(ReplicatedStorage.Modules:WaitForChild("EnumLibrary", 10))
     if EnumLibrary then EnumLibrary:WaitForEnumBuilder() end
 end)
-pcall(function() CosmeticLibrary   = require(ReplicatedStorage.Modules:WaitForChild("CosmeticLibrary", 10)) end)
-pcall(function() ItemLibrary       = require(ReplicatedStorage.Modules:WaitForChild("ItemLibrary", 10)) end)
-pcall(function() DataController    = require(controllers:WaitForChild("PlayerDataController", 10)) end)
-pcall(function() FighterController = require(controllers:WaitForChild("FighterController", 10)) end)
+pcall(function() CosmeticLibrary   = require(ReplicatedStorage.Modules:WaitForChild("CosmeticLibrary",  10)) end)
+pcall(function() ItemLibrary       = require(ReplicatedStorage.Modules:WaitForChild("ItemLibrary",       10)) end)
+pcall(function() DataController    = require(controllers:WaitForChild("PlayerDataController",            10)) end)
+pcall(function() FighterController = require(controllers:WaitForChild("FighterController",               10)) end)
 pcall(function()
     ClientItem = require(LP.PlayerScripts.Modules.ClientReplicatedClasses.ClientFighter.ClientItem)
 end)
@@ -603,7 +602,14 @@ local TriggerCFG = {
 }
 
 -- ═══════════════════════════════════════════
--- RAGEBOT CONFIG
+-- RAGEBOT CONFIG — UE style
+--
+-- Void Spam:  client-side teleport ENEMY to you
+--             orbit them so shots register first
+-- Hide time:  how long enemy stays at your pos
+--             before we shoot
+-- Attack time: how fast we fire each attempt
+-- Attempts:   how many shots per cycle
 -- ═══════════════════════════════════════════
 local RageCFG = {
     On           = false,
@@ -611,14 +617,11 @@ local RageCFG = {
     TeamCheck    = false,
     VisibleCheck = false,
     TargetPart   = "Head",
-    -- Teleport mode: teleport behind target before shooting
-    TeleportMode = false,
-    -- How far behind the target to stand (studs)
-    TeleportDist = 3,
-    -- Return to original position after shooting
-    ReturnAfter  = true,
-    -- How long to wait after teleport before shooting (ms)
-    TeleportDelay = 50,
+    -- UE / Void spam settings
+    VoidSpam     = false,   -- enable enemy client-teleport
+    HideTime     = 0.25,    -- seconds to hold enemy at our pos before shooting
+    AttackTime   = 0.1,     -- seconds between each shoot attempt
+    Attempts     = 1,       -- shoot attempts per cycle
 }
 
 local GunCFG = {
@@ -973,8 +976,8 @@ local function triggerSendShot(item, hitPart)
     local objectID = nil
     pcall(function() objectID = item:Get("ObjectID") end)
     if not objectID then return end
-    local camCF  = camera.CFrame
-    local aimCF  = CFrame.lookAt(camCF.Position, hitPart.Position)
+    local camCF    = camera.CFrame
+    local aimCF    = CFrame.lookAt(camCF.Position, hitPart.Position)
     local shootData = {}
     pcall(function()
         shootData[utf8.char(1)] = {
@@ -1052,20 +1055,34 @@ local function stopTriggerbot()
 end
 
 -- ═══════════════════════════════════════════
--- RAGEBOT — Fixed + Teleport Mode
+-- RAGEBOT — UE / Void Spam Style
 --
--- Normal mode: shoots from current position
--- Teleport mode:
---   1. Save current CFrame
---   2. Teleport HRP directly behind/on target
---   3. Wait TeleportDelay ms
---   4. Fire shoot remote from that position
---   5. Teleport back to saved CFrame
---      (so in your POV you never moved)
+-- The trick (client-side only):
+--   1. Find closest enemy
+--   2. VoidSpam ON:
+--      - Client teleport THEIR character to us
+--        (only visible on our screen, not theirs)
+--      - Orbit their HRP around us so we can
+--        guarantee close-range server hits
+--      - Wait HideTime seconds
+--      - Fire Attempts shots spaced AttackTime apart
+--      - Release enemy (stop forcing position)
+--   3. VoidSpam OFF:
+--      - Normal ragebot from camera position
+--
+-- WHY it works: we shoot the server remote with
+-- a CFrame that matches their actual server
+-- position while client-side we've moved them
+-- closer. The server sees the bullet hit because
+-- the angle is right even if timing is off.
 -- ═══════════════════════════════════════════
-local rageConn     = nil
-local rageReloadCD = 0
-local rageTeleporting = false  -- prevent overlapping teleports
+local rageConn       = nil
+local rageReloadCD   = 0
+local rageRunning    = false   -- prevent overlap
+local rageOrbitAngle = 0       -- current orbit angle
+local rageOrbitConn  = nil     -- heartbeat holding enemy near us
+local rageEnemyChar  = nil     -- enemy character we're orbiting
+local rageEnemySaved = {}      -- saved original CFrames of enemy parts
 
 local rageRayParams = RaycastParams.new()
 rageRayParams.FilterType = Enum.RaycastFilterType.Exclude
@@ -1101,14 +1118,73 @@ local function rageGetClosest()
     return best, bChar, bPart
 end
 
+-- Stop orbiting the enemy (release their position)
+local function rageStopOrbit()
+    if rageOrbitConn then
+        rageOrbitConn:Disconnect()
+        rageOrbitConn = nil
+    end
+    rageEnemyChar  = nil
+    rageOrbitAngle = 0
+end
+
 --[[
-    rageFireShot: Encodes and sends the shoot payload.
-    shootOrigin is the position we're shooting FROM
-    (either our real pos, or the teleported pos).
+    rageStartOrbit: forces the enemy character to orbit
+    around our HRP on the CLIENT only.
+
+    Every Heartbeat we:
+    - Compute a point slightly offset from our HRP
+    - Set the enemy's PrimaryPart CFrame to that point
+      facing us
+
+    This is 100% client-side. The enemy player sees
+    themselves in their real position. The server
+    sees them in their real position. We just draw
+    them near us so our shot remote has minimal
+    lag to register.
 ]]
-local function rageFireShot(objectID, shootOriginPos, bPart)
+local function rageStartOrbit(enemyChar)
+    rageStopOrbit()
+    rageEnemyChar  = enemyChar
+    rageOrbitAngle = 0
+
+    rageOrbitConn = RunService.Heartbeat:Connect(function(dt)
+        if not rageEnemyChar or not rageEnemyChar.Parent then
+            rageStopOrbit(); return
+        end
+        local myHRP = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+        if not myHRP then rageStopOrbit(); return end
+
+        -- Orbit: spin enemy around us at 1 stud radius
+        rageOrbitAngle = rageOrbitAngle + dt * 6  -- radians/sec
+        local radius   = 1
+        local orbitPos = myHRP.Position
+            + Vector3.new(
+                math.cos(rageOrbitAngle) * radius,
+                0,
+                math.sin(rageOrbitAngle) * radius
+            )
+
+        -- Face enemy toward us
+        local faceCF = CFrame.lookAt(orbitPos, myHRP.Position)
+        pcall(function()
+            rageEnemyChar:SetPrimaryPartCFrame(faceCF)
+        end)
+    end)
+end
+
+-- Fire the shoot remote using the REAL server position of the part
+-- (bPart is already a reference, .Position is server-authoritative
+--  on the client frame, close enough since we're firing every frame)
+local function rageFireShot(objectID, bPart)
     if not util_mod or not enums_mod or not useItemRemote then return end
-    local aimCF = CFrame.lookAt(shootOriginPos, bPart.Position)
+    local myHRP = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+    if not myHRP then return end
+
+    -- Shoot from our real position toward the part
+    local shootOrigin = myHRP.Position + Vector3.new(0, 1.5, 0)
+    local aimCF       = CFrame.lookAt(shootOrigin, bPart.Position)
+
     local shootData = {}
     local ok = pcall(function()
         shootData[utf8.char(1)] = {
@@ -1121,6 +1197,7 @@ local function rageFireShot(objectID, shootOriginPos, bPart)
         }
     end)
     if not ok then return end
+
     pcall(function()
         useItemRemote:FireServer(objectID, enums_mod:ToEnum("StartShooting"), shootData, nil)
     end)
@@ -1133,12 +1210,14 @@ end
 
 local function startRagebot()
     if rageConn then rageConn:Disconnect() end
+    rageRunning = false
+
     rageConn = RunService.Heartbeat:Connect(function(dt)
         if not RageCFG.On then return end
         if not LP.Character then return end
         if not util_mod or not enums_mod then return end
         if not fighter_mod or not useItemRemote then return end
-        if rageTeleporting then return end
+        if rageRunning then return end  -- don't overlap attack cycles
 
         local localFighter = nil
         pcall(function() localFighter = fighter_mod.LocalFighter end)
@@ -1151,81 +1230,72 @@ local function startRagebot()
         pcall(function() objectID = item:Get("ObjectID") end)
         if not objectID then return end
 
-        -- Auto-reload
+        -- Auto reload
         rageReloadCD = rageReloadCD - dt
         local ammo = nil
         pcall(function() ammo = item:Get("CurrentAmmo") end)
         if ammo ~= nil and ammo <= 0 and rageReloadCD <= 0 then
+            rageStopOrbit()
             pcall(function()
                 useItemRemote:FireServer(objectID, enums_mod:ToEnum("Reload"), {}, nil)
             end)
-            rageReloadCD = 2.0; return
+            rageReloadCD = 2.0
+            return
         end
 
         local _, bChar, bPart = rageGetClosest()
-        if not bChar or not bPart then return end
+        if not bChar or not bPart then
+            rageStopOrbit()
+            return
+        end
 
-        local myHRP = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
-        if not myHRP then return end
+        if RageCFG.VoidSpam then
+            -- ── UE VOID SPAM MODE ──
+            rageRunning = true
 
-        if RageCFG.TeleportMode then
-            -- ── TELEPORT MODE ──
-            -- Prevent overlapping teleport sequences
-            rageTeleporting = true
+            -- Step 1: orbit enemy around us (client-side)
+            rageStartOrbit(bChar)
 
-            -- 1. Save current CFrame so we can return
-            local savedCF = myHRP.CFrame
+            -- Step 2: wait HideTime so orbit locks in
+            task.delay(RageCFG.HideTime, function()
+                if not RageCFG.On then
+                    rageStopOrbit()
+                    rageRunning = false
+                    return
+                end
 
-            -- 2. Compute position directly behind the target
-            --    relative to target's look direction
-            local targetHRP = bChar:FindFirstChild("HumanoidRootPart")
-            local teleportPos
-            if targetHRP then
-                -- Behind target = target pos - target's LookVector * dist
-                local behindDir = targetHRP.CFrame.LookVector
-                teleportPos = targetHRP.Position
-                    - behindDir * RageCFG.TeleportDist
-                    + Vector3.new(0, 0, 0)
-            else
-                -- Fallback: offset from target part
-                teleportPos = bPart.Position - Vector3.new(0, 0, RageCFG.TeleportDist)
-            end
+                -- Step 3: fire Attempts shots spaced AttackTime apart
+                local attempts = RageCFG.Attempts
+                for i = 1, attempts do
+                    if not RageCFG.On then break end
+                    task.delay((i - 1) * RageCFG.AttackTime, function()
+                        if not RageCFG.On then return end
+                        -- Re-check part is still valid
+                        if bPart and bPart.Parent then
+                            rageFireShot(objectID, bPart)
+                        end
+                    end)
+                end
 
-            -- 3. Teleport there — client side only
-            pcall(function()
-                LP.Character:SetPrimaryPartCFrame(
-                    CFrame.new(teleportPos) * CFrame.Angles(0, math.atan2(
-                        -(bPart.Position.X - teleportPos.X),
-                        -(bPart.Position.Z - teleportPos.Z)
-                    ), 0)
-                )
-            end)
-
-            -- 4. Wait TeleportDelay then fire from teleported position
-            task.delay(RageCFG.TeleportDelay / 1000, function()
-                rageFireShot(objectID, teleportPos, bPart)
-
-                -- 5. Return to original CFrame
-                task.delay(0.1, function()
-                    if RageCFG.ReturnAfter and LP.Character then
-                        pcall(function()
-                            LP.Character:SetPrimaryPartCFrame(savedCF)
-                        end)
-                    end
-                    rageTeleporting = false
+                -- Step 4: release orbit after all shots fire
+                local releaseDelay = attempts * RageCFG.AttackTime + 0.15
+                task.delay(releaseDelay, function()
+                    rageStopOrbit()
+                    rageRunning = false
                 end)
             end)
         else
             -- ── NORMAL MODE ──
-            -- Shoot from actual camera position, no teleport
-            rageFireShot(objectID, camera.CFrame.Position, bPart)
+            -- Shoot straight from our camera position, no orbit
+            rageFireShot(objectID, bPart)
         end
     end)
 end
 
 local function stopRagebot()
     RageCFG.On = false
-    rageTeleporting = false
+    rageRunning = false
+    rageStopOrbit()
     if rageConn then rageConn:Disconnect(); rageConn = nil end
 end
 
@@ -1268,84 +1338,106 @@ local function patchGun()
 end
 
 -- ═══════════════════════════════════════════
--- BULLET TRACERS — Drawing.new("Line")
+-- BULLET TRACERS — Drawing.new("Line") only
 --
--- How it works:
--- Hook Workspace:Raycast (same hook SA uses)
--- When a raycast fires that looks like a shot
--- (from near camera/HRP, long direction),
--- draw a line from origin to hit point or
--- max range in that direction.
--- Lines fade out over TracerCFG.Duration seconds.
+-- No Raycast hook at all.
+-- We intercept the shoot remote FIRE itself.
+-- When rageFireShot / triggerSendShot fires,
+-- we call spawnTracer() with origin + target.
+-- The tracer draws from our HRP/camera to the
+-- part we shot at, fades over Duration seconds.
 -- ═══════════════════════════════════════════
 local TracerCFG = {
     Enabled   = false,
     Color     = Color3.fromRGB(255, 50, 50),
     Thickness = 1.5,
-    Duration  = 0.4,    -- seconds before line fades
-    MaxLength = 500,    -- stud cap on tracer length
+    Duration  = 0.4,
+    -- Origin mode: "Camera" or "HRP" or "Bottom"
+    Origin    = "Camera",
 }
 
--- Pool of active tracer lines
-local activeTracers = {}  -- {line, born, fromV2, toV2}
-local tracerHooked  = false
+-- Active tracer pool
+-- Each entry: { line=Drawing, born=tick(), origin=V3, target=V3 }
+local activeTracers = {}
 
--- Convert 3D world position to 2D screen
-local function worldToScreen(pos)
+-- Convert world pos to screen, returns V2 or nil
+local function w2s(pos)
     local sp, on = camera:WorldToViewportPoint(pos)
     if not on or sp.Z <= 0 then return nil end
     return Vector2.new(sp.X, sp.Y)
 end
 
-local function spawnTracer(originPos, endPos)
-    if not TracerCFG.Enabled then return end
-    local fromV2 = worldToScreen(originPos)
-    local toV2   = worldToScreen(endPos)
-    if not fromV2 or not toV2 then return end
+-- Get tracer origin based on setting
+local function getTracerOrigin()
+    if TracerCFG.Origin == "HRP" then
+        local hrp = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+        if hrp then return hrp.Position end
+    elseif TracerCFG.Origin == "Bottom" then
+        return Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y)
+    end
+    -- Default: camera
+    return camera.CFrame.Position
+end
 
+--[[
+    spawnTracer: called directly from rageFireShot
+    and triggerSendShot after remote fires.
+    origin3D: world Vector3 where shot came from
+    target3D: world Vector3 of the part hit
+]]
+local function spawnTracer(origin3D, target3D)
+    if not TracerCFG.Enabled then return end
     local line = Drawing.new("Line")
-    line.From        = fromV2
-    line.To          = toV2
-    line.Color       = TracerCFG.Color
-    line.Thickness   = TracerCFG.Thickness
+    line.Thickness    = TracerCFG.Thickness
+    line.Color        = TracerCFG.Color
     line.Transparency = 0
-    line.Visible     = true
+    line.Visible      = false  -- set visible once we have valid screen pos
 
     table.insert(activeTracers, {
-        line    = line,
-        born    = tick(),
-        origin  = originPos,
-        endPos  = endPos,
+        line     = line,
+        born     = tick(),
+        origin3D = origin3D,
+        target3D = target3D,
     })
 end
 
--- Updated every RenderStepped — fade + cleanup
+-- Called every RenderStepped — update positions + fade
 local function updateTracers(dt)
     local now   = tick()
     local alive = {}
     for _, t in ipairs(activeTracers) do
+        if not t.line then continue end
         local age  = now - t.born
-        local life = TracerCFG.Duration
+        local life = math.max(TracerCFG.Duration, 0.05)
         if age >= life then
-            t.line:Remove()
+            pcall(function() t.line:Remove() end)
         else
-            -- Recalculate screen positions each frame
-            -- so they follow world correctly
-            local fromV2 = worldToScreen(t.origin)
-            local toV2   = worldToScreen(t.endPos)
+            local alpha = 1 - (age / life)
+
+            -- Reproject world positions each frame
+            local fromV2, toV2
+
+            -- Origin: "Bottom" uses a fixed screen point
+            if TracerCFG.Origin == "Bottom" then
+                fromV2 = Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y)
+            else
+                fromV2 = w2s(t.origin3D)
+            end
+
+            toV2 = w2s(t.target3D)
+
             if fromV2 and toV2 then
-                local alpha = 1 - (age / life)
                 t.line.From          = fromV2
                 t.line.To            = toV2
-                t.line.Transparency  = 1 - alpha  -- 0=opaque 1=invisible
+                t.line.Transparency  = 1 - alpha
                 t.line.Color         = TracerCFG.Color
                 t.line.Thickness     = TracerCFG.Thickness
                 t.line.Visible       = true
-                table.insert(alive, t)
             else
                 t.line.Visible = false
-                table.insert(alive, t)
             end
+
+            table.insert(alive, t)
         end
     end
     activeTracers = alive
@@ -1358,67 +1450,34 @@ local function clearTracers()
     activeTracers = {}
 end
 
--- Hook Workspace:Raycast to detect shots for tracers
--- We piggyback on the SA hook since only one
--- hookmetamethod per namecall is allowed.
--- Instead we store a callback the hook calls.
-local tracerRayCallback = nil
+-- ═══════════════════════════════════════════
+-- PATCH rageFireShot and triggerSendShot
+-- to also call spawnTracer
+-- (done by wrapping after definition)
+-- ═══════════════════════════════════════════
 
-local function applyTracerHook()
-    if tracerHooked then return end
-    if not hookmetamethod then return end
-    -- Only apply if SA hook is NOT already applied
-    -- (if SA hook is applied, tracers get injected into SA callback instead)
-    if saHookApplied then
-        -- Inject into SA callback path
-        tracerHooked = true
-        return
-    end
-
-    local origNC
-    origNC = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
-        local method = getnamecallmethod()
-        if method == "Raycast" and (self == Workspace or self == ws) then
-            local result = origNC(self, ...)
-            -- Fire tracer callback if enabled
-            if TracerCFG.Enabled and tracerRayCallback then
-                local args = {...}
-                tracerRayCallback(args[1], args[2], result)
-            end
-            return result
+-- We re-wrap rageFireShot to inject tracer
+local _rageFireShotReal = rageFireShot
+rageFireShot = function(objectID, bPart)
+    if TracerCFG.Enabled and bPart and bPart.Parent then
+        local origin3D = getTracerOrigin()
+        if typeof(origin3D) == "Vector3" then
+            spawnTracer(origin3D, bPart.Position)
         end
-        return origNC(self, ...)
-    end))
-    tracerHooked = true
+    end
+    _rageFireShotReal(objectID, bPart)
 end
 
--- Tracer ray callback — called when any Workspace:Raycast fires
-tracerRayCallback = function(origin, direction, result)
-    if not TracerCFG.Enabled then return end
-    if not origin or not direction then return end
-    if typeof(origin) ~= "Vector3" or typeof(direction) ~= "Vector3" then return end
-    -- Only care about long rays (shots, not camera rays)
-    if direction.Magnitude < 30 then return end
-
-    local myChar = LP.Character
-    local myHRP  = myChar and myChar:FindFirstChild("HumanoidRootPart")
-    local camPos = camera.CFrame.Position
-
-    -- Check if ray originates near camera or HRP
-    local nearCam = (origin - camPos).Magnitude < 20
-    local nearHRP = myHRP and (origin - myHRP.Position).Magnitude < 15 or false
-    if not nearCam and not nearHRP then return end
-
-    -- Endpoint: hit position or max range
-    local endPos
-    if result and result.Position then
-        endPos = result.Position
-    else
-        local cap = math.min(direction.Magnitude, TracerCFG.MaxLength)
-        endPos = origin + direction.Unit * cap
+-- We re-wrap triggerSendShot to inject tracer
+local _triggerSendShotReal = triggerSendShot
+triggerSendShot = function(item, hitPart)
+    if TracerCFG.Enabled and hitPart and hitPart.Parent then
+        local origin3D = getTracerOrigin()
+        if typeof(origin3D) == "Vector3" then
+            spawnTracer(origin3D, hitPart.Position)
+        end
     end
-
-    spawnTracer(origin, endPos)
+    _triggerSendShotReal(item, hitPart)
 end
 
 -- ═══════════════════════════════════════════
@@ -1507,7 +1566,6 @@ local blurEffect = Instance.new("BlurEffect")
 blurEffect.Parent = Lighting
 blurEffect.Size   = 0
 
--- World Tint
 local worldTintEnabled = false
 local worldTintColor   = Color3.fromRGB(255, 255, 255)
 
@@ -1517,7 +1575,6 @@ local function applyWorldTint()
         or  Color3.fromRGB(255, 255, 255)
 end
 
--- Lighting Intensity
 local savedLighting       = nil
 local lightIntensityOn    = false
 local lightIntensityValue = 100
@@ -1572,16 +1629,11 @@ local function startSnow()
     if snowConn then return end
     for i = 1, 120 do
         local p = Instance.new("Part")
-        p.Size         = Vector3.new(0.2, 0.2, 0.2)
-        p.Shape        = Enum.PartType.Ball
-        p.Anchored     = true
-        p.CanCollide   = false
-        p.CastShadow   = false
-        p.Material     = Enum.Material.SmoothPlastic
-        p.Color        = Color3.fromRGB(240, 240, 255)
-        p.Transparency = 0.3
-        p.Position     = randomSnowPos()
-        p.Parent       = Workspace
+        p.Size = Vector3.new(0.2, 0.2, 0.2); p.Shape = Enum.PartType.Ball
+        p.Anchored = true; p.CanCollide = false; p.CastShadow = false
+        p.Material = Enum.Material.SmoothPlastic
+        p.Color = Color3.fromRGB(240, 240, 255); p.Transparency = 0.3
+        p.Position = randomSnowPos(); p.Parent = Workspace
         table.insert(snowParts, p)
     end
     snowConn = RunService.Heartbeat:Connect(function(dt)
@@ -1623,15 +1675,11 @@ local function startRain()
     if rainConn then return end
     for i = 1, 200 do
         local p = Instance.new("Part")
-        p.Size         = Vector3.new(0.05, 0.8, 0.05)
-        p.Anchored     = true
-        p.CanCollide   = false
-        p.CastShadow   = false
-        p.Material     = Enum.Material.Neon
-        p.Color        = Color3.fromRGB(160, 200, 255)
-        p.Transparency = 0.5
-        p.Position     = randomRainPos()
-        p.Parent       = Workspace
+        p.Size = Vector3.new(0.05, 0.8, 0.05); p.Anchored = true
+        p.CanCollide = false; p.CastShadow = false
+        p.Material = Enum.Material.Neon
+        p.Color = Color3.fromRGB(160, 200, 255); p.Transparency = 0.5
+        p.Position = randomRainPos(); p.Parent = Workspace
         table.insert(rainParts, p)
     end
     rainConn = RunService.Heartbeat:Connect(function(dt)
@@ -1700,7 +1748,7 @@ local C_AB2     = Tabs.Combat:AddRightGroupbox("Aimbot Settings")
 local C_SA      = Tabs.Combat:AddLeftGroupbox("Silent Aim")
 local C_SA2     = Tabs.Combat:AddRightGroupbox("SA Settings")
 local C_RB      = Tabs.Combat:AddLeftGroupbox("Ragebot")
-local C_RB2     = Tabs.Combat:AddRightGroupbox("Ragebot Teleport")
+local C_RB2     = Tabs.Combat:AddRightGroupbox("Void Spam Settings")
 local C_GN      = Tabs.Combat:AddRightGroupbox("Gun Mods")
 local C_PLAT    = Tabs.Combat:AddLeftGroupbox("Platform / Input")
 local C_TB_MAIN = Tabs.Combat:AddLeftGroupbox("Triggerbot")
@@ -1766,8 +1814,8 @@ C_SA2:AddSlider("SAFOVSz",  { Text = "FOV Size",     Default = 600, Min = 10, Ma
 C_SA2:AddToggle("SADrawFOV",{ Text = "Draw FOV",     Default = true, Callback = function(v) SACFG.DrawFOV = v; saFovCircle.Visible = v and SACFG.On and not SACFG.IgnoreFOV end })
 
 -- ── Triggerbot ──
-C_TB_MAIN:AddLabel("Shoots when YOU aim at enemy")
-C_TB_MAIN:AddLabel("No auto-aim — crosshair only")
+C_TB_MAIN:AddLabel("Fires when YOUR crosshair is on enemy")
+C_TB_MAIN:AddLabel("No auto-aim — detection only")
 C_TB_MAIN:AddToggle("TBOn", {
     Text = "Enabled", Default = false,
     Callback = function(v)
@@ -1775,31 +1823,16 @@ C_TB_MAIN:AddToggle("TBOn", {
         if v then startTriggerbot() else stopTriggerbot() end
     end
 })
-C_TB_MAIN:AddSlider("TBDelay", {
-    Text = "Delay (ms)", Default = 0, Min = 0, Max = 500, Rounding = 0,
-    Callback = function(v) TriggerCFG.Delay = v end
-})
-C_TB_MAIN:AddSlider("TBGrace", {
-    Text = "Grace (ms)", Default = 0, Min = 0, Max = 500, Rounding = 0,
-    Callback = function(v) TriggerCFG.Grace = v end
-})
+C_TB_MAIN:AddSlider("TBDelay", { Text = "Delay (ms)", Default = 0,   Min = 0, Max = 500, Rounding = 0, Callback = function(v) TriggerCFG.Delay = v end })
+C_TB_MAIN:AddSlider("TBGrace", { Text = "Grace (ms)", Default = 0,   Min = 0, Max = 500, Rounding = 0, Callback = function(v) TriggerCFG.Grace = v end })
 C_TB_ADV:AddLabel("Advanced")
-C_TB_ADV:AddToggle("TBRandDelay", {
-    Text = "Random Delay", Default = false,
-    Callback = function(v) TriggerCFG.RandomDelay = v end
-})
-C_TB_ADV:AddSlider("TBMinDelay", {
-    Text = "Min Delay (ms)", Default = 50, Min = 0, Max = 500, Rounding = 0,
-    Callback = function(v) TriggerCFG.MinDelay = v end
-})
-C_TB_ADV:AddSlider("TBMaxDelay", {
-    Text = "Max Delay (ms)", Default = 150, Min = 0, Max = 500, Rounding = 0,
-    Callback = function(v) TriggerCFG.MaxDelay = v end
-})
+C_TB_ADV:AddToggle("TBRandDelay", { Text = "Random Delay", Default = false, Callback = function(v) TriggerCFG.RandomDelay = v end })
+C_TB_ADV:AddSlider("TBMinDelay",  { Text = "Min Delay (ms)", Default = 50,  Min = 0, Max = 500, Rounding = 0, Callback = function(v) TriggerCFG.MinDelay = v end })
+C_TB_ADV:AddSlider("TBMaxDelay",  { Text = "Max Delay (ms)", Default = 150, Min = 0, Max = 500, Rounding = 0, Callback = function(v) TriggerCFG.MaxDelay = v end })
 C_TB_TGT:AddLabel("Targeting")
 C_TB_TGT:AddToggle("TBVis",  { Text = "Visible Check", Default = false, Callback = function(v) TriggerCFG.VisCheck  = v end })
 C_TB_TGT:AddToggle("TBTeam", { Text = "Team Check",    Default = true,  Callback = function(v) TriggerCFG.TeamCheck = v end })
-C_TB_TGT:AddSlider("TBFov",  { Text = "Trigger FOV (px)", Default = 250, Min = 5, Max = 600, Rounding = 0, Callback = function(v) TriggerCFG.FOVSize = v end })
+C_TB_TGT:AddSlider("TBFov",  { Text = "Trigger FOV (px)", Default = 250, Min = 5,  Max = 600,  Rounding = 0, Callback = function(v) TriggerCFG.FOVSize = v end })
 C_TB_TGT:AddSlider("TBDist", { Text = "Max Distance",     Default = 500, Min = 10, Max = 2000, Rounding = 0, Callback = function(v) TriggerCFG.MaxDist = v end })
 
 -- ── Ragebot ──
@@ -1831,25 +1864,28 @@ C_RB:AddButton({ Text = "Force Reload", Func = function()
     Library:Notify("Reload fired", 2)
 end })
 
--- ── Ragebot Teleport ──
-C_RB2:AddLabel("Teleport behind target before shoot")
-C_RB2:AddLabel("Client-side only — looks normal in your POV")
-C_RB2:AddLabel("WARNING: May be detected by AC")
-C_RB2:AddToggle("RBTeleport", {
-    Text = "Teleport Mode", Default = false,
-    Callback = function(v) RageCFG.TeleportMode = v end
+-- ── Void Spam Settings ──
+C_RB2:AddLabel("Client-side teleport ENEMY to you")
+C_RB2:AddLabel("Enemy orbits around you while you shoot")
+C_RB2:AddLabel("They see nothing — 100% client-side")
+C_RB2:AddToggle("RBVoidSpam", {
+    Text = "Void Spam", Default = false,
+    Callback = function(v) RageCFG.VoidSpam = v end
 })
-C_RB2:AddToggle("RBReturn", {
-    Text = "Return After Shot", Default = true,
-    Callback = function(v) RageCFG.ReturnAfter = v end
+C_RB2:AddSlider("RBHideTime", {
+    Text = "Hide Time (s)", Default = 25, Min = 5, Max = 100, Rounding = 0,
+    Suffix = "ms",
+    Callback = function(v) RageCFG.HideTime = v / 1000 end
 })
-C_RB2:AddSlider("RBTelDist", {
-    Text = "Behind Distance (studs)", Default = 3, Min = 1, Max = 15, Rounding = 0,
-    Callback = function(v) RageCFG.TeleportDist = v end
+C_RB2:AddSlider("RBAttackTime", {
+    Text = "Attack Time (s)", Default = 10, Min = 0, Max = 100, Rounding = 0,
+    Suffix = "ms",
+    Callback = function(v) RageCFG.AttackTime = v / 1000 end
 })
-C_RB2:AddSlider("RBTelDelay", {
-    Text = "Fire Delay (ms)", Default = 50, Min = 0, Max = 300, Rounding = 0,
-    Callback = function(v) RageCFG.TeleportDelay = v end
+C_RB2:AddSlider("RBAttempts", {
+    Text = "Shoot Attempts", Default = 1, Min = 1, Max = 10, Rounding = 0,
+    Suffix = "x",
+    Callback = function(v) RageCFG.Attempts = v end
 })
 
 -- ── Gun Mods ──
@@ -1890,16 +1926,15 @@ V_HN:AddSlider("HitDur", { Text = "Duration (s)", Default = 5, Min = 1, Max = 10
     Callback = function(v) hitDuration = v end })
 
 -- ── Bullet Tracers ──
-V_TR:AddLabel("Drawing.new Line tracers")
-V_TR:AddLabel("Draws where bullets travel")
+V_TR:AddLabel("Drawing.new Line — no Raycast hook")
+V_TR:AddLabel("Fires on every ragebot / triggerbot shot")
 V_TR:AddToggle("TracerOn", { Text = "Enable Tracers", Default = false,
     Callback = function(v)
         TracerCFG.Enabled = v
-        if v then applyTracerHook() end
         if not v then clearTracers() end
     end
 })
-V_TR:AddLabel("Tracer Color"):AddColorPicker("TracerColor", {
+V_TR:AddLabel("Color"):AddColorPicker("TracerColor", {
     Default = Color3.fromRGB(255, 50, 50),
     Callback = function(v) TracerCFG.Color = v end
 })
@@ -1907,10 +1942,12 @@ V_TR:AddSlider("TracerThick", { Text = "Thickness", Default = 2, Min = 1, Max = 
     Callback = function(v) TracerCFG.Thickness = v end
 })
 V_TR:AddSlider("TracerDur", { Text = "Duration (s)", Default = 0, Min = 0, Max = 3, Rounding = 1,
-    Callback = function(v) TracerCFG.Duration = v end
+    Callback = function(v) TracerCFG.Duration = math.max(v, 0.05) end
 })
-V_TR:AddSlider("TracerLen", { Text = "Max Length (studs)", Default = 500, Min = 50, Max = 2000, Rounding = 0,
-    Callback = function(v) TracerCFG.MaxLength = v end
+V_TR:AddDropdown("TracerOrigin", {
+    Text = "Origin", Default = "Camera",
+    Values = {"Camera", "HRP", "Bottom"},
+    Callback = function(v) TracerCFG.Origin = v end
 })
 
 -- ── World ──
@@ -1956,10 +1993,9 @@ local M_R = Tabs.Misc:AddRightGroupbox("Actions")
 M_L:AddLabel("AC Bypass: Active")
 M_L:AddLabel("No Player:GetMouse()")
 M_L:AddLabel("All services cloneref'd")
-M_L:AddLabel("All hooks newcclosure'd")
-M_L:AddLabel("Ragebot: util EncodeCFrame")
-M_L:AddLabel("Teleport: client-side HRP")
+M_L:AddLabel("Ragebot: enemy orbit (client-side)")
 M_L:AddLabel("Tracers: Drawing.new Line")
+M_L:AddLabel("No Raycast hook for tracers")
 
 M_R:AddButton({ Text = "Stop All Features", Func = function()
     AimbotCFG.On = false; lockedTarget = nil; lockTimer = 0; resetDelayedPos()
@@ -1995,8 +2031,8 @@ SK_L:AddToggle("SkinChangerOn", {
 })
 SK_L:AddLabel("")
 SK_L:AddLabel("Open in-game cosmetic menu to equip.")
-SK_L:AddButton({ Text = "Save Config",    Func = function() saveConfig(); Library:Notify("Saved",   2) end })
-SK_L:AddButton({ Text = "Load Config",    Func = function() loadConfig(); Library:Notify("Loaded",  2) end })
+SK_L:AddButton({ Text = "Save Config",    Func = function() saveConfig(); Library:Notify("Saved", 2) end })
+SK_L:AddButton({ Text = "Load Config",    Func = function() loadConfig(); Library:Notify("Loaded", 2) end })
 SK_L:AddButton({ Text = "Clear Equipped", Func = function()
     equipped = {}; favorites = {}; saveConfig(); Library:Notify("Cleared", 2)
 end })
@@ -2035,7 +2071,6 @@ RunService.RenderStepped:Connect(function(dt)
     local center = getScreenCenter()
     local sensX, sensY = getSensitivity()
 
-    -- FOV circles
     fovCircle.Position  = center
     fovCircle.Radius    = getEffectiveAimbotFOV()
     fovCircle.Visible   = AimbotCFG.DrawFOV and AimbotCFG.On and AimbotCFG.FOVStyle ~= "Invisible"
@@ -2044,7 +2079,7 @@ RunService.RenderStepped:Connect(function(dt)
     saFovCircle.Radius   = SACFG.IgnoreFOV and 0 or getEffectiveSAFOV()
     saFovCircle.Visible  = SACFG.DrawFOV and SACFG.On and not SACFG.IgnoreFOV
 
-    -- Bullet tracer update
+    -- Tracer fade + reproject
     updateTracers(dt)
 
     -- ESP
@@ -2103,5 +2138,5 @@ end)
 -- ═══════════════════════════════════════════
 Library:Notify("Rivals Tool v2 | Loaded", 6)
 print("[RIVALS TOOL v2] Loaded")
-print("[RB] Teleport Mode: behind target, return after shot")
-print("[TR] Bullet Tracers: Drawing.new Line, fade over time")
+print("[RB] Void Spam: client-side enemy orbit, no POV change")
+print("[TR] Bullet Tracers: Drawing.new Line, fired on shot remote")

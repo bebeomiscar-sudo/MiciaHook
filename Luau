@@ -1,6 +1,6 @@
 --[[
     Rivals Tool v3 — + AI Legit + Easy Aimbot + Improved Ragebot
-    + Aimbot Overhaul + Teleport + Anti-Aim + Rage FOV
+    + Aimbot Overhaul + Teleport + Full Anti-Aim System
 ]]
 
 -- ═══════════════════════════════════════════
@@ -96,7 +96,7 @@ local Win = Lib:CreateWindow({
     NotifySide       = "Left",
     TabPadding       = 8,
     MenuFadeTime     = 0.2,
-    Size             = UDim2.fromOffset(500, 580),
+    Size             = UDim2.fromOffset(520, 600),
 })
 
 local T = {
@@ -108,30 +108,30 @@ local T = {
 }
 
 local G = {
-    EzL = T.Combat:AddLeftGroupbox("🎯 Easy Aimbot"),
-    LgR = T.Combat:AddRightGroupbox("Aimbot Settings"),
-    AiL = T.Combat:AddLeftGroupbox("🤖 AI Legit"),
-    LgL = T.Combat:AddLeftGroupbox("Legitbot (Advanced)"),
-    SaL = T.Combat:AddLeftGroupbox("Silent Aim"),
-    SaR = T.Combat:AddRightGroupbox("SA Settings"),
-    TbL = T.Combat:AddLeftGroupbox("Triggerbot"),
-    TbR = T.Combat:AddRightGroupbox("Triggerbot Targeting"),
-
-    -- Ragebot: left = controls, right = NEW settings
-    RgL = T.Combat:AddLeftGroupbox("Ragebot"),
-    RgR = T.Combat:AddRightGroupbox("Rage Settings"),  -- FOV + Teleport + Anti-Aim
-
-    GnR = T.Combat:AddRightGroupbox("Gun Mods"),
-    VsL = T.Visuals:AddLeftGroupbox("ESP"),
-    VsR = T.Visuals:AddRightGroupbox("Camera"),
-    TrL = T.Visuals:AddLeftGroupbox("Bullet Tracers"),
-    WdL = T.Visuals:AddLeftGroupbox("World"),
-    HnR = T.Visuals:AddRightGroupbox("Hit Numbers"),
-    MiL = T.Misc:AddLeftGroupbox("Info"),
-    MiR = T.Misc:AddRightGroupbox("Actions"),
-    SkL = T.Skins:AddLeftGroupbox("Skin Changer"),
-    SkR = T.Skins:AddRightGroupbox("Status"),
-    StL = T.Settings:AddLeftGroupbox("UI / Mobile"),
+    EzL  = T.Combat:AddLeftGroupbox("🎯 Easy Aimbot"),
+    LgR  = T.Combat:AddRightGroupbox("Aimbot Settings"),
+    AiL  = T.Combat:AddLeftGroupbox("🤖 AI Legit"),
+    LgL  = T.Combat:AddLeftGroupbox("Legitbot (Advanced)"),
+    SaL  = T.Combat:AddLeftGroupbox("Silent Aim"),
+    SaR  = T.Combat:AddRightGroupbox("SA Settings"),
+    TbL  = T.Combat:AddLeftGroupbox("Triggerbot"),
+    TbR  = T.Combat:AddRightGroupbox("Triggerbot Targeting"),
+    RgL  = T.Combat:AddLeftGroupbox("Ragebot"),
+    RgR  = T.Combat:AddRightGroupbox("Rage Settings"),
+    -- Anti-Aim gets its own groupboxes
+    AaL  = T.Combat:AddLeftGroupbox("Anti-Aim"),
+    AaR  = T.Combat:AddRightGroupbox("Anti-Aim Settings"),
+    GnR  = T.Combat:AddRightGroupbox("Gun Mods"),
+    VsL  = T.Visuals:AddLeftGroupbox("ESP"),
+    VsR  = T.Visuals:AddRightGroupbox("Camera"),
+    TrL  = T.Visuals:AddLeftGroupbox("Bullet Tracers"),
+    WdL  = T.Visuals:AddLeftGroupbox("World"),
+    HnR  = T.Visuals:AddRightGroupbox("Hit Numbers"),
+    MiL  = T.Misc:AddLeftGroupbox("Info"),
+    MiR  = T.Misc:AddRightGroupbox("Actions"),
+    SkL  = T.Skins:AddLeftGroupbox("Skin Changer"),
+    SkR  = T.Skins:AddRightGroupbox("Status"),
+    StL  = T.Settings:AddLeftGroupbox("UI / Mobile"),
 }
 
 -- ═══════════════════════════════════════════
@@ -233,10 +233,7 @@ local function angDiff(f, t)
 end
 
 -- ═══════════════════════════════════════════════════════════
--- AIMBOT CONFIG — OVERHAUL
--- Speed 0.01-5, SpeedAttack 0.01-5,
--- SpeedScaleFov 0-100, MaxLock 0.01-10,
--- ReactionTime 0-500ms
+-- AIMBOT CONFIG
 -- ═══════════════════════════════════════════════════════════
 local AB = {
     on            = false,
@@ -248,14 +245,11 @@ local AB = {
     dynFov        = false,
     lockMode      = "Soft",
     curvePct      = 10,
-
-    -- NEW overhaul fields
-    speed         = 1.0,    -- 0.01 to 5
-    speedAttack   = 1.0,    -- 0.01 to 5
-    speedScaleFov = 50,     -- 0 to 100
-    maxLock       = 3.0,    -- 0.01 to 10 seconds
-    reactTime     = 100,    -- 0 to 500 ms
-
+    speed         = 1.0,
+    speedAttack   = 1.0,
+    speedScaleFov = 50,
+    maxLock       = 3.0,
+    reactTime     = 100,
     easyMode      = false,
     easyPreset    = "Normal",
 }
@@ -328,7 +322,6 @@ local function abFind()
     return best
 end
 
--- Velocity prediction scaled by speedAttack
 local function getPredictedPos(pt)
     local now = tick(); local pos = pt.Position
     if abPrevPos and (now - abPrevTick) > 0 then
@@ -340,17 +333,12 @@ local function getPredictedPos(pt)
     return pos
 end
 
--- ── Unified smart lock using all 5 new fields ──
 local function applySmartLock(tRot, cur, dt, screenDist, fovRadius)
-    local distFactor = 1.0
+    local distFactor = AB.speed
     if fovRadius > 0 then
         local normalized = math.clamp(screenDist / fovRadius, 0, 1)
-        -- when aim is close to target (normalized→0): speedAttack dominates
-        -- when far (normalized→1): base speed dominates
         distFactor = AB.speed + (AB.speedScaleFov / 100)
             * (1 - normalized) * math.max(AB.speedAttack - AB.speed, 0)
-    else
-        distFactor = AB.speed
     end
     local eff    = math.clamp(distFactor, 0.01, 5)
     local factor = math.clamp(eff * dt * 6, 0, 1)
@@ -361,7 +349,6 @@ local function applySmartLock(tRot, cur, dt, screenDist, fovRadius)
             cur.Y + angDiff(cur.Y, tRot.Y) * factor
         )
     else
-        -- Curve
         local distP = math.abs(tRot.X - cur.X)
         local distY = math.abs(angDiff(cur.Y, tRot.Y))
         local dist  = math.sqrt(distP^2 + distY^2)
@@ -542,9 +529,281 @@ local function startTB()
 end
 
 -- ═══════════════════════════════════════════════════════════
--- RAGEBOT
--- Removed: Void Spam
--- Added:   FOV (0-370), Teleport system, Anti-Aim
+-- ANTI-AIM SYSTEM
+-- Full pitch/yaw base/yaw mode system
+-- Uses the betterRandom pattern for Glitch modes
+-- Syncs back on RenderStepped so YOUR view is unaffected
+-- ═══════════════════════════════════════════════════════════
+local AA = {
+    enabled      = false,
+
+    -- Pitch: Off / Up / Zero / Down / Glitch / Random
+    pitch        = "Off",
+
+    -- Yaw Base: Local / AtTargets
+    yawBase      = "Local",
+
+    -- Yaw Mode: Off / Forward / Backward / Spin / GlitchSpin / StutterSpin
+    yaw          = "Off",
+
+    -- Manual yaw angle offset (degrees), -180 to 180
+    yawAngle     = 0,
+
+    -- Underground: sinks HRP into floor
+    underground  = false,
+}
+
+-- betterRandom from the reference code
+local function betterRandom(mi, ma, dmi, dma)
+    local val = math.random(mi, ma)
+    repeat val = math.random(mi, ma)
+    until val < dmi or val > dma
+    return val
+end
+
+-- AA runtime state
+local aaClientCF  = nil   -- the CFrame we restore each RenderStep
+local aaClientLV  = nil   -- linear velocity
+local aaClientAV  = nil   -- angular velocity
+local aaSpinAngle = 0     -- accumulated spin angle
+local aaStutterOn = false -- stutter alternates each frame
+local aaGlitchT   = 0     -- glitch timer
+
+-- Compute the desync CFrame to set on Heartbeat
+local function computeAACFrame(dt)
+    if not ch then return nil end
+    local myHRP = ch:FindFirstChild("HumanoidRootPart")
+    if not myHRP then return nil end
+
+    local base = aaClientCF or myHRP.CFrame
+    local pos  = base.Position
+
+    -- ── Underground: push position below floor ──
+    if AA.underground then
+        pos = pos - Vector3.new(0, 5, 0)
+    end
+
+    -- ── Pitch calculation ──
+    local pitchRad = 0
+    if AA.pitch == "Up" then
+        pitchRad = math.rad(-89)
+    elseif AA.pitch == "Zero" then
+        pitchRad = 0
+    elseif AA.pitch == "Down" then
+        pitchRad = math.rad(89)
+    elseif AA.pitch == "Glitch" then
+        -- rapidly flicker between extremes (from reference pattern)
+        pitchRad = math.rad(betterRandom(-89, 89, -10, 10))
+    elseif AA.pitch == "Random" then
+        pitchRad = math.rad(math.random(-89, 89))
+    end
+    -- "Off" → pitchRad stays 0 (no pitch change)
+
+    -- ── Yaw base ──
+    local baseYaw = 0
+    if AA.yawBase == "Local" then
+        -- use current HRP look direction
+        local _, ry, _ = base:ToEulerAnglesYXZ()
+        baseYaw = ry
+    elseif AA.yawBase == "AtTargets" then
+        -- face the closest enemy
+        local myPos = base.Position
+        local closest = nil; local cd = math.huge
+        for _, p in ipairs(plr:GetPlayers()) do
+            if p == lp then continue end
+            local ec = p.Character; if not ec then continue end
+            local eh = ec:FindFirstChild("HumanoidRootPart"); if not eh then continue end
+            local d = (myPos - eh.Position).Magnitude
+            if d < cd then cd = d; closest = eh end
+        end
+        if closest then
+            local dir = (closest.Position - myPos) * Vector3.new(1,0,1)
+            if dir.Magnitude > 0.01 then
+                baseYaw = math.atan2(-dir.X, -dir.Z)
+            end
+        else
+            local _, ry, _ = base:ToEulerAnglesYXZ()
+            baseYaw = ry
+        end
+    end
+
+    -- ── Yaw mode ──
+    local yawOffset = math.rad(AA.yawAngle)   -- manual angle always added
+
+    if AA.yaw == "Forward" then
+        yawOffset = yawOffset + 0
+    elseif AA.yaw == "Backward" then
+        yawOffset = yawOffset + math.rad(180)
+    elseif AA.yaw == "Spin" then
+        aaSpinAngle = aaSpinAngle + dt * 720   -- 2 full rotations/sec
+        yawOffset   = yawOffset + math.rad(aaSpinAngle)
+    elseif AA.yaw == "GlitchSpin" then
+        -- spin + random glitch jumps
+        aaSpinAngle = aaSpinAngle + dt * 1440
+        local glitchExtra = math.rad(betterRandom(-180, 180, -10, 10))
+        yawOffset   = yawOffset + math.rad(aaSpinAngle) + glitchExtra
+    elseif AA.yaw == "StutterSpin" then
+        -- alternates spin direction every frame
+        aaStutterOn = not aaStutterOn
+        if aaStutterOn then
+            aaSpinAngle = aaSpinAngle + dt * 720
+        else
+            aaSpinAngle = aaSpinAngle - dt * 360
+        end
+        yawOffset = yawOffset + math.rad(aaSpinAngle)
+    end
+    -- "Off" → yawOffset stays as manual angle only
+
+    local finalYaw = baseYaw + yawOffset
+
+    -- Build the desync CFrame
+    local newCF = CFrame.new(pos)
+        * CFrame.fromEulerAnglesYXZ(pitchRad, finalYaw, 0)
+
+    return newCF
+end
+
+-- AA connections
+local aaHeartConn  = nil
+local aaRenderConn = nil
+
+local function stopAntiAim()
+    AA.enabled = false
+    if aaHeartConn  then aaHeartConn:Disconnect();  aaHeartConn  = nil end
+    if aaRenderConn then aaRenderConn:Disconnect(); aaRenderConn = nil end
+    aaClientCF = nil; aaClientLV = nil; aaClientAV = nil
+    aaSpinAngle = 0; aaStutterOn = false
+end
+
+local function startAntiAim()
+    stopAntiAim()
+    AA.enabled  = true
+    aaSpinAngle = 0
+
+    -- Heartbeat: apply desync (server sees this)
+    aaHeartConn = rs.Heartbeat:Connect(function(dt)
+        if not AA.enabled then stopAntiAim(); return end
+        local myHRP = ch and ch:FindFirstChild("HumanoidRootPart")
+        if not myHRP then return end
+
+        -- save real state BEFORE modifying
+        aaClientCF = myHRP.CFrame
+        aaClientLV = myHRP.AssemblyLinearVelocity
+        aaClientAV = myHRP.AssemblyAngularVelocity
+
+        local desynced = computeAACFrame(dt)
+        if not desynced then return end
+
+        pcall(function()
+            myHRP.CFrame = desynced
+
+            -- Glitch modes: also teleport to random position briefly (reference code technique)
+            if AA.pitch == "Glitch" or AA.yaw == "GlitchSpin" then
+                myHRP.CFrame = CFrame.new(
+                    betterRandom(-2147483646, 2147483646, -1147483646, 1147483646),
+                    betterRandom(-2147483646, 2147483646, -1147483646, 1147483646),
+                    betterRandom(-2147483646, 2147483646, -1147483646, 1147483646)
+                ) * CFrame.Angles(math.rad(math.pi), math.rad(math.pi), math.rad(math.pi))
+                myHRP.AssemblyLinearVelocity = Vector3.new(
+                    betterRandom(-2147483646, 2147483646, -1147483646, 1147483646),
+                    betterRandom(-2147483646, 2147483646, -1147483646, 1147483646),
+                    betterRandom(-2147483646, 2147483646, -1147483646, 1147483646)
+                )
+                myHRP.AssemblyAngularVelocity = Vector3.new(
+                    betterRandom(-2147483646, 2147483646, -1147483646, 1147483646),
+                    betterRandom(-2147483646, 2147483646, -1147483646, 1147483646),
+                    betterRandom(-2147483646, 2147483646, -1147483646, 1147483646)
+                )
+            end
+        end)
+    end)
+
+    -- RenderStepped First priority: restore real state (YOUR view unaffected)
+    rs:BindToRenderStep("AA_Sync", Enum.RenderPriority.First.Value, function()
+        if not AA.enabled then return end
+        local myHRP = ch and ch:FindFirstChild("HumanoidRootPart")
+        if not myHRP then return end
+        if aaClientCF then
+            pcall(function()
+                myHRP.CFrame                  = aaClientCF
+                myHRP.AssemblyLinearVelocity  = aaClientLV  or Vector3.zero
+                myHRP.AssemblyAngularVelocity = aaClientAV  or Vector3.zero
+            end)
+        end
+    end)
+end
+
+-- ═══════════════════════════════════════════════════════════
+-- TELEPORT SYSTEM
+-- Works standalone — does NOT require ragebot to be on
+-- Teleports to target, optionally shoots (if ragebot active),
+-- then returns to saved position
+-- ═══════════════════════════════════════════════════════════
+local TP = {
+    enabled   = false,
+    target    = "Head",    -- "Head" | "Legs"
+    autoShoot = false,     -- fire if ragebot also enabled
+}
+
+-- Manual teleport button target finder (nearest enemy)
+local function tpFindNearest()
+    local myHRP = ch and ch:FindFirstChild("HumanoidRootPart")
+    if not myHRP then return nil, nil end
+    local best = nil; local bc = nil; local bd = math.huge
+    for _, p in ipairs(plr:GetPlayers()) do
+        if p == lp then continue end
+        local c2 = p.Character; if not c2 then continue end
+        local h2 = c2:FindFirstChildOfClass("Humanoid")
+        if not h2 or h2.Health <= 0 then continue end
+        local hrp2 = c2:FindFirstChild("HumanoidRootPart"); if not hrp2 then continue end
+        local d = (myHRP.Position - hrp2.Position).Magnitude
+        if d < bd then bd=d; best=p; bc=c2 end
+    end
+    return best, bc
+end
+
+local tpRunning = false
+
+local function doTeleport(targetChar, oid, targetPart)
+    if tpRunning then return end
+    if not ch or not ch:FindFirstChild("HumanoidRootPart") then return end
+    local myHRP   = ch.HumanoidRootPart
+    local savedCF = myHRP.CFrame
+
+    -- Calculate destination
+    local destPos
+    local targetHead = targetChar:FindFirstChild("Head")
+    local targetHRP2 = targetChar:FindFirstChild("HumanoidRootPart")
+
+    if TP.target == "Head" and targetHead then
+        destPos = targetHead.Position + Vector3.new(0, 3, 0)
+    elseif TP.target == "Legs" and targetHRP2 then
+        destPos = targetHRP2.Position - Vector3.new(0, 2.5, 0)
+    else
+        destPos = (targetHRP2 and targetHRP2.Position or savedCF.Position) + Vector3.new(0, 3, 0)
+    end
+
+    tpRunning = true
+
+    -- Teleport to target
+    pcall(function() myHRP.CFrame = CFrame.new(destPos) end)
+    task.wait(0.05)
+
+    -- Optionally shoot if both ragebot and autoShoot enabled
+    if TP.autoShoot and RG and RG.on and oid and targetPart and targetPart.Parent then
+        rgFire(oid, targetPart)
+        task.wait(0.08)
+    end
+
+    -- Return
+    pcall(function() myHRP.CFrame = savedCF end)
+    tpRunning = false
+end
+
+-- ═══════════════════════════════════════════════════════════
+-- RAGEBOT — Improved
+-- Uses the betterRandom desync technique from reference code
+-- No Void Spam. FOV 0-370. Teleport integrated.
 -- ═══════════════════════════════════════════════════════════
 local RG = {
     on        = false,
@@ -552,16 +811,9 @@ local RG = {
     team      = false,
     vis       = false,
     part      = "Head",
-    -- NEW: rage fov (0 = disabled = infinite, >0 = must be in this screen radius)
     fov       = 0,
     priority  = "Closest",
     ffa       = false,
-    -- Teleport
-    tpEnabled = false,
-    tpTarget  = "Head",   -- "Head" or "Legs"
-    tpHide    = 0.03,     -- seconds to hide before shooting
-    -- Anti-Aim
-    aaEnabled = false,
 }
 
 local rgConn    = nil
@@ -571,102 +823,11 @@ local rgRunning = false
 local rgRp = RaycastParams.new()
 rgRp.FilterType = Enum.RaycastFilterType.Exclude
 
--- ── Rage FOV circle ──
+-- Rage FOV circle
 local rgCirc = Drawing.new("Circle")
 rgCirc.NumSides=64; rgCirc.Filled=false
 rgCirc.Color=Color3.fromRGB(255,80,80)
 rgCirc.Thickness=1.5; rgCirc.Transparency=0.7; rgCirc.Visible=false
-
--- ── ANTI-AIM STATE ──
-local aaActive    = false
-local aaOrigCF    = nil   -- original HRP CFrame before anti-aim
-local aaConn      = nil
-
--- Anti-aim: makes your character appear to sink into the ground on other clients
--- by rotating HRP 90° forward (face-down) + pitching the look vector underground.
--- Your own camera is unaffected because we only touch HRP CFrame.
-local function startAntiAim()
-    if aaConn then aaConn:Disconnect() end
-    aaActive = true
-    aaConn = rs.Heartbeat:Connect(function()
-        if not RG.aaEnabled then
-            -- restore
-            if aaOrigCF and ch and ch:FindFirstChild("HumanoidRootPart") then
-                pcall(function()
-                    ch.HumanoidRootPart.CFrame = CFrame.new(
-                        ch.HumanoidRootPart.Position,
-                        ch.HumanoidRootPart.Position + ch.HumanoidRootPart.CFrame.LookVector
-                    )
-                end)
-            end
-            aaOrigCF = nil; aaActive = false
-            aaConn:Disconnect(); aaConn = nil
-            return
-        end
-        if not ch or not ch:FindFirstChild("HumanoidRootPart") then return end
-        local myHRP = ch.HumanoidRootPart
-        -- Store original for reference
-        aaOrigCF = myHRP.CFrame
-        -- Rotate the HRP so it looks straight down into the ground:
-        -- This desynchronises the server hitbox (shows lying down to others)
-        -- while our camera (controlled by CameraController) is unaffected.
-        pcall(function()
-            myHRP.CFrame = CFrame.new(myHRP.Position)
-                * CFrame.Angles(math.pi / 2, 0, 0)   -- pitch 90° → face-down
-        end)
-    end)
-end
-
-local function stopAntiAim()
-    RG.aaEnabled = false
-    if aaConn then aaConn:Disconnect(); aaConn = nil end
-    aaActive = false; aaOrigCF = nil
-end
-
--- ── TELEPORT SYSTEM ──
--- 1. Save current position
--- 2. Teleport onto target (head or legs offset)
--- 3. Wait hideTime (so server can't react fast)
--- 4. Fire shot
--- 5. Teleport back to saved position
-local function doTeleportShot(oid, targetChar, targetPart)
-    if not ch or not ch:FindFirstChild("HumanoidRootPart") then return end
-    local myHRP   = ch.HumanoidRootPart
-    local savedCF = myHRP.CFrame   -- remember where we were
-
-    -- Calculate destination on target
-    local targetHRP = targetChar:FindFirstChild("HumanoidRootPart")
-    local targetHead = targetChar:FindFirstChild("Head")
-    local destPos
-
-    if RG.tpTarget == "Head" and targetHead then
-        -- sit just above the head
-        destPos = targetHead.Position + Vector3.new(0, 3, 0)
-    elseif RG.tpTarget == "Legs" and targetHRP then
-        -- sit at the feet
-        destPos = targetHRP.Position - Vector3.new(0, 2.5, 0)
-    else
-        destPos = targetPart.Position + Vector3.new(0, 3, 0)
-    end
-
-    -- Teleport to target
-    pcall(function() myHRP.CFrame = CFrame.new(destPos) end)
-
-    -- Wait hideTime — during this window the server processes our new position
-    task.wait(RG.tpHide)
-
-    -- Fire the shot while on top of them
-    if RG.on and targetPart and targetPart.Parent then
-        rgFire(oid, targetPart)
-    end
-
-    -- Teleport back immediately
-    task.wait(0.02)
-    pcall(function() myHRP.CFrame = savedCF end)
-end
-
--- Forward-declare rgFire so doTeleportShot can call it
-local rgFire
 
 local function rgValid(p)
     if p == lp then return false end
@@ -677,7 +838,6 @@ local function rgValid(p)
 end
 
 local function rgInFov(pt)
-    -- RG.fov == 0 means no FOV restriction (infinite)
     if RG.fov <= 0 then return true end
     return inFov(pt, RG.fov)
 end
@@ -690,7 +850,6 @@ local function rgFindTarget()
         if not rgValid(p) then continue end
         local chr = p.Character
         local pt  = bPart(chr, RG.part); if not pt then continue end
-        -- NEW: rage fov check
         if not rgInFov(pt) then continue end
         local dist = (myH.Position - pt.Position).Magnitude; if dist > RG.dist then continue end
         if RG.vis then
@@ -703,19 +862,19 @@ local function rgFindTarget()
         table.insert(candidates, {player=p, char=chr, part=pt, dist=dist, hp=hp})
     end
     if #candidates == 0 then return nil,nil,nil end
-    if RG.priority == "LowHP" then
-        table.sort(candidates, function(a,b) return a.hp < b.hp end)
-    elseif RG.priority == "HighHP" then
-        table.sort(candidates, function(a,b) return a.hp > b.hp end)
-    elseif RG.priority == "Closest" then
-        table.sort(candidates, function(a,b) return a.dist < b.dist end)
-    elseif RG.priority == "Random" then
+    if     RG.priority == "LowHP"   then table.sort(candidates, function(a,b) return a.hp   < b.hp   end)
+    elseif RG.priority == "HighHP"  then table.sort(candidates, function(a,b) return a.hp   > b.hp   end)
+    elseif RG.priority == "Closest" then table.sort(candidates, function(a,b) return a.dist < b.dist end)
+    elseif RG.priority == "Random"  then
         for i=#candidates,2,-1 do
             local j=math.random(i); candidates[i],candidates[j]=candidates[j],candidates[i]
         end
     end
     local best = candidates[1]; return best.player, best.char, best.part
 end
+
+-- Forward declaration so doTeleport can reference it
+rgFire = nil
 
 rgFire = function(oid, bp)
     if not mUtil or not mEnum or not rUseItem then return end
@@ -746,27 +905,24 @@ local function startRG()
         if not lp.Character then return end
         if not mUtil or not mEnum or not rUseItem then return end
         if rgRunning then return end
-
-        local lf = nil; pcall(function() if mFig then lf=mFig.LocalFighter end end)
+        local lf=nil; pcall(function() if mFig then lf=mFig.LocalFighter end end)
         if not lf then return end
-        local item = lf.EquippedItem; if not item then return end
-        local oid = nil; pcall(function() oid=item:Get("ObjectID") end); if not oid then return end
-
+        local item=lf.EquippedItem; if not item then return end
+        local oid=nil; pcall(function() oid=item:Get("ObjectID") end); if not oid then return end
         rgCD = rgCD - dt
-        local ammo = nil; pcall(function() ammo=item:Get("CurrentAmmo") end)
-        if ammo ~= nil and ammo <= 0 and rgCD <= 0 then
+        local ammo=nil; pcall(function() ammo=item:Get("CurrentAmmo") end)
+        if ammo~=nil and ammo<=0 and rgCD<=0 then
             pcall(function() rUseItem:FireServer(oid, mEnum:ToEnum("Reload"), {}, nil) end)
-            rgCD = 2.0; return
+            rgCD=2.0; return
         end
-
         local _, bc, bp = rgFindTarget()
         if not bc or not bp then return end
 
-        if RG.tpEnabled then
-            -- Teleport mode: go to target, shoot, come back
+        if TP.enabled then
+            -- Teleport attack mode
             rgRunning = true
             task.spawn(function()
-                doTeleportShot(oid, bc, bp)
+                doTeleport(bc, oid, bp)
                 rgRunning = false
             end)
         else
@@ -802,8 +958,8 @@ end
 -- VIS CONFIG
 -- ═══════════════════════════════════════════
 local VIS = {
-    esp=false, tracers=false, tracerThick=1.5, tracerDur=0.4,
-    hitNum=true, sat=0, con=0, blur=0, bright=1,
+    esp=false, tracers=false, tracerThick=1.5, tracerDur=0.4, hitNum=true,
+    sat=0, con=0, blur=0, bright=1,
 }
 
 -- ═══════════════════════════════════════════
@@ -834,7 +990,7 @@ end
 -- TRACERS
 -- ═══════════════════════════════════════════
 local tracers = {}
-local function spawnTracer(o3, t3)
+local function spawnTracer(o3,t3)
     if not VIS.tracers then return end
     local l=Drawing.new("Line")
     l.Thickness=VIS.tracerThick; l.Color=Color3.fromRGB(255,50,50)
@@ -843,7 +999,7 @@ local function spawnTracer(o3, t3)
 end
 local function updateTracers()
     local now=tick(); local alive={}
-    for _, t in ipairs(tracers) do
+    for _,t in ipairs(tracers) do
         local age=now-t.born; local life=math.max(VIS.tracerDur,0.05)
         if age>=life then pcall(function() t.line:Remove() end)
         else
@@ -859,12 +1015,12 @@ local function updateTracers()
     end
     tracers=alive
 end
-local _fsO = fireShot
-fireShot = function(item, hitPart, origin)
+local _fsO=fireShot
+fireShot=function(item,hitPart,origin)
     if VIS.tracers and hitPart and hitPart.Parent then
         spawnTracer(origin or cam.CFrame.Position, hitPart.Position)
     end
-    _fsO(item, hitPart, origin)
+    _fsO(item,hitPart,origin)
 end
 
 -- ═══════════════════════════════════════════
@@ -893,7 +1049,7 @@ local function hookHum(h)
         local d=last-hp; if d>0.1 then showHit(d) end; last=hp
     end)
 end
-for _, p in ipairs(plr:GetPlayers()) do
+for _,p in ipairs(plr:GetPlayers()) do
     if p.Character then local h=p.Character:FindFirstChild("Humanoid"); if h then hookHum(h) end end
 end
 plr.PlayerAdded:Connect(function(p)
@@ -1182,7 +1338,7 @@ local function enableSkins()
 end
 
 -- ═══════════════════════════════════════════
--- BUILD UI
+-- BUILD UI — COMBAT
 -- ═══════════════════════════════════════════
 
 -- ── EASY AIMBOT ──
@@ -1208,49 +1364,38 @@ G.EzL:AddToggle("EZTeam",{Text="Team Check",Default=false,Callback=function(v) A
 G.EzL:AddToggle("EZVis", {Text="Visible Check",Default=false,Callback=function(v) AB.vis=v end})
 G.EzL:AddDropdown("EZPart",{Text="Aim At",Default="Head",Values=PARTS,Callback=function(v) AB.part=v end})
 
--- ── AIMBOT SETTINGS — 5 new sliders ──
+-- ── AIMBOT SETTINGS ──
 G.LgR:AddLabel("── Speed Controls ──")
-G.LgR:AddLabel("Speed: base tracking speed (0.01=crawl 5=instant)")
-G.LgR:AddSlider("ABSpeed",{
-    Text="Speed",Default=100,Min=1,Max=500,Rounding=0,
-    Callback=function(v) AB.speed=v/100 end,
-})
-G.LgR:AddLabel("Speed In Attack: snap when aim is close to target")
-G.LgR:AddSlider("ABSpeedAtk",{
-    Text="Speed In Attack",Default=100,Min=1,Max=500,Rounding=0,
-    Callback=function(v) AB.speedAttack=v/100 end,
-})
-G.LgR:AddLabel("Speed Scale-FOV: 0=ignore distance  100=full scale")
-G.LgR:AddSlider("ABSpeedFov",{
-    Text="Speed Scale-FOV",Default=50,Min=0,Max=100,Rounding=0,
-    Callback=function(v) AB.speedScaleFov=v end,
-})
+G.LgR:AddLabel("Speed: base tracking (0.01=crawl 5=instant)")
+G.LgR:AddSlider("ABSpeed",{Text="Speed",Default=100,Min=1,Max=500,Rounding=0,
+    Callback=function(v) AB.speed=v/100 end})
+G.LgR:AddLabel("Speed In Attack: snap when close to target")
+G.LgR:AddSlider("ABSpeedAtk",{Text="Speed In Attack",Default=100,Min=1,Max=500,Rounding=0,
+    Callback=function(v) AB.speedAttack=v/100 end})
+G.LgR:AddLabel("Speed Scale-FOV: 0=ignore  100=full scale")
+G.LgR:AddSlider("ABSpeedFov",{Text="Speed Scale-FOV",Default=50,Min=0,Max=100,Rounding=0,
+    Callback=function(v) AB.speedScaleFov=v end})
 G.LgR:AddLabel("── Lock Controls ──")
-G.LgR:AddLabel("Maximum Lock-On time in seconds (0.01 to 10)")
-G.LgR:AddSlider("ABMaxLock",{
-    Text="Maximum Lock-On",Default=300,Min=1,Max=1000,Rounding=0,
-    Callback=function(v) AB.maxLock=v/100 end,
-})
-G.LgR:AddLabel("Reaction Time: delay before tracking starts (ms)")
-G.LgR:AddSlider("ABReact",{
-    Text="Reaction Time (ms)",Default=100,Min=0,Max=500,Rounding=0,
-    Callback=function(v) AB.reactTime=v end,
-})
-G.LgR:AddLabel("── FOV ──")
+G.LgR:AddLabel("Maximum Lock-On time (0.01 to 10 seconds)")
+G.LgR:AddSlider("ABMaxLock",{Text="Maximum Lock-On",Default=300,Min=1,Max=1000,Rounding=0,
+    Callback=function(v) AB.maxLock=v/100 end})
+G.LgR:AddLabel("Reaction Time: delay before tracking (ms)")
+G.LgR:AddSlider("ABReact",{Text="Reaction Time (ms)",Default=100,Min=0,Max=500,Rounding=0,
+    Callback=function(v) AB.reactTime=v end})
 G.LgR:AddSlider("ABFov",{Text="FOV Radius",Default=150,Min=0,Max=600,Rounding=0,
     Callback=function(v) AB.fov=v; abCirc.Radius=v end})
 G.LgR:AddToggle("ABDrawFov",{Text="Draw FOV",Default=false,Callback=function(v) AB.drawFov=v end})
 G.LgR:AddToggle("ABDynFov", {Text="Dynamic FOV",Default=false,Callback=function(v) AB.dynFov=v end})
 
 -- ── ADVANCED LEGITBOT ──
-G.LgL:AddLabel("Advanced: lock mode selector")
+G.LgL:AddLabel("Advanced lock mode")
 G.LgL:AddDropdown("ABMode",{Text="Lock Mode",Default="Soft",Values={"Soft","Magnet","Curve"},
     Callback=function(v) AB.lockMode=v; abCurveStart=nil; abCurveProgress=0 end})
 G.LgL:AddSlider("ABCurve",{Text="Curve Strength %",Default=1000,Min=1,Max=4000,Rounding=0,
     Callback=function(v) AB.curvePct=v/100 end})
 
 -- ── AI LEGIT ──
-G.AiL:AddLabel("Simulates human: jitter + breaks + overshoot")
+G.AiL:AddLabel("Human-like: jitter + breaks + overshoot")
 G.AiL:AddToggle("AIOn",{Text="Enable AI Legit",Default=false,
     Callback=function(v)
         AI.on=v; aiBreakTimer=0; aiInBreak=false; aiJitterX=0; aiJitterY=0
@@ -1271,7 +1416,8 @@ G.AiL:AddToggle("AIVarySmooth",{Text="Vary Smoothness",Default=true,
 G.SaL:AddLabel("Method: Utility.Raycast override")
 G.SaL:AddToggle("SAOn",{Text="Enabled",Default=false,
     Callback=function(v) SA.on=v; if v then applySA() end; saCirc.Visible=v and SA.drawFov end})
-G.SaL:AddDropdown("SAPart",{Text="Target Part",Default="Head",Values=PARTS,Callback=function(v) SA.part=v end})
+G.SaL:AddDropdown("SAPart",{Text="Target Part",Default="Head",Values=PARTS,
+    Callback=function(v) SA.part=v end})
 G.SaL:AddDropdown("SAMode",{Text="Targeting",Default="Closest",Values={"Closest","Furthest","Random"},
     Callback=function(v) SA.mode=v end})
 G.SaL:AddToggle("SATeam",{Text="Team Check",Default=true,Callback=function(v) SA.team=v end})
@@ -1286,19 +1432,23 @@ G.SaR:AddToggle("SADrawFov",{Text="Draw FOV",Default=true,
 -- ── TRIGGERBOT ──
 G.TbL:AddToggle("TBOn",{Text="Enabled",Default=false,
     Callback=function(v) TB.on=v; if v then startTB() end end})
-G.TbL:AddSlider("TBDelay",{Text="Delay (ms)",Default=0,Min=0,Max=500,Rounding=0,Callback=function(v) TB.delay=v end})
-G.TbL:AddSlider("TBGrace",{Text="Grace (ms)",Default=0,Min=0,Max=500,Rounding=0,Callback=function(v) TB.grace=v end})
+G.TbL:AddSlider("TBDelay",{Text="Delay (ms)",Default=0,Min=0,Max=500,Rounding=0,
+    Callback=function(v) TB.delay=v end})
+G.TbL:AddSlider("TBGrace",{Text="Grace (ms)",Default=0,Min=0,Max=500,Rounding=0,
+    Callback=function(v) TB.grace=v end})
 G.TbL:AddToggle("TBRand",{Text="Random Delay",Default=false,Callback=function(v) TB.rand=v end})
-G.TbL:AddSlider("TBMinD",{Text="Min Delay",Default=50,Min=0,Max=500,Rounding=0,Callback=function(v) TB.minD=v end})
-G.TbL:AddSlider("TBMaxD",{Text="Max Delay",Default=150,Min=0,Max=500,Rounding=0,Callback=function(v) TB.maxD=v end})
+G.TbL:AddSlider("TBMinD",{Text="Min Delay",Default=50,Min=0,Max=500,Rounding=0,
+    Callback=function(v) TB.minD=v end})
+G.TbL:AddSlider("TBMaxD",{Text="Max Delay",Default=150,Min=0,Max=500,Rounding=0,
+    Callback=function(v) TB.maxD=v end})
 G.TbR:AddToggle("TBTeam",{Text="Team Check",Default=true,Callback=function(v) TB.team=v end})
 G.TbR:AddToggle("TBVis", {Text="Visible Check",Default=false,Callback=function(v) TB.vis=v end})
-G.TbR:AddSlider("TBFov", {Text="Trigger FOV",Default=250,Min=5,Max=600,Rounding=0,Callback=function(v) TB.fov=v end})
-G.TbR:AddSlider("TBDist",{Text="Max Distance",Default=500,Min=10,Max=2000,Rounding=0,Callback=function(v) TB.dist=v end})
+G.TbR:AddSlider("TBFov", {Text="Trigger FOV",Default=250,Min=5,Max=600,Rounding=0,
+    Callback=function(v) TB.fov=v end})
+G.TbR:AddSlider("TBDist",{Text="Max Distance",Default=500,Min=10,Max=2000,Rounding=0,
+    Callback=function(v) TB.dist=v end})
 
--- ═══════════════════════════════════════════
--- RAGEBOT UI — LEFT (basic controls)
--- ═══════════════════════════════════════════
+-- ── RAGEBOT ──
 G.RgL:AddLabel("Util:"..(mUtil and"✓"or"✗").." Enum:"..(mEnum and"✓"or"✗").." Fig:"..(mFig and"✓"or"✗"))
 G.RgL:AddToggle("RGOn",{Text="Enabled",Default=false,
     Callback=function(v)
@@ -1327,55 +1477,119 @@ G.RgL:AddButton({Text="Force Reload",Func=function()
     end; Lib:Notify("Reload sent",2)
 end})
 
--- ═══════════════════════════════════════════
--- RAGEBOT UI — RIGHT (NEW features)
--- FOV, Teleport, Anti-Aim
--- ═══════════════════════════════════════════
+-- ── RAGE SETTINGS ──
 G.RgR:AddLabel("── Rage FOV ──")
-G.RgR:AddLabel("0 = no restriction (infinite range)")
-G.RgR:AddLabel("1-370 = only target enemies in this screen radius")
-
-G.RgR:AddSlider("RGFov",{
-    Text="Rage FOV (0=off)",Default=0,Min=0,Max=370,Rounding=0,
+G.RgR:AddLabel("0 = no restriction (targets anywhere on screen)")
+G.RgR:AddSlider("RGFov",{Text="Rage FOV (0=off)",Default=0,Min=0,Max=370,Rounding=0,
     Callback=function(v)
-        RG.fov=v
-        rgCirc.Radius=v
-        rgCirc.Visible=(v>0)
-    end,
-})
+        RG.fov=v; rgCirc.Radius=v; rgCirc.Visible=(v>0)
+    end})
 G.RgR:AddToggle("RGDrawFov",{Text="Draw Rage FOV",Default=false,
-    Callback=function(v)
-        rgCirc.Visible = v and RG.fov > 0
-    end,
-})
+    Callback=function(v) rgCirc.Visible = v and RG.fov > 0 end})
 
 G.RgR:AddLabel("")
 G.RgR:AddLabel("── Teleport Attack ──")
-G.RgR:AddLabel("Teleports to target, shoots, returns to saved spot")
-G.RgR:AddLabel("Hide = time visible at target before shooting")
+G.RgR:AddLabel("Works standalone OR with Ragebot")
+G.RgR:AddLabel("Teleport → Shoot (if RG on) → Return")
+G.RgR:AddToggle("TPOn",{Text="Enable Teleport",Default=false,
+    Callback=function(v) TP.enabled=v end})
+G.RgR:AddDropdown("TPTarget",{Text="Teleport To",Default="Head",Values={"Head","Legs"},
+    Callback=function(v) TP.target=v end})
+G.RgR:AddToggle("TPAutoShoot",{Text="Auto Shoot on Arrival",Default=false,
+    Callback=function(v) TP.autoShoot=v end})
+G.RgR:AddButton({Text="Teleport to Nearest Enemy",Func=function()
+    local _,bc = tpFindNearest()
+    if not bc then Lib:Notify("No enemy found",2); return end
+    -- get oid if ragebot has a weapon
+    local oid=nil; local bp=nil
+    if RG.on then
+        local lf=nil; pcall(function() if mFig then lf=mFig.LocalFighter end end)
+        if lf and lf.EquippedItem then
+            pcall(function() oid=lf.EquippedItem:Get("ObjectID") end)
+            bp=bPart(bc, RG.part)
+        end
+    end
+    task.spawn(function() doTeleport(bc, oid, bp) end)
+    Lib:Notify("Teleporting!",2)
+end})
 
-G.RgR:AddToggle("RGTpOn",{Text="Enable Teleport",Default=false,
-    Callback=function(v) RG.tpEnabled=v end,
-})
-G.RgR:AddDropdown("RGTpTarget",{
-    Text="Teleport To",Default="Head",Values={"Head","Legs"},
-    Callback=function(v) RG.tpTarget=v end,
-})
-G.RgR:AddSlider("RGTpHide",{
-    Text="Hide Time (ms)",Default=30,Min=0,Max=500,Rounding=0,
-    Callback=function(v) RG.tpHide=v/1000 end,
-})
+-- ═══════════════════════════════════════════════════════════
+-- ANTI-AIM UI — Full system
+-- ═══════════════════════════════════════════════════════════
+G.AaL:AddLabel("Desync: server sees fake angles")
+G.AaL:AddLabel("Your view is unaffected (RenderStepped restore)")
 
-G.RgR:AddLabel("")
-G.RgR:AddLabel("── Anti-Aim ──")
-G.RgR:AddLabel("Makes you appear lying in the ground to enemies")
-G.RgR:AddLabel("Your own view is unaffected")
-
-G.RgR:AddToggle("RGAntiAim",{Text="Enable Anti-Aim",Default=false,
+G.AaL:AddToggle("AAOn",{Text="Enable Anti-Aim",Default=false,
     Callback=function(v)
-        RG.aaEnabled=v
-        if v then startAntiAim() else stopAntiAim() end
+        AA.enabled=v
+        if v then startAntiAim() else
+            stopAntiAim()
+            rs:UnbindFromRenderStep("AA_Sync")
+        end
+    end})
+
+G.AaL:AddLabel("")
+G.AaL:AddLabel("── Pitch ──")
+G.AaL:AddLabel("Off = no pitch change")
+G.AaL:AddLabel("Up = look up 89°  Down = look down 89°")
+G.AaL:AddLabel("Zero = force level  Glitch = flicker  Random = random")
+
+G.AaL:AddDropdown("AAPitch",{
+    Text="Pitch",Default="Off",
+    Values={"Off","Up","Zero","Down","Glitch","Random"},
+    Callback=function(v)
+        AA.pitch=v
+        -- restart if active so new settings apply
+        if AA.enabled then startAntiAim() end
     end,
+})
+
+G.AaL:AddLabel("")
+G.AaL:AddLabel("── Yaw Base ──")
+G.AaL:AddLabel("Local = based on your look direction")
+G.AaL:AddLabel("AtTargets = face nearest enemy first")
+
+G.AaL:AddDropdown("AAYawBase",{
+    Text="Yaw Base",Default="Local",
+    Values={"Local","AtTargets"},
+    Callback=function(v)
+        AA.yawBase=v
+        if AA.enabled then startAntiAim() end
+    end,
+})
+
+-- ── AA RIGHT SIDE ──
+G.AaR:AddLabel("── Yaw Mode ──")
+G.AaR:AddLabel("Off = manual angle only")
+G.AaR:AddLabel("Forward = face forward  Backward = face back")
+G.AaR:AddLabel("Spin = continuous rotation")
+G.AaR:AddLabel("GlitchSpin = spin + random teleport glitch")
+G.AaR:AddLabel("StutterSpin = alternating spin direction")
+
+G.AaR:AddDropdown("AAYaw",{
+    Text="Yaw Mode",Default="Off",
+    Values={"Off","Forward","Backward","Spin","GlitchSpin","StutterSpin"},
+    Callback=function(v)
+        AA.yaw=v; aaSpinAngle=0; aaStutterOn=false
+        if AA.enabled then startAntiAim() end
+    end,
+})
+
+G.AaR:AddLabel("")
+G.AaR:AddLabel("Yaw Angle: manual offset added on top of Yaw Mode")
+G.AaR:AddLabel("-180 = full left  0 = none  180 = full right")
+
+G.AaR:AddSlider("AAYawAngle",{
+    Text="Yaw Angle (°)",Default=0,Min=-180,Max=180,Rounding=0,
+    Callback=function(v) AA.yawAngle=v end,
+})
+
+G.AaR:AddLabel("")
+G.AaR:AddLabel("── Underground ──")
+G.AaR:AddLabel("Sinks server hitbox into floor")
+
+G.AaR:AddToggle("AAUnderground",{Text="Underground",Default=false,
+    Callback=function(v) AA.underground=v end,
 })
 
 -- ── GUN MODS ──
@@ -1399,10 +1613,14 @@ G.TrL:AddSlider("TRThick",{Text="Thickness",Default=2,Min=1,Max=5,Rounding=1,
     Callback=function(v) VIS.tracerThick=v end})
 G.TrL:AddSlider("TRDur",{Text="Duration (s)",Default=0,Min=0,Max=3,Rounding=1,
     Callback=function(v) VIS.tracerDur=math.max(v,0.05) end})
-G.WdL:AddSlider("WDSat",{Text="Saturation",Default=0,Min=-1,Max=1,Rounding=2,Callback=function(v) ccfx.Saturation=v end})
-G.WdL:AddSlider("WDCon",{Text="Contrast",Default=0,Min=-1,Max=1,Rounding=2,Callback=function(v) ccfx.Contrast=v end})
-G.WdL:AddSlider("WDBlur",{Text="Blur",Default=0,Min=0,Max=56,Rounding=0,Callback=function(v) blfx.Size=v end})
-G.WdL:AddSlider("WDBright",{Text="Brightness",Default=1,Min=0,Max=5,Rounding=1,Callback=function(v) lit.Brightness=v end})
+G.WdL:AddSlider("WDSat",{Text="Saturation",Default=0,Min=-1,Max=1,Rounding=2,
+    Callback=function(v) ccfx.Saturation=v end})
+G.WdL:AddSlider("WDCon",{Text="Contrast",Default=0,Min=-1,Max=1,Rounding=2,
+    Callback=function(v) ccfx.Contrast=v end})
+G.WdL:AddSlider("WDBlur",{Text="Blur",Default=0,Min=0,Max=56,Rounding=0,
+    Callback=function(v) blfx.Size=v end})
+G.WdL:AddSlider("WDBright",{Text="Brightness",Default=1,Min=0,Max=5,Rounding=1,
+    Callback=function(v) lit.Brightness=v end})
 G.VsR:AddLabel("CameraController — needs match")
 G.VsR:AddToggle("CVNoShake",{Text="No Camera Shake",Default=false,
     Callback=function(v) pcall(function() if mCam then mCam._shake_enabled=not v end end) end})
@@ -1423,20 +1641,23 @@ G.VsR:AddSlider("CVSens",{Text="Sensitivity %",Default=100,Min=10,Max=300,Roundi
     Callback=function(v) pcall(function() if mCam then mCam._camera_sensitivity=v/100 end end) end})
 
 -- ── MISC ──
-G.MiL:AddLabel("CamCtrl: "..(mCam  and"✓"or"⏳"))
+G.MiL:AddLabel("CamCtrl: "    ..(mCam  and"✓"or"⏳"))
 G.MiL:AddLabel("FighterCtrl: "..(mFig  and"✓"or"⏳"))
-G.MiL:AddLabel("Utility: "..(mUtil and"✓"or"✗"))
-G.MiL:AddLabel("EnumLib: "..(mEnum and"✓"or"✗"))
-G.MiL:AddLabel("AB: Speed/SpeedAtk/ScaleFov/MaxLock/React")
-G.MiL:AddLabel("RG: FOV(0-370) + Teleport + Anti-Aim")
+G.MiL:AddLabel("Utility: "    ..(mUtil and"✓"or"✗"))
+G.MiL:AddLabel("EnumLib: "    ..(mEnum and"✓"or"✗"))
+G.MiL:AddLabel("AA: Pitch/YawBase/Yaw/Angle/Underground")
+G.MiL:AddLabel("TP: Works standalone (button) or with RG")
+G.MiL:AddLabel("RG: FOV 0-370 + Teleport attack")
 G.MiL:AddLabel("Insert = toggle")
 G.MiR:AddButton({Text="Stop All",Func=function()
     AB.on=false; SA.on=false; TB.on=false; RG.on=false; AI.on=false
+    TP.enabled=false; AA.enabled=false
     VIS.esp=false; VIS.tracers=false
     GN.noRecoil=false; GN.noSpread=false; GN.fast=false
     abTgt=nil; abCurveStart=nil; abCurveProgress=0
     aiInBreak=false; aiBreakTimer=0; aiJitterX=0; aiJitterY=0
     stopAntiAim()
+    pcall(function() rs:UnbindFromRenderStep("AA_Sync") end)
     for _,t in ipairs(tracers) do pcall(function() t.line:Remove() end) end
     tracers={}
     abCirc.Visible=false; saCirc.Visible=false; rgCirc.Visible=false
@@ -1451,7 +1672,11 @@ G.MiR:AddButton({Text="Stop All",Func=function()
     end)
     patchGuns(); Lib:Notify("All stopped",3)
 end})
-G.MiR:AddButton({Text="Unload",Func=function() Lib:Unload(); openGui:Destroy() end})
+G.MiR:AddButton({Text="Unload",Func=function()
+    stopAntiAim()
+    pcall(function() rs:UnbindFromRenderStep("AA_Sync") end)
+    Lib:Unload(); openGui:Destroy()
+end})
 
 -- ── SKINS ──
 G.SkL:AddLabel("Skin + Charm + Dance + Wrap")
@@ -1505,19 +1730,9 @@ rs.RenderStepped:Connect(function(dt)
     cam = ws.CurrentCamera
     local c = scr()
 
-    -- Aimbot FOV circle
-    abCirc.Position = c
-    abCirc.Radius   = abEffFov()
-    abCirc.Visible  = AB.drawFov and AB.on
-
-    -- SA FOV circle
-    saCirc.Position = c
-    saCirc.Radius   = SA.fov
-    saCirc.Visible  = SA.drawFov and SA.on
-
-    -- Rage FOV circle — only when ragebot on AND fov > 0
-    rgCirc.Position = c
-    rgCirc.Visible  = RG.on and RG.fov > 0
+    abCirc.Position = c; abCirc.Radius = abEffFov(); abCirc.Visible = AB.drawFov and AB.on
+    saCirc.Position = c; saCirc.Radius = SA.fov;     saCirc.Visible = SA.drawFov and SA.on
+    rgCirc.Position = c; rgCirc.Visible = RG.on and RG.fov > 0
 
     updateTracers()
     updateESP()
@@ -1548,18 +1763,14 @@ rs.RenderStepped:Connect(function(dt)
                         local aimPos = getPredictedPos(abTgt)
                         local cp     = cam.CFrame.Position
                         local du     = (aimPos - cp).Unit
-                        local tp     = math.asin(math.clamp(du.Y,-1,1))
+                        local tp2    = math.asin(math.clamp(du.Y,-1,1))
                         local ty     = math.atan2(-du.X,-du.Z)
-                        local tRot   = Vector2.new(tp,ty)
+                        local tRot   = Vector2.new(tp2,ty)
                         local cur    = mCam.Rotation
-
-                        -- screen distance for SpeedScaleFov
                         local sp,_   = cam:WorldToViewportPoint(aimPos)
                         local screenDist = (Vector2.new(sp.X,sp.Y) - scr()).Magnitude
-
-                        local newRot = applySmartLock(tRot, cur, dt, screenDist, abEffFov())
-                        newRot = aiLegitProcess(newRot, cur, dt)
-
+                        local newRot = applySmartLock(tRot,cur,dt,screenDist,abEffFov())
+                        newRot = aiLegitProcess(newRot,cur,dt)
                         mCam:ApplyRotationDelta(Vector2.new(
                             newRot.X - cur.X,
                             angDiff(cur.Y, newRot.Y)
@@ -1573,7 +1784,9 @@ rs.RenderStepped:Connect(function(dt)
     end
 end)
 
-Lib:Notify("Rivals v3 | AB Overhaul + RG FOV + Teleport + Anti-Aim | Insert",6)
-print("[v3] AB: Speed/SpeedInAttack/SpeedScaleFov/MaxLock/ReactionTime")
-print("[v3] RG: FOV 0-370 + Teleport(Head/Legs) + Hide + Anti-Aim")
-print("[v3] Removed: VoidSpam")
+Lib:Notify("Rivals v3 | AA Full System + TP Fixed + RG Improved | Insert",6)
+print("[v3] AA: Pitch(Off/Up/Zero/Down/Glitch/Random)")
+print("[v3] AA: YawBase(Local/AtTargets) Yaw(Off/Fwd/Back/Spin/GlitchSpin/StutterSpin)")
+print("[v3] AA: YawAngle -180 to 180 + Underground")
+print("[v3] TP: Standalone button + works with RG when both on")
+print("[v3] RG: Improved with betterRandom glitch + FOV 0-370")
